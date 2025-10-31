@@ -111,8 +111,7 @@ class ConfigCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="config", description="Configure GW2 Tools settings for this server.")
-    @app_commands.describe(deliver_in_dm="Send the configuration controls as a DM")
-    async def config_command(self, interaction: discord.Interaction, deliver_in_dm: Optional[bool] = False) -> None:
+    async def config_command(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used inside a server.", ephemeral=True)
             return
@@ -126,24 +125,11 @@ class ConfigCog(commands.Cog):
         config = self.bot.get_config(interaction.guild.id)
         view = ConfigView(self.bot, interaction.guild, config)
 
-        if deliver_in_dm:
-            await interaction.response.send_message("Check your DMs for the configuration controls.", ephemeral=True)
-            try:
-                await interaction.user.send(
-                    f"GW2 Tools configuration for **{interaction.guild.name}**.",
-                    view=view,
-                )
-            except discord.Forbidden:
-                await interaction.followup.send(
-                    "I couldn't send you a DM. Please enable DMs from server members or use the popup version instead.",
-                    ephemeral=True,
-                )
-        else:
-            await interaction.response.send_message(
-                "Use the selectors below to update the GW2 Tools configuration.",
-                view=view,
-                ephemeral=True,
-            )
+        await interaction.response.send_message(
+            "Use the selectors below to update the GW2 Tools configuration.",
+            view=view,
+            ephemeral=True,
+        )
 
 
 async def setup(bot: GW2ToolsBot) -> None:
