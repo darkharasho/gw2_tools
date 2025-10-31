@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Set
 
 import discord
 from discord.ext import commands
@@ -29,6 +30,8 @@ class GW2ToolsBot(commands.Bot):
         )
         self.storage = StorageManager(storage_root)
         self.tree.on_error = self.on_app_command_error
+        self._global_sync_done = False
+        self._synced_guilds: Set[int] = set()
 
     # ------------------------------------------------------------------
     async def setup_hook(self) -> None:
@@ -37,12 +40,41 @@ class GW2ToolsBot(commands.Bot):
         await self.load_extension("gw2_tools_bot.cogs.config")
         await self.load_extension("gw2_tools_bot.cogs.builds")
 
+    async def on_ready(self) -> None:
+        await self._sync_global_commands()
+        for guild in self.guilds:
+            await self._sync_guild_commands(guild)
+        LOGGER.info("GW2 Tools is ready. Logged in as %s (%s)", self.user, getattr(self.user, "id", "unknown"))
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        await self._sync_global_commands()
+        await self._sync_guild_commands(guild)
+
+    async def on_guild_available(self, guild: discord.Guild) -> None:
+        await self._sync_global_commands()
+        await self._sync_guild_commands(guild)
+
+    async def _sync_global_commands(self) -> None:
+        if self._global_sync_done:
+            return
         try:
             synced = await self.tree.sync()
         except Exception:  # pragma: no cover - defensive logging
-            LOGGER.exception("Failed to sync application commands")
+            LOGGER.exception("Failed to sync global application commands")
         else:
-            LOGGER.info("Synced %s application commands", len(synced))
+            LOGGER.info("Synced %s global application commands", len(synced))
+            self._global_sync_done = True
+
+    async def _sync_guild_commands(self, guild: discord.Guild) -> None:
+        if guild.id in self._synced_guilds:
+            return
+        try:
+            synced = await self.tree.sync(guild=guild)
+        except Exception:  # pragma: no cover - defensive logging
+            LOGGER.exception("Failed to sync application commands for guild %s", guild.id)
+        else:
+            LOGGER.info("Synced %s application commands for guild %s", len(synced), guild.id)
+            self._synced_guilds.add(guild.id)
 
     # ------------------------------------------------------------------
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError) -> None:

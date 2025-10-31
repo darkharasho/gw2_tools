@@ -161,6 +161,10 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
+# Project data storage
+gw2_tools_bot/data/
+/data/
+
 # Pyre type checker
 .pyre/
 
