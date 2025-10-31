@@ -23,6 +23,7 @@ class GuildConfig:
 
     moderator_role_ids: List[int]
     build_channel_id: Optional[int] = None
+    arcdps_channel_id: Optional[int] = None
 
     @classmethod
     def default(cls) -> "GuildConfig":
@@ -47,6 +48,13 @@ class BuildRecord:
     message_id: Optional[int] = None
     channel_id: Optional[int] = None
     thread_id: Optional[int] = None
+
+
+@dataclass
+class ArcDpsStatus:
+    """Persisted information about the latest ArcDPS release."""
+
+    last_updated_at: str
 
     def to_embed_footer(self) -> str:
         """Format a footer summarising audit information."""
@@ -97,6 +105,20 @@ class StorageManager:
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
         path = self._guild_path(guild_id) / "config.json"
         self._write_json(path, asdict(config))
+
+    # ------------------------------------------------------------------
+    # ArcDPS updates
+    # ------------------------------------------------------------------
+    def get_arcdps_status(self, guild_id: int) -> Optional[ArcDpsStatus]:
+        path = self._guild_path(guild_id) / "arcdps.json"
+        payload = self._read_json(path, None)
+        if not payload:
+            return None
+        return ArcDpsStatus(**payload)
+
+    def save_arcdps_status(self, guild_id: int, status: ArcDpsStatus) -> None:
+        path = self._guild_path(guild_id) / "arcdps.json"
+        self._write_json(path, asdict(status))
 
     # ------------------------------------------------------------------
     # Builds
