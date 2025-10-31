@@ -52,3 +52,24 @@ media/
 ```
 
 Persistent data (configurations and builds) will appear under `gw2_tools_bot/data/` after you run the bot locally.
+
+## Running the bot with PM2
+
+If you want the bot to stay online after reboots, PM2 can run the same module entry point that you use in development. Two key tips:
+
+* Point PM2 at the actual Python binary (e.g. the virtualenv's `bin/python`). Tools such as pyenv create shims under `~/.pyenv/shims` that are shell scripts; PM2 will try to parse them as JavaScript unless you bypass the shim with `pyenv which python`.
+* Pass `--interpreter none` so PM2 executes the binary directly instead of wrapping it in Node.js.
+
+From the repository root, the following command starts the bot under PM2 with your virtualenv interpreter:
+
+```bash
+pm2 start $(pyenv which python) \
+  --name gw2-tools-bot \
+  --cwd $(pwd) \
+  --interpreter none \
+  -- -m gw2_tools_bot
+```
+
+The command after `--` is forwarded to Python, so the module executes exactly as `python -m gw2_tools_bot` would. Once you verify the process stays online you can run `pm2 save` so it restarts on boot.
+
+If you prefer an ecosystem configuration file, copy `ecosystem.config.js.example`, update the `script`, `cwd`, and environment variables, and then start it with `pm2 start ecosystem.config.js`.
