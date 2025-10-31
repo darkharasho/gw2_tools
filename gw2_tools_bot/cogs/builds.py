@@ -26,7 +26,7 @@ def slugify(value: str) -> str:
 class BuildAddModal(discord.ui.Modal):
     """Modal used to gather inputs for creating a build."""
 
-    def __init__(self, cog: "BuildsCog") -> None:
+    def __init__(self, cog: "BuildsCog", *, default_class: Optional[str] = None) -> None:
         super().__init__(title="Add Guild Wars 2 build")
         self.cog = cog
 
@@ -36,6 +36,8 @@ class BuildAddModal(discord.ui.Modal):
             placeholder="e.g. Guardian, Tempest, or Luminary",
             max_length=50,
         )
+        if default_class:
+            self.class_input.default = default_class
         self.chat_code_input = discord.ui.TextInput(label="Chat code", max_length=200)
         self.url_input = discord.ui.TextInput(
             label="Reference URL",
@@ -505,16 +507,30 @@ class BuildsCog(commands.GroupCog, name="builds"):
         ]
         return [app_commands.Choice(name=build.name, value=build.build_id) for build in matches[:25]]
 
+    async def _class_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        del interaction  # Unused for now but kept for future guild-specific overrides.
+        current_lower = current.lower()
+        matches = [
+            choice for choice in constants.CLASS_CHOICES if current_lower in choice.lower()
+        ]
+        return [app_commands.Choice(name=choice, value=choice) for choice in matches[:25]]
+
     # ------------------------------------------------------------------
     @app_commands.command(name="add", description="Add a new Guild Wars 2 build")
-    async def add(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(class_option="Select a class or specialization")
+    @app_commands.autocomplete(class_option=_class_autocomplete)
+    async def add(
+        self,
+        interaction: discord.Interaction,
+        class_option: Optional[str] = None,
+    ) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
             return
         if not await self.bot.ensure_authorised(interaction):
             return
 
-        modal = BuildAddModal(self)
+        modal = BuildAddModal(self, default_class=class_option)
         await interaction.response.send_modal(modal)
 
     # ------------------------------------------------------------------
