@@ -37,6 +37,13 @@ class GW2ToolsBot(commands.Bot):
         await self.load_extension("gw2_tools_bot.cogs.config")
         await self.load_extension("gw2_tools_bot.cogs.builds")
 
+        try:
+            synced = await self.tree.sync()
+        except Exception:  # pragma: no cover - defensive logging
+            LOGGER.exception("Failed to sync application commands")
+        else:
+            LOGGER.info("Synced %s application commands", len(synced))
+
     # ------------------------------------------------------------------
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError) -> None:
         LOGGER.exception("App command error: %s", error)
