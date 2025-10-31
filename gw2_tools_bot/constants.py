@@ -55,23 +55,22 @@ SPECIALIZATIONS: Dict[str, Specialization] = {
     "Tempest": Specialization("Tempest", "Elementalist", "Tempest.png"),
     "Weaver": Specialization("Weaver", "Elementalist", "Weaver.png"),
     "Catalyst": Specialization("Catalyst", "Elementalist", "Catalyst.png"),
-    "Luminary": Specialization("Luminary", "Elementalist", "Luminary.png"),
+    "Evoker": Specialization("Evoker", "Elementalist", "Evoker.png"),
     # Engineer
     "Scrapper": Specialization("Scrapper", "Engineer", "Scrapper.png"),
     "Holosmith": Specialization("Holosmith", "Engineer", "Holosmith.png"),
     "Mechanist": Specialization("Mechanist", "Engineer", "Mechanist.png"),
-    "Conduit": Specialization("Conduit", "Engineer", "Conduit.png"),
+    "Amalgam": Specialization("Amalgam", "Engineer", "Amalgam.png"),
     # Guardian
     "Dragonhunter": Specialization("Dragonhunter", "Guardian", "Dragonhunter.png"),
-    "Firebrand": Specialization("Firebrand", "Guardian"),  # Uses base icon
-    "Willbender": Specialization("Willbender", "Guardian"),
-    "Paragon": Specialization("Paragon", "Guardian", "Paragon.png"),
-    "Troubadour": Specialization("Troubadour", "Guardian", "Troubadour.png"),
+    "Firebrand": Specialization("Firebrand", "Guardian", "Firebrand.png"),
+    "Willbender": Specialization("Willbender", "Guardian", "Willbender.png"),
+    "Luminary": Specialization("Luminary", "Guardian", "Luminary.png"),
     # Mesmer
     "Chronomancer": Specialization("Chronomancer", "Mesmer", "Chronomancer.png"),
     "Mirage": Specialization("Mirage", "Mesmer", "Mirage.png"),
     "Virtuoso": Specialization("Virtuoso", "Mesmer", "Virtuoso.png"),
-    "Antiquary": Specialization("Antiquary", "Mesmer", "Antiquary.png"),
+    "Troubadour": Specialization("Troubadour", "Mesmer", "Troubadour.png"),
     # Necromancer
     "Reaper": Specialization("Reaper", "Necromancer", "Reaper.png"),
     "Scourge": Specialization("Scourge", "Necromancer", "Scourge.png"),
@@ -84,19 +83,19 @@ SPECIALIZATIONS: Dict[str, Specialization] = {
     "Galeshot": Specialization("Galeshot", "Ranger", "Galeshot.png"),
     # Revenant
     "Herald": Specialization("Herald", "Revenant", "Herald.png"),
-    "Renegade": Specialization("Renegade", "Revenant"),
-    "Vindicator": Specialization("Vindicator", "Vindicator.png"),
-    "Amalgam": Specialization("Amalgam", "Revenant", "Amalgam.png"),
+    "Renegade": Specialization("Renegade", "Revenant", "Renegade.png"),
+    "Vindicator": Specialization("Vindicator", "Revenant", "Vindicator.png"),
+    "Conduit": Specialization("Conduit", "Revenant", "Conduit.png"),
     # Thief
     "Daredevil": Specialization("Daredevil", "Thief", "Daredevil.png"),
     "Deadeye": Specialization("Deadeye", "Thief", "Deadeye.png"),
     "Specter": Specialization("Specter", "Thief", "Specter.png"),
+    "Antiquary": Specialization("Antiquary", "Thief", "Antiquary.png"),
     # Warrior
     "Berserker": Specialization("Berserker", "Warrior", "Berserker.png"),
     "Spellbreaker": Specialization("Spellbreaker", "Warrior", "Spellbreaker.png"),
     "Bladesworn": Specialization("Bladesworn", "Warrior", "Bladesworn.png"),
-    "Warden": Specialization("Warden", "Warrior"),
-    "Evoker": Specialization("Evoker", "Warrior", "Evoker.png"),
+    "Paragon": Specialization("Paragon", "Warrior", "Paragon.png"),
 }
 
 # Convenience list that combines professions and specializations for command choices.
