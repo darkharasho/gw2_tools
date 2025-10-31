@@ -25,8 +25,9 @@ def slugify(value: str) -> str:
 class BuildsCog(commands.GroupCog, name="builds"):
     """Manage Guild Wars 2 build posts."""
 
+    description = "Manage Guild Wars 2 builds."
+
     def __init__(self, bot: GW2ToolsBot) -> None:
-        super().__init__(description="Manage Guild Wars 2 builds.")
         self.bot = bot
 
     # ------------------------------------------------------------------
