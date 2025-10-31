@@ -22,11 +22,16 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
    pip install -r requirements.txt
    ```
 4. **Configure environment variables:**
+   - Duplicate `.env.example` to `.env` and set the values inside:
+     ```bash
+     cp .env.example .env
+     # Edit .env and add your real token
+     ```
    - `DISCORD_TOKEN` – Your Discord bot token. You can create one through the [Discord Developer Portal](https://discord.com/developers/applications).
 
 ## Running the bot locally
 
-1. Ensure the virtual environment is activated and `DISCORD_TOKEN` is set in your shell (for example `export DISCORD_TOKEN=...`).
+1. Ensure the virtual environment is activated and `DISCORD_TOKEN` is set (either exported in your shell or defined in `.env`).
 2. Start the bot:
    ```bash
    python -m gw2_tools_bot

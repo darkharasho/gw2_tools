@@ -6,6 +6,9 @@ import os
 
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from .storage import DEFAULT_STORAGE_ROOT, GuildConfig, StorageManager
 
