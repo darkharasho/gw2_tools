@@ -1,3 +1,6 @@
+# Local environment configuration
+.env
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -135,7 +138,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
 .envrc
 .venv
 env/
@@ -158,6 +160,10 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Project data storage
+gw2_tools_bot/data/
+/data/
 
 # Pyre type checker
 .pyre/
