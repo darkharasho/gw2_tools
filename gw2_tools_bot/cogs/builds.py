@@ -1,6 +1,7 @@
 """Build management cog for GW2 Tools."""
 from __future__ import annotations
 
+from datetime import datetime
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -10,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..bot import GW2ToolsBot
-from ..storage import BuildRecord, utcnow
+from ..storage import ISOFORMAT, BuildRecord, utcnow
 from ..utils import build_embed, get_icon_and_color, resolve_profession
 from .. import constants
 
@@ -322,6 +323,32 @@ class BuildsCog(commands.GroupCog, name="builds"):
             return None
         return channel
 
+    async def _resolve_user_display(self, guild: discord.Guild, user_id: int) -> str:
+        member = guild.get_member(user_id)
+        if member:
+            return member.display_name
+        try:
+            member = await guild.fetch_member(user_id)
+        except discord.HTTPException:
+            member = None
+        if member:
+            return member.display_name
+        user = self.bot.get_user(user_id)
+        if user:
+            return user.name
+        try:
+            user = await self.bot.fetch_user(user_id)
+        except discord.HTTPException:
+            return f"User {user_id}"
+        return user.name if user else f"User {user_id}"
+
+    def _format_timestamp(self, timestamp: str) -> str:
+        try:
+            parsed = datetime.strptime(timestamp, ISOFORMAT)
+        except ValueError:
+            return timestamp
+        return parsed.strftime("%m/%d/%y")
+
     async def _delete_existing_post(self, record: BuildRecord, guild: discord.Guild) -> None:
         if not record.channel_id or not record.message_id:
             return
@@ -366,7 +393,15 @@ class BuildsCog(commands.GroupCog, name="builds"):
         icon_file = Path(icon_path)
         filename = icon_file.name
         file = discord.File(icon_file, filename=filename)
-        embed = build_embed(record, icon_attachment_name=filename, color=color)
+        updated_by = await self._resolve_user_display(channel.guild, record.updated_by)
+        updated_on = self._format_timestamp(record.updated_at)
+        embed = build_embed(
+            record,
+            icon_attachment_name=filename,
+            color=color,
+            updated_by=updated_by,
+            updated_on=updated_on,
+        )
 
         if isinstance(channel, discord.ForumChannel):
             result = await channel.create_thread(name=record.name, embed=embed, file=file)
@@ -397,7 +432,15 @@ class BuildsCog(commands.GroupCog, name="builds"):
         icon_path, color = get_icon_and_color(selection)
         filename = Path(icon_path).name
         file = discord.File(icon_path, filename=filename)
-        embed = build_embed(record, icon_attachment_name=filename, color=color)
+        updated_by = await self._resolve_user_display(channel.guild, record.updated_by)
+        updated_on = self._format_timestamp(record.updated_at)
+        embed = build_embed(
+            record,
+            icon_attachment_name=filename,
+            color=color,
+            updated_by=updated_by,
+            updated_on=updated_on,
+        )
 
         if isinstance(channel, discord.ForumChannel):
             if record.channel_id and record.channel_id != channel.id:
