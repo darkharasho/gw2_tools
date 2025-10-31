@@ -1,0 +1,18 @@
+module.exports = {
+  apps: [
+    {
+      name: "gw2-tools-bot",
+      cwd: "/path/to/gw2_tools",
+      script: "/path/to/venv/bin/python",   // or "python3" if global
+      args: "-m gw2_tools_bot",
+      env: {
+        DISCORD_TOKEN: "your-real-token"    // omit if you rely on .env loading
+      },
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+      out_file: "/var/log/pm2/gw2-tools-out.log",
+      error_file: "/var/log/pm2/gw2-tools-error.log"
+    }
+  ]
+};
