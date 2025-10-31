@@ -136,6 +136,29 @@ class BuildEditModal(discord.ui.Modal):
         )
 
 
+class BuildDeleteModal(discord.ui.Modal):
+    """Modal that confirms deletion by asking for the build name."""
+
+    def __init__(self, cog: "BuildsCog", record: BuildRecord) -> None:
+        super().__init__(title=f"Delete {record.name}?")
+        self.cog = cog
+        self.build_id = record.build_id
+
+        self.confirm_input = discord.ui.TextInput(
+            label="Type the build name to confirm",
+            placeholder=record.name,
+            max_length=100,
+        )
+        self.add_item(self.confirm_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.handle_delete_submission(
+            interaction=interaction,
+            build_id=self.build_id,
+            confirmation=self.confirm_input.value,
+        )
+
+
 class BuildsCog(commands.GroupCog, name="builds"):
     """Manage Guild Wars 2 build posts."""
 
@@ -310,6 +333,37 @@ class BuildsCog(commands.GroupCog, name="builds"):
             self.bot.storage.delete_build(interaction.guild.id, original_build_id)
         self.bot.storage.upsert_build(interaction.guild.id, record)
         await interaction.response.send_message(f"Build **{record.name}** updated.", ephemeral=True)
+
+    # ------------------------------------------------------------------
+    async def handle_delete_submission(
+        self,
+        *,
+        interaction: discord.Interaction,
+        build_id: str,
+        confirmation: str,
+    ) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            return
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        record = self.bot.storage.find_build(interaction.guild.id, build_id)
+        if not record:
+            await interaction.response.send_message("Build not found.", ephemeral=True)
+            return
+
+        if confirmation.strip().lower() != record.name.strip().lower():
+            await interaction.response.send_message("Confirmation text does not match the build name.", ephemeral=True)
+            return
+
+        await self._delete_existing_post(record, interaction.guild)
+
+        removed = self.bot.storage.delete_build(interaction.guild.id, build_id)
+        if removed:
+            await interaction.response.send_message("Build deleted.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Build could not be deleted.", ephemeral=True)
 
     # ------------------------------------------------------------------
     async def _get_build_channel(self, guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
@@ -558,13 +612,12 @@ class BuildsCog(commands.GroupCog, name="builds"):
 
     # ------------------------------------------------------------------
     @app_commands.command(name="delete", description="Delete a build")
-    @app_commands.describe(build="Select the build to delete", confirm="Confirm deletion")
+    @app_commands.describe(build="Select the build to delete")
     @app_commands.autocomplete(build=_build_autocomplete)
     async def delete(
         self,
         interaction: discord.Interaction,
         build: str,
-        confirm: bool,
     ) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
@@ -576,21 +629,9 @@ class BuildsCog(commands.GroupCog, name="builds"):
         if not record:
             await interaction.response.send_message("Build not found.", ephemeral=True)
             return
-        if not confirm:
-            await interaction.response.send_message(
-                "Deletion not confirmed. Pass `confirm=true` to delete the build.",
-                ephemeral=True,
-            )
-            return
 
-        if interaction.guild:
-            await self._delete_existing_post(record, interaction.guild)
-
-        removed = self.bot.storage.delete_build(interaction.guild.id, build)
-        if removed:
-            await interaction.response.send_message("Build deleted.", ephemeral=True)
-        else:
-            await interaction.response.send_message("Build could not be deleted.", ephemeral=True)
+        modal = BuildDeleteModal(self, record)
+        await interaction.response.send_modal(modal)
 
 
 async def setup(bot: GW2ToolsBot) -> None:
