@@ -60,6 +60,32 @@ class BuildChannelSelect(discord.ui.ChannelSelect):
         self.config_view.persist()
 
 
+class ArcDpsChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, view: "ConfigView", default_channel: Optional[discord.abc.GuildChannel]):
+        super().__init__(
+            placeholder="Select the channel for ArcDPS update notifications",
+            channel_types=(
+                discord.ChannelType.text,
+                discord.ChannelType.news,
+            ),
+            min_values=0,
+            max_values=1,
+            default_values=[default_channel] if default_channel else None,
+        )
+        self.config_view = view
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values:
+            channel = self.values[0]
+            self.config_view.config.arcdps_channel_id = channel.id
+            message = f"ArcDPS updates channel set to {channel.mention}."
+        else:
+            self.config_view.config.arcdps_channel_id = None
+            message = "ArcDPS updates disabled."
+        self.config_view.persist()
+        await interaction.response.send_message(message, ephemeral=True)
+
+
 class ResetRolesButton(discord.ui.Button["ConfigView"]):
     def __init__(self) -> None:
         super().__init__(style=discord.ButtonStyle.danger, label="Reset to admins")
@@ -90,9 +116,13 @@ class ConfigView(discord.ui.View):
 
         default_roles = [role for role_id in config.moderator_role_ids if (role := guild.get_role(role_id))]
         default_channel = guild.get_channel(config.build_channel_id) if config.build_channel_id else None
+        default_arcdps_channel = (
+            guild.get_channel(config.arcdps_channel_id) if config.arcdps_channel_id else None
+        )
 
         self.add_item(ModeratorRoleSelect(self, default_roles))
         self.add_item(BuildChannelSelect(self, default_channel))
+        self.add_item(ArcDpsChannelSelect(self, default_arcdps_channel))
         self.add_item(ResetRolesButton())
         self.add_item(CloseButton())
 
