@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
 import discord
 from bs4 import BeautifulSoup
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
@@ -21,6 +23,7 @@ class ArcDpsUpdatesCog(commands.Cog):
 
     CHECK_INTERVAL_MINUTES = 15
     RELEASE_URL = "https://www.deltaconnected.com/arcdps/x64/"
+    PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
@@ -67,20 +70,8 @@ class ArcDpsUpdatesCog(commands.Cog):
             if stored_timestamp and latest_release <= stored_timestamp:
                 continue
 
-            channel = guild.get_channel(channel_id)
-            if channel is None:
-                try:
-                    channel = await guild.fetch_channel(channel_id)
-                except (discord.Forbidden, discord.HTTPException, discord.NotFound):
-                    LOGGER.warning(
-                        "Unable to fetch ArcDPS updates channel %s for guild %s", channel_id, guild.id
-                    )
-                    continue
-
-            if not isinstance(channel, discord.TextChannel):
-                LOGGER.warning(
-                    "Configured ArcDPS channel %s in guild %s is not a text-based channel", channel_id, guild.id
-                )
+            channel = await self._resolve_notification_channel(guild, channel_id)
+            if not channel:
                 continue
 
             embed = self._build_embed(guild, latest_release)
@@ -150,6 +141,85 @@ class ArcDpsUpdatesCog(commands.Cog):
             embed.set_author(name=f"{guild.name} - ArcDPS Releases")
         embed.set_footer(text="ArcDPS release monitor")
         return embed
+
+    async def _resolve_notification_channel(
+        self, guild: discord.Guild, channel_id: int
+    ) -> Optional[discord.TextChannel]:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await guild.fetch_channel(channel_id)
+            except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+                LOGGER.warning(
+                    "Unable to fetch ArcDPS updates channel %s for guild %s", channel_id, guild.id
+                )
+                return None
+
+        if not isinstance(channel, discord.TextChannel):
+            LOGGER.warning(
+                "Configured ArcDPS channel %s in guild %s is not a text-based channel", channel_id, guild.id
+            )
+            return None
+
+        return channel
+
+    @app_commands.command(name="arcdps_force_notification", description="Send a test ArcDPS notification.")
+    async def force_notification(self, interaction: discord.Interaction) -> None:
+        """Allow developers to trigger a notification in non-production environments."""
+
+        if self.PRODUCTION:
+            await interaction.response.send_message(
+                "This command is disabled in production environments.",
+                ephemeral=True,
+            )
+            return
+
+        if not interaction.guild:
+            await interaction.response.send_message(
+                "This command must be used inside a server.", ephemeral=True
+            )
+            return
+
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        channel_id = config.arcdps_channel_id
+        if not channel_id:
+            await interaction.response.send_message(
+                "ArcDPS notifications are disabled for this server.",
+                ephemeral=True,
+            )
+            return
+
+        channel = await self._resolve_notification_channel(interaction.guild, channel_id)
+        if not channel:
+            await interaction.response.send_message(
+                "Unable to locate the configured ArcDPS channel.",
+                ephemeral=True,
+            )
+            return
+
+        release_time = datetime.now(timezone.utc)
+        embed = self._build_embed(interaction.guild, release_time)
+
+        try:
+            await channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message(
+                "Failed to send the ArcDPS notification. Check bot permissions.",
+                ephemeral=True,
+            )
+            return
+
+        self.bot.storage.save_arcdps_status(
+            interaction.guild.id, ArcDpsStatus(last_updated_at=release_time.isoformat())
+        )
+
+        await interaction.response.send_message(
+            f"Sent a test ArcDPS notification to {channel.mention}.",
+            ephemeral=True,
+        )
 
 
 async def setup(bot: GW2ToolsBot) -> None:
