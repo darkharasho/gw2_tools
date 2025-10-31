@@ -54,17 +54,8 @@ class BuildRecord:
 class ArcDpsStatus:
     """Persisted information about the latest ArcDPS release."""
 
-    last_updated_at: str
-
-    def to_embed_footer(self) -> str:
-        """Format a footer summarising audit information."""
-
-        creator = f"Created by <@{self.created_by}>"
-        if self.created_by != self.updated_by:
-            updater = f"Updated by <@{self.updated_by}>"
-        else:
-            updater = "Updated by creator"
-        return f"{creator} on {self.created_at} | {updater} on {self.updated_at}"
+    last_checked_at: Optional[str] = None
+    last_updated_at: Optional[str] = None
 
 
 class StorageManager:
@@ -114,6 +105,8 @@ class StorageManager:
         payload = self._read_json(path, None)
         if not payload:
             return None
+        if "last_checked_at" not in payload and "last_updated_at" in payload:
+            payload["last_checked_at"] = payload["last_updated_at"]
         return ArcDpsStatus(**payload)
 
     def save_arcdps_status(self, guild_id: int, status: ArcDpsStatus) -> None:

@@ -4,11 +4,11 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional, Tuple, Union
 
 import aiohttp
 import discord
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 from discord import app_commands
 from discord.ext import commands, tasks
 
@@ -23,6 +23,7 @@ class ArcDpsUpdatesCog(commands.Cog):
 
     CHECK_INTERVAL_MINUTES = 15
     RELEASE_URL = "https://www.deltaconnected.com/arcdps/x64/"
+    CHANGELOG_URL = "https://www.deltaconnected.com/arcdps/"
     PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: GW2ToolsBot) -> None:
@@ -35,10 +36,42 @@ class ArcDpsUpdatesCog(commands.Cog):
             self._session = aiohttp.ClientSession()
         return self._session
 
+    def _store_status(
+        self,
+        guild_id: int,
+        *,
+        last_checked_at: datetime,
+        last_updated_at: Optional[Union[datetime, str]],
+    ) -> None:
+        if isinstance(last_updated_at, datetime):
+            updated_value = last_updated_at.isoformat()
+        else:
+            updated_value = last_updated_at
+
+        self.bot.storage.save_arcdps_status(
+            guild_id,
+            ArcDpsStatus(
+                last_checked_at=last_checked_at.isoformat(),
+                last_updated_at=updated_value,
+            ),
+        )
+
     def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         self.arcdps_check.cancel()
         if self._session and not self._session.closed:
             self.bot.loop.create_task(self._session.close())
+
+    def _parse_iso_timestamp(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            LOGGER.warning("Stored ArcDPS timestamp '%s' is not valid ISO format", value)
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
 
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def arcdps_check(self) -> None:
@@ -49,43 +82,56 @@ class ArcDpsUpdatesCog(commands.Cog):
         if not latest_release:
             return
 
+        changes_info: Optional[Tuple[Optional[str], List[str]]] = None
+
         for guild in self.bot.guilds:
             config = self.bot.get_config(guild.id)
             channel_id = config.arcdps_channel_id
             if not channel_id:
                 continue
 
+            now = datetime.now(timezone.utc)
             stored_status = self.bot.storage.get_arcdps_status(guild.id)
             if stored_status is None:
-                self.bot.storage.save_arcdps_status(
-                    guild.id, ArcDpsStatus(last_updated_at=latest_release.isoformat())
-                )
+                self._store_status(guild.id, last_checked_at=now, last_updated_at=latest_release)
                 continue
 
-            try:
-                stored_timestamp = datetime.fromisoformat(stored_status.last_updated_at)
-            except ValueError:
-                stored_timestamp = None
-
+            stored_timestamp = self._parse_iso_timestamp(stored_status.last_updated_at)
             if stored_timestamp and latest_release <= stored_timestamp:
+                self._store_status(
+                    guild.id,
+                    last_checked_at=now,
+                    last_updated_at=stored_status.last_updated_at,
+                )
                 continue
 
             channel = await self._resolve_notification_channel(guild, channel_id)
             if not channel:
+                self._store_status(
+                    guild.id,
+                    last_checked_at=now,
+                    last_updated_at=stored_status.last_updated_at,
+                )
                 continue
 
-            embed = self._build_embed(guild, latest_release)
+            if changes_info is None:
+                changes_info = await self._fetch_latest_changes()
+
+            embed = self._build_embed(latest_release, changes_info)
             try:
                 await channel.send(embed=embed)
             except (discord.Forbidden, discord.HTTPException):
                 LOGGER.warning(
                     "Failed to post ArcDPS update in channel %s for guild %s", channel_id, guild.id
                 )
+                self._store_status(
+                    guild.id,
+                    last_checked_at=now,
+                    last_updated_at=stored_status.last_updated_at,
+                )
                 continue
 
-            self.bot.storage.save_arcdps_status(
-                guild.id, ArcDpsStatus(last_updated_at=latest_release.isoformat())
-            )
+            self._store_status(guild.id, last_checked_at=now, last_updated_at=latest_release)
 
     @arcdps_check.before_loop
     async def before_arcdps_check(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -120,14 +166,111 @@ class ArcDpsUpdatesCog(commands.Cog):
 
         return parsed.replace(tzinfo=timezone.utc)
 
-    def _build_embed(self, guild: discord.Guild, release_time: datetime) -> discord.Embed:
+    async def _fetch_latest_changes(self) -> Tuple[Optional[str], List[str]]:
+        session = await self._get_session()
+        try:
+            async with session.get(self.CHANGELOG_URL) as response:
+                response.raise_for_status()
+                html = await response.text()
+        except aiohttp.ClientError:
+            LOGGER.warning("Failed to fetch ArcDPS changelog page", exc_info=True)
+            return None, []
+
+        soup = BeautifulSoup(html, "html.parser")
+        header = soup.find("b", string=lambda s: s and s.strip().lower() == "changes")
+        if not header:
+            LOGGER.warning("Unable to locate ArcDPS changelog section")
+            return None, []
+
+        latest_date: Optional[str] = None
+        entries: List[str] = []
+
+        for node in header.next_siblings:
+            if isinstance(node, NavigableString):
+                text = str(node)
+            elif isinstance(node, Tag):
+                if node.name == "br":
+                    continue
+                if node.name == "b":
+                    break
+                text = node.get_text(separator=" ", strip=True)
+            else:
+                continue
+
+            text = text.replace("\xa0", " ").strip()
+            if not text or ":" not in text:
+                continue
+
+            date_part, _, description = text.partition(":")
+            date_part = date_part.strip()
+            description = description.strip()
+            if not description:
+                continue
+
+            if latest_date is None:
+                latest_date = date_part
+            if date_part != latest_date:
+                break
+
+            entries.append(description)
+
+        return latest_date, entries
+
+    def _format_changelog_date(self, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+
+        sanitized = value.replace(" ", "")
+        try:
+            parsed = datetime.strptime(sanitized, "%b.%d.%Y")
+        except ValueError:
+            return value
+
+        return parsed.strftime("%B %d, %Y")
+
+    def _build_embed(
+        self,
+        release_time: datetime,
+        changes: Optional[Tuple[Optional[str], List[str]]],
+    ) -> discord.Embed:
         timestamp = int(release_time.timestamp())
         embed = discord.Embed(
-            title="ArcDPS Update Available",
-            description="A new ArcDPS release has been detected.",
+            title="ArcDPS Update",
             colour=discord.Colour.from_rgb(255, 219, 90),
             url=self.RELEASE_URL,
         )
+
+        change_date, change_entries = changes if changes else (None, [])
+        description_lines: List[str] = []
+
+        if change_entries:
+            formatted_date = self._format_changelog_date(change_date)
+            header = (
+                f"Changes for {formatted_date}"
+                if formatted_date
+                else "Latest Changes"
+            )
+            description_lines.append(f"**{header}**")
+
+            bullets: List[str] = []
+            running_length = sum(len(line) + 1 for line in description_lines)
+            for entry in change_entries:
+                clean_entry = entry.replace("\xa0", " ").strip()
+                if not clean_entry:
+                    continue
+                bullet = f"• {clean_entry}"
+                projected = running_length + len(bullet) + 1
+                if projected > 4096:
+                    bullets.append("• …")
+                    break
+                bullets.append(bullet)
+                running_length = projected
+
+            description_lines.extend(bullets)
+
+        if description_lines:
+            embed.description = "\n".join(description_lines)
+
         embed.add_field(name="Updated", value=f"<t:{timestamp}:R>")
         embed.add_field(name="Release time", value=f"<t:{timestamp}:F>")
         embed.add_field(
@@ -135,11 +278,6 @@ class ArcDpsUpdatesCog(commands.Cog):
             value=f"[Get the latest build]({self.RELEASE_URL})",
             inline=False,
         )
-        if guild.icon:
-            embed.set_author(name=f"{guild.name} - ArcDPS Releases", icon_url=guild.icon.url)
-        else:
-            embed.set_author(name=f"{guild.name} - ArcDPS Releases")
-        embed.set_footer(text="ArcDPS release monitor")
         return embed
 
     async def _resolve_notification_channel(
@@ -201,7 +339,8 @@ class ArcDpsUpdatesCog(commands.Cog):
             return
 
         release_time = datetime.now(timezone.utc)
-        embed = self._build_embed(interaction.guild, release_time)
+        changes_info = await self._fetch_latest_changes()
+        embed = self._build_embed(release_time, changes_info)
 
         try:
             await channel.send(embed=embed)
@@ -212,9 +351,8 @@ class ArcDpsUpdatesCog(commands.Cog):
             )
             return
 
-        self.bot.storage.save_arcdps_status(
-            interaction.guild.id, ArcDpsStatus(last_updated_at=release_time.isoformat())
-        )
+        now = datetime.now(timezone.utc)
+        self._store_status(interaction.guild.id, last_checked_at=now, last_updated_at=release_time)
 
         await interaction.response.send_message(
             f"Sent a test ArcDPS notification to {channel.mention}.",
