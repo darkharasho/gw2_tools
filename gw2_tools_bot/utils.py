@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
+from urllib.parse import urlparse
+
 import discord
 
 from . import constants
@@ -30,23 +32,35 @@ def build_embed(
     *,
     icon_attachment_name: str,
     color: int,
+    updated_by: str,
+    updated_on: str,
 ) -> discord.Embed:
     """Create a Discord embed describing the build."""
 
     embed = discord.Embed(
         title=record.name,
-        description=record.description or "",
         color=color,
     )
+
+    if record.url:
+        parsed = urlparse(record.url)
+        domain = parsed.netloc or "Link"
+        embed.description = f"[{domain} - {record.name}]({record.url})"
+
+    embed.set_thumbnail(url=f"attachment://{icon_attachment_name}")
     embed.set_author(
         name=build_class_display(record.profession, record.specialization),
         icon_url=f"attachment://{icon_attachment_name}",
     )
-    embed.set_thumbnail(url=f"attachment://{icon_attachment_name}")
+
     embed.add_field(name="Chat Code", value=f"```{record.chat_code}```", inline=False)
-    if record.url:
-        embed.add_field(name="Reference", value=record.url, inline=False)
-    embed.set_footer(text=record.to_embed_footer())
+
+    description_value = record.description or "No description provided."
+    embed.add_field(name="Description", value=description_value, inline=False)
+
+    embed.add_field(name="Updated By", value=updated_by, inline=True)
+    embed.add_field(name="Updated On", value=updated_on, inline=True)
+
     embed.timestamp = discord.utils.utcnow()
     return embed
 
