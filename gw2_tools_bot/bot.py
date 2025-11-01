@@ -97,18 +97,46 @@ class GW2ToolsBot(commands.Bot):
         self.storage.save_config(guild_id, config)
 
     # ------------------------------------------------------------------
-    def is_authorised(self, guild: discord.Guild, member: discord.Member) -> bool:
+    def is_authorised(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        *,
+        permissions: discord.Permissions | None = None,
+    ) -> bool:
         config = self.get_config(guild.id)
+
+        if permissions is None:
+            try:
+                permissions = member.guild_permissions
+            except AttributeError:
+                LOGGER.warning(
+                    "Unable to resolve guild permissions for member %s in guild %s; assuming none",
+                    getattr(member, "id", "unknown"),
+                    getattr(guild, "id", "unknown"),
+                )
+                permissions = discord.Permissions.none()
+
+        if permissions.administrator:
+            return True
+
         if not config.moderator_role_ids:
-            return member.guild_permissions.administrator
-        role_ids = {role.id for role in member.roles}
-        return bool(role_ids.intersection(config.moderator_role_ids)) or member.guild_permissions.administrator
+            return False
+
+        role_ids = set(getattr(member, "_roles", ()))
+        role_ids.update(role.id for role in getattr(member, "roles", []) if role is not None)
+
+        return bool(role_ids.intersection(config.moderator_role_ids))
 
     async def ensure_authorised(self, interaction: discord.Interaction) -> bool:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
             return False
-        if not self.is_authorised(interaction.guild, interaction.user):
+        if not self.is_authorised(
+            interaction.guild,
+            interaction.user,
+            permissions=getattr(interaction, "permissions", None),
+        ):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return False
         return True
