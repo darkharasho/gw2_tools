@@ -148,7 +148,11 @@ class ConfigCog(commands.Cog):
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("Unable to resolve your server membership.", ephemeral=True)
             return
-        if not self.bot.is_authorised(interaction.guild, interaction.user):
+        if not self.bot.is_authorised(
+            interaction.guild,
+            interaction.user,
+            permissions=getattr(interaction, "permissions", None),
+        ):
             await interaction.response.send_message("You do not have permission to configure GW2 Tools.", ephemeral=True)
             return
 
