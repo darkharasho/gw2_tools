@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import aiohttp
@@ -16,6 +17,10 @@ from ..bot import GW2ToolsBot
 from ..storage import ArcDpsStatus
 
 LOGGER = logging.getLogger(__name__)
+
+
+ARCDPS_IMAGE_FILENAME = "arcdps.png"
+ARCDPS_IMAGE_PATH = Path(__file__).resolve().parents[3] / "media" / ARCDPS_IMAGE_FILENAME
 
 
 class ArcDpsUpdatesCog(commands.Cog):
@@ -117,9 +122,12 @@ class ArcDpsUpdatesCog(commands.Cog):
             if changes_info is None:
                 changes_info = await self._fetch_latest_changes()
 
-            embed = self._build_embed(latest_release, changes_info)
+            embed, thumbnail = self._build_embed(latest_release, changes_info)
             try:
-                await channel.send(embed=embed)
+                send_kwargs = {"embed": embed}
+                if thumbnail:
+                    send_kwargs["file"] = thumbnail
+                await channel.send(**send_kwargs)
             except (discord.Forbidden, discord.HTTPException):
                 LOGGER.warning(
                     "Failed to post ArcDPS update in channel %s for guild %s", channel_id, guild.id
@@ -232,7 +240,7 @@ class ArcDpsUpdatesCog(commands.Cog):
         self,
         release_time: datetime,
         changes: Optional[Tuple[Optional[str], List[str]]],
-    ) -> discord.Embed:
+    ) -> Tuple[discord.Embed, Optional[discord.File]]:
         timestamp = int(release_time.timestamp())
         embed = discord.Embed(
             title="ArcDPS Update",
@@ -278,7 +286,17 @@ class ArcDpsUpdatesCog(commands.Cog):
             value=f"[Get the latest build]({self.RELEASE_URL})",
             inline=False,
         )
-        return embed
+
+        thumbnail = self._attach_thumbnail(embed)
+        return embed, thumbnail
+
+    def _attach_thumbnail(self, embed: discord.Embed) -> Optional[discord.File]:
+        if not ARCDPS_IMAGE_PATH.exists():
+            LOGGER.warning("ArcDPS thumbnail missing at %s", ARCDPS_IMAGE_PATH)
+            return None
+
+        embed.set_thumbnail(url=f"attachment://{ARCDPS_IMAGE_FILENAME}")
+        return discord.File(ARCDPS_IMAGE_PATH, filename=ARCDPS_IMAGE_FILENAME)
 
     async def _resolve_notification_channel(
         self, guild: discord.Guild, channel_id: int
@@ -340,10 +358,13 @@ class ArcDpsUpdatesCog(commands.Cog):
 
         release_time = datetime.now(timezone.utc)
         changes_info = await self._fetch_latest_changes()
-        embed = self._build_embed(release_time, changes_info)
+        embed, thumbnail = self._build_embed(release_time, changes_info)
 
         try:
-            await channel.send(embed=embed)
+            send_kwargs = {"embed": embed}
+            if thumbnail:
+                send_kwargs["file"] = thumbnail
+            await channel.send(**send_kwargs)
         except (discord.Forbidden, discord.HTTPException):
             await interaction.response.send_message(
                 "Failed to send the ArcDPS notification. Check bot permissions.",
