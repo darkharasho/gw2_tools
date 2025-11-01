@@ -20,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 ARCDPS_IMAGE_FILENAME = "arcdps.png"
-ARCDPS_IMAGE_PATH = Path(__file__).resolve().parents[3] / "media" / ARCDPS_IMAGE_FILENAME
+ARCDPS_IMAGE_PATH = Path(__file__).resolve().parents[2] / "media" / ARCDPS_IMAGE_FILENAME
 
 
 class ArcDpsUpdatesCog(commands.Cog):
