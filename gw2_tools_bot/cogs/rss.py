@@ -202,7 +202,7 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
 
         description = _extract_entry_description(entry)
         if description:
-            embed.description = description
+            embed.description = f"{description}\n\u200B"
 
         author_kwargs = {"name": feed_title}
         if feed_link:
@@ -221,12 +221,14 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
         )
         if published_at:
             embed.timestamp = published_at
+        metadata_lines: List[str] = []
+
         if published_text:
-            embed.add_field(name="Published", value=published_text, inline=False)
+            metadata_lines.append(f"**Published:** {published_text}")
 
         author_name = entry.get("author")
         if author_name:
-            embed.add_field(name="Author", value=str(author_name), inline=True)
+            metadata_lines.append(f"**Author:** {author_name}")
 
         tags = entry.get("tags")
         if isinstance(tags, list):
@@ -237,7 +239,15 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
             ]
             if tag_names:
                 joined = ", ".join(tag_names)
-                embed.add_field(name="Tags", value=joined[:1024], inline=True)
+                metadata_lines.append(f"**Tags:** {joined[:800]}")
+
+        if metadata_lines:
+            metadata_lines.append("\u200B")
+            embed.add_field(
+                name="Details",
+                value="\n".join(metadata_lines)[:1024],
+                inline=False,
+            )
 
         embed.set_footer(text=f"RSS feed: {feed_config.name}")
         return embed
@@ -275,10 +285,13 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
                 channel_display = f"<#{feed.channel_id}>"
 
             field_name = feed.name
-            field_value_parts = [f"[Open feed]({feed.url})", f"Channel: {channel_display}"]
+            field_value_parts = [
+                f"**URL:** [Open feed]({feed.url})",
+                f"**Channel:** {channel_display}",
+            ]
             if feed.last_entry_published_at:
-                field_value_parts.append(f"Last post: {feed.last_entry_published_at}")
-            field_value = "\n".join(field_value_parts)
+                field_value_parts.append(f"**Last post:** {feed.last_entry_published_at}")
+            field_value = "\n".join(field_value_parts) + "\n\u200B"
             if len(field_value) > 1024:
                 field_value = field_value[:1021] + "…"
 
