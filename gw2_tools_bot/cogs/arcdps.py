@@ -319,66 +319,66 @@ class ArcDpsUpdatesCog(commands.Cog):
 
         return channel
 
-    @app_commands.command(name="arcdps_force_notification", description="Send a test ArcDPS notification.")
-    async def force_notification(self, interaction: discord.Interaction) -> None:
-        """Allow developers to trigger a notification in non-production environments."""
+    if not PRODUCTION:
 
-        if self.PRODUCTION:
-            await interaction.response.send_message(
-                "This command is disabled in production environments.",
-                ephemeral=True,
-            )
-            return
-
-        if not interaction.guild:
-            await interaction.response.send_message(
-                "This command must be used inside a server.", ephemeral=True
-            )
-            return
-
-        if not await self.bot.ensure_authorised(interaction):
-            return
-
-        config = self.bot.get_config(interaction.guild.id)
-        channel_id = config.arcdps_channel_id
-        if not channel_id:
-            await interaction.response.send_message(
-                "ArcDPS notifications are disabled for this server.",
-                ephemeral=True,
-            )
-            return
-
-        channel = await self._resolve_notification_channel(interaction.guild, channel_id)
-        if not channel:
-            await interaction.response.send_message(
-                "Unable to locate the configured ArcDPS channel.",
-                ephemeral=True,
-            )
-            return
-
-        release_time = datetime.now(timezone.utc)
-        changes_info = await self._fetch_latest_changes()
-        embed, thumbnail = self._build_embed(release_time, changes_info)
-
-        try:
-            send_kwargs = {"embed": embed}
-            if thumbnail:
-                send_kwargs["file"] = thumbnail
-            await channel.send(**send_kwargs)
-        except (discord.Forbidden, discord.HTTPException):
-            await interaction.response.send_message(
-                "Failed to send the ArcDPS notification. Check bot permissions.",
-                ephemeral=True,
-            )
-            return
-
-        now = datetime.now(timezone.utc)
-        self._store_status(interaction.guild.id, last_checked_at=now, last_updated_at=release_time)
-
-        await interaction.response.send_message(
-            f"Sent a test ArcDPS notification to {channel.mention}.",
-            ephemeral=True,
+        @app_commands.command(
+            name="arcdps_force_notification",
+            description="Send a test ArcDPS notification.",
         )
+        async def force_notification(self, interaction: discord.Interaction) -> None:
+            """Allow developers to trigger a notification in non-production environments."""
+
+            if not interaction.guild:
+                await interaction.response.send_message(
+                    "This command must be used inside a server.", ephemeral=True
+                )
+                return
+
+            if not await self.bot.ensure_authorised(interaction):
+                return
+
+            config = self.bot.get_config(interaction.guild.id)
+            channel_id = config.arcdps_channel_id
+            if not channel_id:
+                await interaction.response.send_message(
+                    "ArcDPS notifications are disabled for this server.",
+                    ephemeral=True,
+                )
+                return
+
+            channel = await self._resolve_notification_channel(interaction.guild, channel_id)
+            if not channel:
+                await interaction.response.send_message(
+                    "Unable to locate the configured ArcDPS channel.",
+                    ephemeral=True,
+                )
+                return
+
+            release_time = datetime.now(timezone.utc)
+            changes_info = await self._fetch_latest_changes()
+            embed, thumbnail = self._build_embed(release_time, changes_info)
+
+            try:
+                send_kwargs = {"embed": embed}
+                if thumbnail:
+                    send_kwargs["file"] = thumbnail
+                await channel.send(**send_kwargs)
+            except (discord.Forbidden, discord.HTTPException):
+                await interaction.response.send_message(
+                    "Failed to send the ArcDPS notification. Check bot permissions.",
+                    ephemeral=True,
+                )
+                return
+
+            now = datetime.now(timezone.utc)
+            self._store_status(
+                interaction.guild.id, last_checked_at=now, last_updated_at=release_time
+            )
+
+            await interaction.response.send_message(
+                f"Sent a test ArcDPS notification to {channel.mention}.",
+                ephemeral=True,
+            )
 
 
 async def setup(bot: GW2ToolsBot) -> None:
