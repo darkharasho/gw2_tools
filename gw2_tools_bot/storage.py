@@ -31,6 +31,17 @@ class GuildConfig:
 
 
 @dataclass
+class RssFeedConfig:
+    """Persisted configuration for an RSS or Atom feed subscription."""
+
+    name: str
+    url: str
+    channel_id: int
+    last_entry_id: Optional[str] = None
+    last_entry_published_at: Optional[str] = None
+
+
+@dataclass
 class BuildRecord:
     """Persisted representation of a Guild Wars 2 build."""
 
@@ -112,6 +123,53 @@ class StorageManager:
     def save_arcdps_status(self, guild_id: int, status: ArcDpsStatus) -> None:
         path = self._guild_path(guild_id) / "arcdps.json"
         self._write_json(path, asdict(status))
+
+    # ------------------------------------------------------------------
+    # RSS feed subscriptions
+    # ------------------------------------------------------------------
+    def get_rss_feeds(self, guild_id: int) -> List[RssFeedConfig]:
+        path = self._guild_path(guild_id) / "rss_feeds.json"
+        payload = self._read_json(path, [])
+        feeds: List[RssFeedConfig] = []
+        for item in payload:
+            try:
+                feeds.append(RssFeedConfig(**item))
+            except TypeError:
+                continue
+        return feeds
+
+    def save_rss_feeds(self, guild_id: int, feeds: List[RssFeedConfig]) -> None:
+        path = self._guild_path(guild_id) / "rss_feeds.json"
+        self._write_json(path, [asdict(feed) for feed in feeds])
+
+    def find_rss_feed(self, guild_id: int, name: str) -> Optional[RssFeedConfig]:
+        name_lower = name.lower()
+        for feed in self.get_rss_feeds(guild_id):
+            if feed.name.lower() == name_lower:
+                return feed
+        return None
+
+    def upsert_rss_feed(self, guild_id: int, feed: RssFeedConfig) -> None:
+        feeds = self.get_rss_feeds(guild_id)
+        updated: List[RssFeedConfig] = []
+        replaced = False
+        for existing in feeds:
+            if existing.name.lower() == feed.name.lower():
+                updated.append(feed)
+                replaced = True
+            else:
+                updated.append(existing)
+        if not replaced:
+            updated.append(feed)
+        self.save_rss_feeds(guild_id, updated)
+
+    def delete_rss_feed(self, guild_id: int, name: str) -> bool:
+        feeds = self.get_rss_feeds(guild_id)
+        remaining = [feed for feed in feeds if feed.name.lower() != name.lower()]
+        if len(remaining) == len(feeds):
+            return False
+        self.save_rss_feeds(guild_id, remaining)
+        return True
 
     # ------------------------------------------------------------------
     # Builds
