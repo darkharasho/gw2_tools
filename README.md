@@ -6,6 +6,7 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
 
 - **Per-guild configuration** – `/config` lets server administrators choose which roles can interact with the bot and which channel or forum should receive build posts. Settings can be delivered in a DM or as an ephemeral popup and persist independently for every guild.
 - **Build management workflows** – `/builds` supports adding, editing, and deleting Guild Wars 2 builds. Each record stores the profession or elite specialisation, URLs, chat codes, optional descriptions, and audit metadata about who made the latest changes.
+- **RSS announcements** – `/rss set` subscribes the guild to an RSS or Atom feed and posts new entries into the channel you specify. `/rss list` and `/rss delete` help you review or remove subscriptions without touching other guilds.
 - **Rich embeds and forum integration** – Build posts automatically use the profession's colour palette and icon from `media/gw2classicons`, include the chat code in a code block, and update or create forum threads when the configured channel is a forum.
 - **Isolated storage** – Configuration and build data are written to `gw2_tools_bot/data/guild_<guild_id>/` so that each Discord server's information is kept separate.
 
@@ -43,7 +44,7 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
 ```
 gw2_tools_bot/
 ├── bot.py          # Bot bootstrapper and shared helpers
-├── cogs/           # Slash-command implementations (config, builds)
+├── cogs/           # Slash-command implementations (config, builds, RSS, ArcDPS)
 ├── constants.py    # Profession/specialisation metadata and icon paths
 ├── storage.py      # JSON-backed storage with per-guild isolation
 └── utils.py        # Utility helpers shared across cogs
@@ -52,6 +53,16 @@ media/
 ```
 
 Persistent data (configurations and builds) will appear under `gw2_tools_bot/data/` after you run the bot locally.
+
+## Managing RSS feed subscriptions
+
+Guild moderators can use the `/rss` command group to mirror updates from community news sites, patch notes, or other feeds into a Discord channel:
+
+1. Run `/rss set` with a unique name, the feed URL, and the channel where updates should be posted. The bot validates the feed and stores the most recent entry so it does not repost historical content.
+2. Use `/rss list` to review the configured feeds for the current guild. Each subscription is isolated, so feeds configured in one server never appear in another.
+3. Remove a subscription with `/rss delete` when it is no longer needed. The bot stops polling and deletes the stored metadata for that feed.
+
+The RSS poller wakes up every 10 minutes. When it finds new entries it posts a rich embed containing the headline, summary, publication time, and link to the original article.
 
 ## Running the bot with PM2
 
