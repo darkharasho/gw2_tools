@@ -708,45 +708,45 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
             ephemeral=True,
         )
 
-    @app_commands.command(name="test", description="Post the latest entry from a configured RSS feed to its channel.")
-    async def test_feed(self, interaction: discord.Interaction) -> None:
-        if self.PRODUCTION:
-            await interaction.response.send_message(
-                "This command is disabled in production environments.",
-                ephemeral=True,
-            )
-            return
+    if not PRODUCTION:
 
-        if not await self.bot.ensure_authorised(interaction):
-            return
-
-        guild = interaction.guild
-        if not guild:
-            await interaction.response.send_message(
-                "This command can only be used in a server.", ephemeral=True
-            )
-            return
-
-        feeds = self.bot.storage.get_rss_feeds(guild.id)
-        if not feeds:
-            await interaction.response.send_message(
-                "No RSS feeds are configured for this server.",
-                ephemeral=True,
-            )
-            return
-
-        view = self._FeedTestView(self, interaction.user, guild, feeds)
-        message = "Choose an RSS feed below to post its latest entry to the configured channel."
-        if len(feeds) > self._FeedTestView.PAGE_SIZE:
-            message += (
-                "\nUse the navigation buttons to browse all feeds before making a selection."
-            )
-
-        await interaction.response.send_message(
-            message,
-            view=view,
-            ephemeral=True,
+        @app_commands.command(
+            name="test",
+            description="Post the latest entry from a configured RSS feed to its channel.",
         )
+        async def test_feed(self, interaction: discord.Interaction) -> None:
+            if not await self.bot.ensure_authorised(interaction):
+                return
+
+            guild = interaction.guild
+            if not guild:
+                await interaction.response.send_message(
+                    "This command can only be used in a server.", ephemeral=True
+                )
+                return
+
+            feeds = self.bot.storage.get_rss_feeds(guild.id)
+            if not feeds:
+                await interaction.response.send_message(
+                    "No RSS feeds are configured for this server.",
+                    ephemeral=True,
+                )
+                return
+
+            view = self._FeedTestView(self, interaction.user, guild, feeds)
+            message = (
+                "Choose an RSS feed below to post its latest entry to the configured channel."
+            )
+            if len(feeds) > self._FeedTestView.PAGE_SIZE:
+                message += (
+                    "\nUse the navigation buttons to browse all feeds before making a selection."
+                )
+
+            await interaction.response.send_message(
+                message,
+                view=view,
+                ephemeral=True,
+            )
 
 
 async def setup(bot: GW2ToolsBot) -> None:
