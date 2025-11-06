@@ -60,7 +60,7 @@ Guild moderators can use the `/rss` command group to mirror updates from communi
 
 1. Run `/rss set` with a unique name, the feed URL, and the channel where updates should be posted. The bot validates the feed and stores the most recent entry so it does not repost historical content.
 2. Use `/rss list` to review the configured feeds for the current guild. Each subscription is isolated, so feeds configured in one server never appear in another.
-3. Run `/rss test` to post the latest entry from a feed into its configured channel when you want to verify permissions or preview the announcement formatting.
+3. Run `/rss test` in non-production environments to open a dropdown of configured feeds and post the most recent entry into the feed's channel when you want to verify permissions or preview the announcement formatting.
 4. Remove a subscription with `/rss delete` when it is no longer needed. The bot stops polling and deletes the stored metadata for that feed.
 
 The RSS poller wakes up every 10 minutes. When it finds new entries it posts a rich embed containing the headline, summary, publication time, and link to the original article.
