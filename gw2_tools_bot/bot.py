@@ -40,6 +40,7 @@ class GW2ToolsBot(commands.Bot):
         await self.load_extension("gw2_tools_bot.cogs.config")
         await self.load_extension("gw2_tools_bot.cogs.builds")
         await self.load_extension("gw2_tools_bot.cogs.arcdps")
+        await self.load_extension("gw2_tools_bot.cogs.rss")
 
     async def on_ready(self) -> None:
         await self._sync_global_commands()
