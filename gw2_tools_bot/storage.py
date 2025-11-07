@@ -96,11 +96,14 @@ class CompConfig:
         if isinstance(post_day, int) and 0 <= post_day <= 6:
             post_days.append(post_day)
 
+        timezone_value = payload.get("timezone", "UTC")
+        if isinstance(timezone_value, str):
+            timezone_value = timezone_value.strip() or "UTC"
         return cls(
             channel_id=payload.get("channel_id"),
             post_days=post_days,
             post_time=payload.get("post_time"),
-            timezone=payload.get("timezone", "UTC"),
+            timezone=timezone_value,
             overview=payload.get("overview", ""),
             classes=classes,
             signups=signups,

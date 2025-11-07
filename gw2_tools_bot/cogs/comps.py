@@ -70,10 +70,13 @@ def _format_day_names(values: Sequence[int]) -> str:
 
 
 def _resolve_timezone(value: str) -> ZoneInfo:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        cleaned = "UTC"
     try:
-        return ZoneInfo(value)
+        return ZoneInfo(cleaned)
     except ZoneInfoNotFoundError:
-        raise ValueError(f"Unknown timezone: {value}") from None
+        raise ValueError(f"Unknown timezone: {cleaned}") from None
 
 
 def _icon_path_for_class(name: str) -> Optional[str]:
