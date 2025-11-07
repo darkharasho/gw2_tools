@@ -7,6 +7,7 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
 - **Per-guild configuration** – `/config` lets server administrators choose which roles can interact with the bot and which channel or forum should receive build posts. Settings can be delivered in a DM or as an ephemeral popup and persist independently for every guild.
 - **Build management workflows** – `/builds` supports adding, editing, and deleting Guild Wars 2 builds. Each record stores the profession or elite specialisation, URLs, chat codes, optional descriptions, and audit metadata about who made the latest changes.
 - **RSS announcements** – `/rss set` subscribes the guild to an RSS or Atom feed and posts new entries into the channel you specify. `/rss list` shows paginated embeds of the configured feeds, and `/rss delete` opens a dropdown so you can pick which subscription to remove without touching other guilds.
+- **Scheduled compositions** – `/comp manage` lets moderators schedule recurring composition posts, choose the destination channel, and maintain dropdown signups that keep headcounts per profession in sync with reactions.
 - **Rich embeds and forum integration** – Build posts automatically use the profession's colour palette and icon from `media/gw2classicons`, include the chat code in a code block, and update or create forum threads when the configured channel is a forum.
 - **Isolated storage** – Configuration and build data are written to `gw2_tools_bot/data/guild_<guild_id>/` so that each Discord server's information is kept separate.
 
@@ -64,6 +65,16 @@ Guild moderators can use the `/rss` command group to mirror updates from communi
 4. Remove a subscription with `/rss delete`, which opens a dropdown of the configured feeds so you can select the one to delete. The bot stops polling and deletes the stored metadata for that feed.
 
 The RSS poller wakes up every 10 minutes. When it finds new entries it posts a rich embed containing the headline, summary, publication time, and link to the original article.
+
+## Scheduling guild compositions
+
+Guild moderators can organise strike, raid, or WvW squad signups through the `/comp` command group. The workflow is designed so admins can configure everything in a single flow and players can register themselves without additional permissions.
+
+1. Run `/comp manage` to open the configuration view. Pick the channel where future posts should appear, set the day and time the signup should be published, and choose whether the schedule repeats weekly or is a one-off announcement.
+2. Click **Edit composition** to open the class editor modal. Add each profession or elite specialisation you want in the squad, optionally specifying the number of slots available. Class icons are sourced from `media/gw2wikiicons`, and the tool builds a grid of icons for the embed automatically.
+3. Use **Post preview** to review the generated embed before saving. When you confirm the settings the bot stores them in the guild configuration and schedules the next post.
+4. When the scheduled time arrives the bot publishes an embed containing each configured class as an inline field. A dropdown menu appears under the message so members can select the class they want to play; the bot tracks selections, prevents users from taking multiple slots, and updates the counts instantly.
+5. If you need to adjust the roster or schedule, rerun `/comp manage` to edit the configuration. Existing posts will update when members change their dropdown choice, and the next scheduled announcement will use your latest settings.
 
 ## Running the bot with PM2
 
