@@ -130,39 +130,7 @@ def _sanitize_signups(config: CompConfig) -> None:
         config.signups.setdefault(entry.name, [])
 
 
-def _build_summary_embed(guild: discord.Guild, config: CompConfig) -> discord.Embed:
-    embed = discord.Embed(title="Guild Composition Settings", color=discord.Color.blurple())
-    schedule_text = "Posting schedule not configured."
-    if config.post_day is not None and config.post_time:
-        schedule_text = f"Scheduled for **{_get_day_name(config.post_day)}** at **{config.post_time}** {config.timezone}."
-    if config.channel_id:
-        channel = guild.get_channel(config.channel_id)
-        if channel:
-            channel_value = channel.mention
-        else:
-            channel_value = f"<#{config.channel_id}>"
-    else:
-        channel_value = "Not set"
-    embed.add_field(name="Post Channel", value=channel_value, inline=False)
-    embed.add_field(name="Schedule", value=schedule_text, inline=False)
-
-    if config.overview:
-        embed.add_field(name="Composition Overview", value=config.overview, inline=False)
-    else:
-        embed.add_field(name="Composition Overview", value="No overview set.", inline=False)
-
-    if config.classes:
-        lines = []
-        for entry in config.classes:
-            if entry.required is None:
-                lines.append(f"• {entry.name}")
-            else:
-                lines.append(f"• {entry.name} — {entry.required}")
-        embed.add_field(name="Configured Classes", value="\n".join(lines), inline=False)
-    else:
-        embed.add_field(name="Configured Classes", value="No classes configured.", inline=False)
-
-    return embed
+OVERVIEW_TOKEN_RE = re.compile(r"(?<!<):([0-9A-Za-z][0-9A-Za-z _-]{0,30}):")
 
 
 class CompSignupView(discord.ui.View):
@@ -524,7 +492,7 @@ class CompConfigView(discord.ui.View):
                     self.message = await interaction.original_response()
                 except discord.HTTPException:
                     return
-        embed = _build_summary_embed(self.guild, self.config.comp)
+        embed = self.cog.build_summary_embed(self.guild, self.config.comp)
         try:
             await self.message.edit(embed=embed, view=self)
         except discord.HTTPException:
@@ -593,7 +561,7 @@ class CompCog(commands.GroupCog, name="comp"):
         assert interaction.guild is not None
         config = self.bot.get_config(interaction.guild.id)
         view = CompConfigView(self, interaction.guild, config)
-        embed = _build_summary_embed(interaction.guild, config.comp)
+        embed = self.build_summary_embed(interaction.guild, config.comp)
         await interaction.response.send_message(
             "Use the controls below to configure the weekly composition post.",
             embed=embed,
@@ -961,6 +929,93 @@ class CompCog(commands.GroupCog, name="comp"):
             view = CompSignupView(self, guild_id, channel=channel)
             self.bot.add_view(view, message_id=comp_config.message_id)
 
+    def _format_overview_text(
+        self,
+        overview: str,
+        comp_config: CompConfig,
+        *,
+        guild: Optional[discord.Guild],
+        channel: Optional[discord.abc.GuildChannel] = None,
+    ) -> str:
+        if not overview or guild is None:
+            return overview
+
+        if channel is None and comp_config.channel_id:
+            channel = guild.get_channel(comp_config.channel_id)
+
+        emoji_lookup: Dict[str, str] = {}
+        for entry in comp_config.classes:
+            emoji_obj = self._get_class_emoji(entry, guild=guild, channel=channel)
+            if not emoji_obj:
+                continue
+            emoji_text = str(emoji_obj)
+            key_variants = {
+                entry.name.casefold(),
+                _emoji_name_for_class(entry.name).casefold(),
+                re.sub(r"[^0-9a-z]", "", entry.name.casefold()),
+            }
+            for key in key_variants:
+                if key:
+                    emoji_lookup[key] = emoji_text
+
+        if not emoji_lookup:
+            return overview
+
+        def replace(match: re.Match[str]) -> str:
+            token = match.group(1)
+            if not token:
+                return match.group(0)
+            lowered = token.casefold()
+            normalized = re.sub(r"[^0-9a-z]", "", lowered)
+            for candidate in (lowered, normalized):
+                if candidate and candidate in emoji_lookup:
+                    return emoji_lookup[candidate]
+            return match.group(0)
+
+        return OVERVIEW_TOKEN_RE.sub(replace, overview)
+
+    def build_summary_embed(self, guild: discord.Guild, config: CompConfig) -> discord.Embed:
+        embed = discord.Embed(title="Guild Composition Settings", color=discord.Color.blurple())
+        schedule_text = "Posting schedule not configured."
+        if config.post_day is not None and config.post_time:
+            schedule_text = (
+                f"Scheduled for **{_get_day_name(config.post_day)}** at **{config.post_time}** {config.timezone}."
+            )
+        if config.channel_id:
+            channel = guild.get_channel(config.channel_id)
+            if channel:
+                channel_value = channel.mention
+            else:
+                channel_value = f"<#{config.channel_id}>"
+        else:
+            channel = None
+            channel_value = "Not set"
+        embed.add_field(name="Post Channel", value=channel_value, inline=False)
+        embed.add_field(name="Schedule", value=schedule_text, inline=False)
+
+        if config.overview:
+            overview_text = self._format_overview_text(
+                config.overview,
+                config,
+                guild=guild,
+                channel=channel,
+            )
+            embed.add_field(name="Composition Overview", value=overview_text, inline=False)
+        else:
+            embed.add_field(name="Composition Overview", value="No overview set.", inline=False)
+
+        if config.classes:
+            lines = []
+            for entry in config.classes:
+                if entry.required is None:
+                    lines.append(f"• {entry.name}")
+                else:
+                    lines.append(f"• {entry.name} — {entry.required}")
+            embed.add_field(name="Configured Classes", value="\n".join(lines), inline=False)
+        else:
+            embed.add_field(name="Configured Classes", value="No classes configured.", inline=False)
+        return embed
+
     def _build_comp_embed(
         self,
         guild: discord.Guild,
@@ -981,9 +1036,15 @@ class CompCog(commands.GroupCog, name="comp"):
             embed.description = "Select your class using the dropdown below."
 
         if comp_config.overview:
+            overview_text = self._format_overview_text(
+                comp_config.overview,
+                comp_config,
+                guild=guild,
+                channel=channel,
+            )
             embed.add_field(
                 name="Composition Overview",
-                value=comp_config.overview,
+                value=overview_text,
                 inline=False,
             )
 
