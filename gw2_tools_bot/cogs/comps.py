@@ -1,6 +1,7 @@
 """Guild composition scheduling and signup management."""
 from __future__ import annotations
 
+import asyncio
 import calendar
 import io
 import logging
@@ -505,15 +506,31 @@ class CompCog(commands.GroupCog, name="comp"):
         super().__init__()
         self.bot = bot
         self.poster_loop.start()
+        self._view_init_task: asyncio.Task[None] | None = None
 
     async def cog_load(self) -> None:
         await super().cog_load()
+        if self._view_init_task is None or self._view_init_task.done():
+            self._view_init_task = self.bot.loop.create_task(self._register_all_persistent_views())
+
+    def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
+        self.poster_loop.cancel()
+        if self._view_init_task is not None:
+            self._view_init_task.cancel()
+            self._view_init_task = None
+
+    async def _register_all_persistent_views(self) -> None:
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             await self._register_persistent_view(guild.id)
 
-    def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
-        self.poster_loop.cancel()
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild) -> None:  # pragma: no cover - requires Discord
+        await self._register_persistent_view(guild.id)
+
+    @commands.Cog.listener()
+    async def on_guild_available(self, guild: discord.Guild) -> None:  # pragma: no cover - requires Discord
+        await self._register_persistent_view(guild.id)
 
     @app_commands.command(name="manage", description="Configure the scheduled composition post for this guild.")
     async def manage(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
