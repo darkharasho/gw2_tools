@@ -23,6 +23,7 @@ class CompClassConfig:
 
     name: str
     required: Optional[int] = None
+    emoji_id: Optional[int] = None
 
 
 @dataclass
