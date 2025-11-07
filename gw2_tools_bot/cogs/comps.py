@@ -55,6 +55,17 @@ def _parse_time(value: str) -> Optional[time_cls]:
     return parsed.time()
 
 
+def _format_day_names(values: Sequence[int]) -> str:
+    names: List[str] = []
+    for day in values:
+        if not isinstance(day, int) or not 0 <= day <= 6:
+            continue
+        name = calendar.day_name[day]
+        if name not in names:
+            names.append(name)
+    return ", ".join(names)
+
+
 def _resolve_timezone(value: str) -> ZoneInfo:
     try:
         return ZoneInfo(value)
@@ -223,7 +234,27 @@ class CompSignupSelect(discord.ui.Select):
         if removed:
             await interaction.response.send_message(f"Removed you from **{selection}**.", ephemeral=True)
         else:
-            await interaction.response.send_message(f"Signed you up for **{selection}**.", ephemeral=True)
+            emoji_text = ""
+            entry = discord.utils.get(comp_config.classes, name=selection)
+            if entry:
+                guild = interaction.guild or self.comp_view.cog.bot.get_guild(self.comp_view.guild_id)
+                channel = self.comp_view.channel
+                if channel is None and interaction.channel and isinstance(
+                    interaction.channel, discord.abc.GuildChannel
+                ):
+                    channel = interaction.channel
+                if channel is None and guild and comp_config.channel_id:
+                    channel = guild.get_channel(comp_config.channel_id)
+                if guild is None and channel is not None:
+                    guild = channel.guild
+                if guild:
+                    emoji_obj = self.comp_view.cog._get_class_emoji(
+                        entry, guild=guild, channel=channel
+                    )
+                    if emoji_obj:
+                        emoji_text = f"{emoji_obj} "
+            message = f"Signed you up for {emoji_text}**{selection}**."
+            await interaction.response.send_message(message, ephemeral=True)
 
 
 class CompChannelSelect(discord.ui.ChannelSelect):
@@ -255,11 +286,11 @@ class ScheduleModal(discord.ui.Modal):
     def __init__(self, view: "CompConfigView") -> None:
         super().__init__(title="Configure posting schedule")
         comp_config = view.config.comp
-        default_day = _get_day_name(comp_config.post_day) if comp_config.post_day is not None else ""
+        default_day = _format_day_names(comp_config.post_days)
         self.day_input = discord.ui.TextInput(
-            label="Day of week",
-            placeholder="Monday",
-            default=default_day if comp_config.post_day is not None else "",
+            label="Day(s) of week",
+            placeholder="Monday or Mon,Wed,Fri",
+            default=default_day,
             required=False,
         )
         self.time_input = discord.ui.TextInput(
@@ -293,7 +324,7 @@ class ScheduleModal(discord.ui.Modal):
             return
 
         if not day_value and not time_value:
-            comp_config.post_day = None
+            comp_config.post_days = []
             comp_config.post_time = None
             comp_config.timezone = tz_value or "UTC"
             self.config_view.persist()
@@ -308,10 +339,30 @@ class ScheduleModal(discord.ui.Modal):
             )
             return
 
-        day_index = _parse_day(day_value)
-        if day_index is None:
+        parsed_days: List[int] = []
+        invalid_tokens: List[str] = []
+        for token in day_value.split(","):
+            cleaned = token.strip()
+            if not cleaned:
+                continue
+            day_index = _parse_day(cleaned)
+            if day_index is None:
+                invalid_tokens.append(cleaned)
+                continue
+            if day_index not in parsed_days:
+                parsed_days.append(day_index)
+
+        if invalid_tokens:
+            invalid_list = ", ".join(invalid_tokens)
             await interaction.response.send_message(
-                "Unrecognised day of the week. Try values like Monday, Tue, Friday, etc.",
+                f"Unrecognised day(s) of the week: {invalid_list}. Try values like Monday, Tue, Friday, etc.",
+                ephemeral=True,
+            )
+            return
+
+        if not parsed_days:
+            await interaction.response.send_message(
+                "Please specify at least one valid day of the week.",
                 ephemeral=True,
             )
             return
@@ -321,13 +372,13 @@ class ScheduleModal(discord.ui.Modal):
             await interaction.response.send_message("Time must be provided in HH:MM 24-hour format.", ephemeral=True)
             return
 
-        comp_config.post_day = day_index
+        comp_config.post_days = parsed_days
         comp_config.post_time = parsed_time.strftime("%H:%M")
         comp_config.timezone = tz_value
         self.config_view.persist()
         await self.config_view.refresh_summary(interaction)
         await interaction.response.send_message(
-            f"Schedule set to {_get_day_name(day_index)} at {comp_config.post_time} {tz_value}.",
+            f"Schedule set to {_format_day_names(parsed_days)} at {comp_config.post_time} {tz_value}.",
             ephemeral=True,
         )
 
@@ -584,7 +635,7 @@ class CompCog(commands.GroupCog, name="comp"):
     async def _maybe_post_for_guild(self, guild: discord.Guild) -> None:
         config = self.bot.get_config(guild.id)
         comp_config = config.comp
-        if not (comp_config.channel_id and comp_config.post_day is not None and comp_config.post_time):
+        if not (comp_config.channel_id and comp_config.post_days and comp_config.post_time):
             return
         if not comp_config.classes:
             return
@@ -596,7 +647,7 @@ class CompCog(commands.GroupCog, name="comp"):
             return
 
         now = datetime.now(tz)
-        if now.weekday() != comp_config.post_day:
+        if now.weekday() not in comp_config.post_days:
             return
 
         target_time = _parse_time(comp_config.post_time)
@@ -615,7 +666,7 @@ class CompCog(commands.GroupCog, name="comp"):
             if last_post_dt is not None:
                 last_local = last_post_dt.astimezone(tz)
                 if (
-                    last_local.weekday() == comp_config.post_day
+                    last_local.weekday() in comp_config.post_days
                     and last_local.hour == target_time.hour
                     and last_local.minute == target_time.minute
                     and last_local.date() == now.date()
@@ -977,10 +1028,12 @@ class CompCog(commands.GroupCog, name="comp"):
     def build_summary_embed(self, guild: discord.Guild, config: CompConfig) -> discord.Embed:
         embed = discord.Embed(title="Guild Composition Settings", color=discord.Color.blurple())
         schedule_text = "Posting schedule not configured."
-        if config.post_day is not None and config.post_time:
-            schedule_text = (
-                f"Scheduled for **{_get_day_name(config.post_day)}** at **{config.post_time}** {config.timezone}."
-            )
+        if config.post_days and config.post_time:
+            day_names = _format_day_names(config.post_days)
+            if day_names:
+                schedule_text = (
+                    f"Scheduled for **{day_names}** at **{config.post_time}** {config.timezone}."
+                )
         if config.channel_id:
             channel = guild.get_channel(config.channel_id)
             if channel:
@@ -1027,11 +1080,15 @@ class CompCog(commands.GroupCog, name="comp"):
             resolved_channel = guild.get_channel(comp_config.channel_id)
             channel = resolved_channel
         embed = discord.Embed(title="Guild Composition Signup", color=discord.Color.dark_teal())
-        if comp_config.post_day is not None and comp_config.post_time:
-            embed.description = (
-                f"Scheduled for **{_get_day_name(comp_config.post_day)}** at **{comp_config.post_time}** {comp_config.timezone}.\n"
-                "Select your class using the dropdown below."
-            )
+        if comp_config.post_days and comp_config.post_time:
+            day_names = _format_day_names(comp_config.post_days)
+            if day_names:
+                embed.description = (
+                    f"Scheduled for **{day_names}** at **{comp_config.post_time}** {comp_config.timezone}.\n"
+                    "Select your class using the dropdown below."
+                )
+            else:
+                embed.description = "Select your class using the dropdown below."
         else:
             embed.description = "Select your class using the dropdown below."
 
