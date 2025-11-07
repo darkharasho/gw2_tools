@@ -34,6 +34,7 @@ class CompConfig:
     post_day: Optional[int] = None
     post_time: Optional[str] = None
     timezone: str = "UTC"
+    overview: str = ""
     classes: List[CompClassConfig] = field(default_factory=list)
     signups: Dict[str, List[int]] = field(default_factory=dict)
     message_id: Optional[int] = None
@@ -79,6 +80,7 @@ class CompConfig:
             post_day=post_day,
             post_time=payload.get("post_time"),
             timezone=payload.get("timezone", "UTC"),
+            overview=payload.get("overview", ""),
             classes=classes,
             signups=signups,
             message_id=payload.get("message_id"),

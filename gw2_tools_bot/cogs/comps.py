@@ -146,6 +146,11 @@ def _build_summary_embed(guild: discord.Guild, config: CompConfig) -> discord.Em
     embed.add_field(name="Post Channel", value=channel_value, inline=False)
     embed.add_field(name="Schedule", value=schedule_text, inline=False)
 
+    if config.overview:
+        embed.add_field(name="Composition Overview", value=config.overview, inline=False)
+    else:
+        embed.add_field(name="Composition Overview", value="No overview set.", inline=False)
+
     if config.classes:
         lines = []
         for entry in config.classes:
@@ -359,6 +364,33 @@ class ScheduleModal(discord.ui.Modal):
         )
 
 
+class OverviewModal(discord.ui.Modal):
+    def __init__(self, view: "CompConfigView") -> None:
+        super().__init__(title="Configure composition overview")
+        comp_config = view.config.comp
+        self.overview_input = discord.ui.TextInput(
+            label="Overview (shown above class signups)",
+            style=discord.TextStyle.paragraph,
+            placeholder="Example: Tank: Firebrand, Heal: Druid, Support: Chrono",
+            default=comp_config.overview,
+            required=False,
+            max_length=1024,
+        )
+        self.config_view = view
+        self.add_item(self.overview_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        comp_config = self.config_view.config.comp
+        comp_config.overview = str(self.overview_input.value).strip()
+        self.config_view.persist()
+        await self.config_view.cog.refresh_signup_message(self.config_view.guild.id)
+        await self.config_view.refresh_summary(interaction)
+        message = "Composition overview updated."
+        if not comp_config.overview:
+            message = "Composition overview cleared."
+        await interaction.response.send_message(message, ephemeral=True)
+
+
 class ClassesModal(discord.ui.Modal):
     def __init__(self, view: "CompConfigView") -> None:
         super().__init__(title="Configure composition classes")
@@ -472,6 +504,8 @@ class CompConfigView(discord.ui.View):
         self.add_item(CompChannelSelect(self, default_channel))
         self.add_item(discord.ui.Button(label="Edit schedule", style=discord.ButtonStyle.primary, custom_id="comp_schedule"))
         self.children[-1].callback = self._schedule_callback  # type: ignore[assignment]
+        self.add_item(discord.ui.Button(label="Edit overview", style=discord.ButtonStyle.primary, custom_id="comp_overview"))
+        self.children[-1].callback = self._overview_callback  # type: ignore[assignment]
         self.add_item(discord.ui.Button(label="Edit classes", style=discord.ButtonStyle.primary, custom_id="comp_classes"))
         self.children[-1].callback = self._classes_callback  # type: ignore[assignment]
         self.add_item(PostNowButton())
@@ -502,6 +536,9 @@ class CompConfigView(discord.ui.View):
 
     async def _schedule_callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         await interaction.response.send_modal(ScheduleModal(self))
+
+    async def _overview_callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        await interaction.response.send_modal(OverviewModal(self))
 
     async def _classes_callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         await interaction.response.send_modal(ClassesModal(self))
@@ -942,6 +979,13 @@ class CompCog(commands.GroupCog, name="comp"):
             )
         else:
             embed.description = "Select your class using the dropdown below."
+
+        if comp_config.overview:
+            embed.add_field(
+                name="Composition Overview",
+                value=comp_config.overview,
+                inline=False,
+            )
 
         for entry in comp_config.classes:
             signups = comp_config.signups.get(entry.name, [])
