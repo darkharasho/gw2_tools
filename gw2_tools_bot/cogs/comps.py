@@ -25,6 +25,9 @@ LOGGER = logging.getLogger(__name__)
 WIKI_ICON_PATH = constants.MEDIA_PATH / "gw2wikiicons"
 SELECT_CUSTOM_ID_PREFIX = "gw2tools:comp:signup"
 
+ABSENT_OPTION_NAME = "Absent"
+ABSENT_EMOJI = "\N{CROSS MARK}"
+
 DAY_LOOKUP: Dict[str, int] = {}
 for index, name in enumerate(calendar.day_name):
     DAY_LOOKUP[name.lower()] = index
@@ -136,9 +139,11 @@ def _format_signups(guild: discord.Guild, signups: Sequence[int]) -> str:
 
 def _sanitize_signups(config: CompConfig) -> None:
     valid_names = {entry.name for entry in config.classes}
+    valid_names.add(ABSENT_OPTION_NAME)
     config.signups = {name: users for name, users in config.signups.items() if name in valid_names}
     for entry in config.classes:
         config.signups.setdefault(entry.name, [])
+    config.signups.setdefault(ABSENT_OPTION_NAME, [])
 
 
 OVERVIEW_TOKEN_RE = re.compile(r"(?<!<):([0-9A-Za-z][0-9A-Za-z _-]{0,30}):")
@@ -187,6 +192,15 @@ class CompSignupSelect(discord.ui.Select):
                 )
             )
 
+        options.append(
+            discord.SelectOption(
+                label=ABSENT_OPTION_NAME,
+                value=ABSENT_OPTION_NAME,
+                description="Mark yourself as absent",
+                emoji=ABSENT_EMOJI,
+            )
+        )
+
         disabled = not options
         super().__init__(
             placeholder="Select a class to sign up (select again to remove)",
@@ -201,13 +215,13 @@ class CompSignupSelect(discord.ui.Select):
         config = self.comp_view.cog.bot.get_config(self.comp_view.guild_id)
         comp_config = config.comp
         _sanitize_signups(comp_config)
-        if not comp_config.classes:
-            await interaction.response.send_message("No classes are configured for signups yet.", ephemeral=True)
-            return
-
         selection = self.values[0]
         if selection == "__none":
             await interaction.response.send_message("There are no classes to sign up for yet.", ephemeral=True)
+            return
+
+        if not comp_config.classes and selection != ABSENT_OPTION_NAME:
+            await interaction.response.send_message("No classes are configured for signups yet.", ephemeral=True)
             return
 
         user_id = interaction.user.id
@@ -253,6 +267,8 @@ class CompSignupSelect(discord.ui.Select):
                     )
                     if emoji_obj:
                         emoji_text = f"{emoji_obj} "
+            elif selection == ABSENT_OPTION_NAME:
+                emoji_text = f"{ABSENT_EMOJI} "
             message = f"Signed you up for {emoji_text}**{selection}**."
             await interaction.response.send_message(message, ephemeral=True)
 
@@ -875,6 +891,7 @@ class CompCog(commands.GroupCog, name="comp"):
 
         if reset_signups:
             comp_config.signups = {entry.name: [] for entry in comp_config.classes}
+            comp_config.signups[ABSENT_OPTION_NAME] = []
 
         emoji_updated = await self.ensure_class_emojis(
             guild, comp_config, channel=channel
@@ -1076,6 +1093,7 @@ class CompCog(commands.GroupCog, name="comp"):
         *,
         channel: Optional[discord.abc.GuildChannel] = None,
     ) -> discord.Embed:
+        _sanitize_signups(comp_config)
         if channel is None and comp_config.channel_id:
             resolved_channel = guild.get_channel(comp_config.channel_id)
             channel = resolved_channel
@@ -1105,6 +1123,7 @@ class CompCog(commands.GroupCog, name="comp"):
                 inline=False,
             )
 
+        inline_count = 0
         for entry in comp_config.classes:
             signups = comp_config.signups.get(entry.name, [])
             emoji = self._get_class_emoji(entry, guild=guild, channel=channel)
@@ -1115,6 +1134,19 @@ class CompCog(commands.GroupCog, name="comp"):
             else:
                 title = f"{prefix}{entry.name} ({current_total})"
             embed.add_field(name=title, value=_format_signups(guild, signups), inline=True)
+            inline_count += 1
+
+        absent_signups = comp_config.signups.get(ABSENT_OPTION_NAME, [])
+        absent_title = f"{ABSENT_EMOJI} {ABSENT_OPTION_NAME} ({len(absent_signups)})"
+        embed.add_field(
+            name=absent_title,
+            value=_format_signups(guild, absent_signups),
+            inline=True,
+        )
+        inline_count += 1
+
+        if inline_count % 3 == 2:
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
 
         embed.set_footer(text="Select the dropdown again to remove yourself from a class.")
         embed.timestamp = discord.utils.utcnow()
