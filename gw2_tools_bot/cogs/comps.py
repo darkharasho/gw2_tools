@@ -676,7 +676,8 @@ class CompCog(commands.GroupCog, name="comp"):
         if not target_time:
             return
 
-        if now.hour != target_time.hour or now.minute != target_time.minute:
+        target_dt = datetime.combine(now.date(), target_time, tz)
+        if now < target_dt:
             return
 
         last_post_at = comp_config.last_post_at
@@ -687,12 +688,7 @@ class CompCog(commands.GroupCog, name="comp"):
                 last_post_dt = None
             if last_post_dt is not None:
                 last_local = last_post_dt.astimezone(tz)
-                if (
-                    last_local.weekday() in comp_config.post_days
-                    and last_local.hour == target_time.hour
-                    and last_local.minute == target_time.minute
-                    and last_local.date() == now.date()
-                ):
+                if last_local.date() == now.date() and last_local >= target_dt:
                     return
 
         await self.post_composition(guild.id, reset_signups=True)
