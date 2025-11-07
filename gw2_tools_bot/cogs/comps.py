@@ -84,11 +84,10 @@ def _icon_path_for_class(name: str) -> Optional[str]:
 
 
 def _emoji_name_for_class(name: str) -> str:
-    base = re.sub(r"[^0-9a-zA-Z]", "", name.lower())
-    if not base:
-        base = "class"
-    trimmed = base[:25]
-    return f"gw2_{trimmed}"
+    cleaned = re.sub(r"[^0-9A-Za-z]", "", name)
+    if len(cleaned) < 2:
+        cleaned = "Class"
+    return cleaned[:32]
 
 
 def _load_icon_bytes(name: str) -> Optional[bytes]:
