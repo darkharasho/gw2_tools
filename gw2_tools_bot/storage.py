@@ -31,7 +31,7 @@ class CompConfig:
     """Composition scheduling and signup configuration."""
 
     channel_id: Optional[int] = None
-    post_day: Optional[int] = None
+    post_days: List[int] = field(default_factory=list)
     post_time: Optional[str] = None
     timezone: str = "UTC"
     overview: str = ""
@@ -68,16 +68,37 @@ class CompConfig:
                         continue
             signups[class_name] = valid
 
+        post_days_payload = payload.get("post_days")
+        post_days: List[int] = []
+        if isinstance(post_days_payload, list):
+            for raw in post_days_payload:
+                candidate: Optional[int] = None
+                if isinstance(raw, int):
+                    candidate = raw
+                elif isinstance(raw, str):
+                    try:
+                        candidate = int(raw)
+                    except ValueError:
+                        candidate = None
+                if candidate is None:
+                    continue
+                if 0 <= candidate <= 6 and candidate not in post_days:
+                    post_days.append(candidate)
+
         post_day = payload.get("post_day")
-        if isinstance(post_day, str):
+        if post_days:
+            post_day = None
+        elif isinstance(post_day, str):
             try:
                 post_day = int(post_day)
             except ValueError:
                 post_day = None
+        if isinstance(post_day, int) and 0 <= post_day <= 6:
+            post_days.append(post_day)
 
         return cls(
             channel_id=payload.get("channel_id"),
-            post_day=post_day,
+            post_days=post_days,
             post_time=payload.get("post_time"),
             timezone=payload.get("timezone", "UTC"),
             overview=payload.get("overview", ""),
