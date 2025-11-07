@@ -443,7 +443,9 @@ class PostNowButton(discord.ui.Button["CompConfigView"]):
         if not comp_config.classes:
             await interaction.response.send_message("Configure at least one class before posting.", ephemeral=True)
             return
-        await view.cog.post_composition(view.guild.id, reset_signups=False)
+        await view.cog.post_composition(
+            view.guild.id, reset_signups=False, force_new_message=True
+        )
         await interaction.response.send_message("Composition post updated.", ephemeral=True)
 
 
@@ -787,7 +789,13 @@ class CompCog(commands.GroupCog, name="comp"):
                 return emoji
         return None
 
-    async def post_composition(self, guild_id: int, *, reset_signups: bool) -> None:
+    async def post_composition(
+        self,
+        guild_id: int,
+        *,
+        reset_signups: bool,
+        force_new_message: bool = False,
+    ) -> None:
         guild = self.bot.get_guild(guild_id)
         if not guild:
             return
@@ -827,6 +835,17 @@ class CompCog(commands.GroupCog, name="comp"):
                 message = await channel.fetch_message(comp_config.message_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 message = None
+
+        if force_new_message and message is not None:
+            try:
+                await message.edit(view=None)
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.debug(
+                    "Failed to clear view on previous comp message %s in guild %s",
+                    comp_config.message_id,
+                    guild_id,
+                )
+            message = None
 
         if message is None:
             try:
