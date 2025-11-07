@@ -7,7 +7,7 @@ import io
 import logging
 import os
 import re
-from datetime import datetime, time as time_cls, timezone, tzinfo
+from datetime import datetime, time as time_cls, timezone, tzinfo, timedelta
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
 
 import discord
@@ -46,6 +46,30 @@ TIMEZONE_ALIASES = {
     "PDT": "America/Los_Angeles",
     "PST": "America/Los_Angeles",
     "UTC": "UTC",
+}
+
+TIMEZONE_ALIAS_FALLBACKS = {
+    "ACDT": timezone(timedelta(hours=10, minutes=30)),
+    "ACST": timezone(timedelta(hours=9, minutes=30)),
+    "AKDT": timezone(timedelta(hours=-8)),
+    "AKST": timezone(timedelta(hours=-9)),
+    "AST": timezone(timedelta(hours=-4)),
+    "ADT": timezone(timedelta(hours=-3)),
+    "BST": timezone(timedelta(hours=1)),
+    "CDT": timezone(timedelta(hours=-5)),
+    "CST": timezone(timedelta(hours=-6)),
+    "CEST": timezone(timedelta(hours=2)),
+    "CET": timezone(timedelta(hours=1)),
+    "EDT": timezone(timedelta(hours=-4)),
+    "EST": timezone(timedelta(hours=-5)),
+    "GMT": timezone.utc,
+    "HST": timezone(timedelta(hours=-10)),
+    "IST": timezone(timedelta(hours=1)),
+    "MDT": timezone(timedelta(hours=-6)),
+    "MST": timezone(timedelta(hours=-7)),
+    "PDT": timezone(timedelta(hours=-7)),
+    "PST": timezone(timedelta(hours=-8)),
+    "UTC": timezone.utc,
 }
 
 WIKI_ICON_PATH = constants.MEDIA_PATH / "gw2wikiicons"
@@ -111,6 +135,12 @@ def _resolve_timezone(value: str, *, strict: bool = True) -> tzinfo:
                 LOGGER.warning(
                     "Timezone alias '%s' resolved to unknown zone '%s'", alias_key, alias_target
                 )
+        fallback_tz = TIMEZONE_ALIAS_FALLBACKS.get(alias_key)
+        if fallback_tz is not None:
+            LOGGER.debug(
+                "Using fixed-offset fallback for timezone alias '%s'", alias_key
+            )
+            return fallback_tz
         if strict:
             raise ValueError(f"Unknown timezone: {cleaned}") from None
         LOGGER.warning("Unknown timezone '%s', defaulting to UTC", cleaned)
