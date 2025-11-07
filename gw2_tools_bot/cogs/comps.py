@@ -21,7 +21,6 @@ from ..storage import CompClassConfig, CompConfig, GuildConfig
 
 LOGGER = logging.getLogger(__name__)
 
-ICON_SHEET_FILENAME = "comp_icons.png"
 WIKI_ICON_PATH = constants.MEDIA_PATH / "gw2wikiicons"
 SELECT_CUSTOM_ID_PREFIX = "gw2tools:comp:signup"
 
@@ -83,47 +82,33 @@ def _icon_path_for_class(name: str) -> Optional[str]:
     return None
 
 
-def _build_icon_sheet(classes: Sequence[CompClassConfig]) -> Optional[discord.File]:
-    if not classes:
+def _emoji_name_for_class(name: str) -> str:
+    base = re.sub(r"[^0-9a-zA-Z]", "", name.lower())
+    if not base:
+        base = "class"
+    trimmed = base[:25]
+    return f"gw2_{trimmed}"
+
+
+def _load_icon_bytes(name: str) -> Optional[bytes]:
+    icon_path = _icon_path_for_class(name)
+    if not icon_path:
+        return None
+    try:
+        with Image.open(icon_path) as source:
+            image = source.convert("RGBA")
+    except (FileNotFoundError, OSError):
         return None
 
-    icons: List[Image.Image] = []
-    for entry in classes:
-        icon_path = _icon_path_for_class(entry.name)
-        if not icon_path:
-            continue
-        try:
-            image = Image.open(icon_path).convert("RGBA")
-        except (FileNotFoundError, OSError):
-            continue
-        image.thumbnail((64, 64))
-        icons.append(image)
-
-    if not icons:
-        return None
-
-    columns = min(4, max(1, len(icons)))
-    rows = (len(icons) + columns - 1) // columns
-    width = columns * 70
-    height = rows * 70
-    sheet = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-
-    for index, icon in enumerate(icons):
-        row = index // columns
-        col = index % columns
-        x = col * 70 + (70 - icon.width) // 2
-        y = row * 70 + (70 - icon.height) // 2
-        sheet.alpha_composite(icon, (x, y))
-
+    image.thumbnail((96, 96))
     buffer = io.BytesIO()
-    sheet.save(buffer, format="PNG")
-    buffer.seek(0)
-    return discord.File(buffer, filename=ICON_SHEET_FILENAME)
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _format_signups(guild: discord.Guild, signups: Sequence[int]) -> str:
     if not signups:
-        return "No signups yet."
+        return "\u200b"
 
     lines: List[str] = []
     for user_id in signups[:15]:
@@ -189,15 +174,20 @@ class CompSignupSelect(discord.ui.Select):
         config = view.cog.bot.get_config(view.guild_id).comp
         _sanitize_signups(config)
         options: List[discord.SelectOption] = []
+        guild = view.cog.bot.get_guild(view.guild_id)
         for entry in config.classes:
             description = "Sign up for this class"
             if entry.required is not None:
                 description = f"{entry.required} needed"
+            emoji = None
+            if guild:
+                emoji = view.cog._get_class_emoji(guild, entry)
             options.append(
                 discord.SelectOption(
                     label=entry.name,
                     value=entry.name,
                     description=description,
+                    emoji=emoji,
                 )
             )
 
@@ -414,6 +404,7 @@ class ClassesModal(discord.ui.Modal):
         comp_config = self.config_view.config.comp
         comp_config.classes = classes
         _sanitize_signups(comp_config)
+        await self.config_view.cog.ensure_class_emojis(self.config_view.guild, comp_config)
         self.config_view.persist()
         await self.config_view.cog.refresh_signup_message(self.config_view.guild.id)
         await self.config_view.refresh_summary(interaction)
@@ -602,6 +593,72 @@ class CompCog(commands.GroupCog, name="comp"):
 
         await self.post_composition(guild.id, reset_signups=True)
 
+    async def ensure_class_emojis(self, guild: discord.Guild, comp_config: CompConfig) -> bool:
+        if not comp_config.classes:
+            return False
+
+        me = guild.me
+        permissions = getattr(me, "guild_permissions", None) if me else None
+        can_manage = False
+        if permissions is not None:
+            can_manage = bool(
+                getattr(permissions, "manage_emojis_and_stickers", False)
+                or getattr(permissions, "manage_emojis", False)
+            )
+
+        updated = False
+        for entry in comp_config.classes:
+            emoji = None
+            if entry.emoji_id:
+                emoji = discord.utils.get(guild.emojis, id=entry.emoji_id)
+                if emoji is None:
+                    entry.emoji_id = None
+                    updated = True
+
+            if emoji is not None:
+                continue
+
+            emoji_name = _emoji_name_for_class(entry.name)
+            emoji = discord.utils.get(guild.emojis, name=emoji_name)
+            if emoji:
+                if entry.emoji_id != emoji.id:
+                    entry.emoji_id = emoji.id
+                    updated = True
+                continue
+
+            if not can_manage:
+                continue
+
+            icon_bytes = _load_icon_bytes(entry.name)
+            if not icon_bytes:
+                continue
+
+            try:
+                emoji = await guild.create_custom_emoji(
+                    name=emoji_name,
+                    image=icon_bytes,
+                    reason="GW2 Tools composition class icon",
+                )
+            except discord.Forbidden:
+                LOGGER.warning("Missing permissions to create emojis in guild %s", guild.id)
+                break
+            except discord.HTTPException as exc:
+                LOGGER.warning("Failed to create emoji '%s' in guild %s: %s", emoji_name, guild.id, exc)
+                continue
+
+            entry.emoji_id = emoji.id
+            updated = True
+
+        return updated
+
+    def _get_class_emoji(self, guild: discord.Guild, entry: CompClassConfig) -> Optional[discord.Emoji]:
+        if entry.emoji_id:
+            emoji = discord.utils.get(guild.emojis, id=entry.emoji_id)
+            if emoji:
+                return emoji
+        emoji_name = _emoji_name_for_class(entry.name)
+        return discord.utils.get(guild.emojis, name=emoji_name)
+
     async def post_composition(self, guild_id: int, *, reset_signups: bool) -> None:
         guild = self.bot.get_guild(guild_id)
         if not guild:
@@ -627,7 +684,11 @@ class CompCog(commands.GroupCog, name="comp"):
         if reset_signups:
             comp_config.signups = {entry.name: [] for entry in comp_config.classes}
 
-        embed, file = self._build_comp_embed(guild, comp_config)
+        emoji_updated = await self.ensure_class_emojis(guild, comp_config)
+        if emoji_updated:
+            self.bot.save_config(guild_id, config)
+
+        embed = self._build_comp_embed(guild, comp_config)
         view = CompSignupView(self, guild_id)
 
         message = None
@@ -639,22 +700,14 @@ class CompCog(commands.GroupCog, name="comp"):
 
         if message is None:
             try:
-                if file:
-                    new_message = await channel.send(embed=embed, view=view, files=[file])
-                else:
-                    new_message = await channel.send(embed=embed, view=view)
+                new_message = await channel.send(embed=embed, view=view)
             except (discord.Forbidden, discord.HTTPException):
                 LOGGER.warning("Failed to send composition message in guild %s", guild_id)
                 return
             comp_config.message_id = new_message.id
         else:
             try:
-                edit_kwargs: Dict[str, object] = {"embed": embed, "view": view}
-                if file:
-                    edit_kwargs["attachments"] = [file]
-                else:
-                    edit_kwargs["attachments"] = []
-                await message.edit(**edit_kwargs)
+                await message.edit(embed=embed, view=view)
                 new_message = message
             except (discord.Forbidden, discord.HTTPException):
                 LOGGER.warning("Failed to update composition message in guild %s", guild_id)
@@ -689,15 +742,14 @@ class CompCog(commands.GroupCog, name="comp"):
             self.bot.save_config(guild_id, config)
             return
 
-        embed, file = self._build_comp_embed(guild, comp_config)
+        emoji_updated = await self.ensure_class_emojis(guild, comp_config)
+        if emoji_updated:
+            self.bot.save_config(guild_id, config)
+
+        embed = self._build_comp_embed(guild, comp_config)
         view = CompSignupView(self, guild_id)
-        kwargs: Dict[str, object] = {"embed": embed, "view": view}
-        if file:
-            kwargs["attachments"] = [file]
-        else:
-            kwargs["attachments"] = []
         try:
-            await message.edit(**kwargs)
+            await message.edit(embed=embed, view=view)
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning("Failed to refresh composition message in guild %s", guild_id)
             return
@@ -708,10 +760,15 @@ class CompCog(commands.GroupCog, name="comp"):
         comp_config = config.comp
         if comp_config.message_id:
             _sanitize_signups(comp_config)
+            guild = self.bot.get_guild(guild_id)
+            if guild:
+                emoji_updated = await self.ensure_class_emojis(guild, comp_config)
+                if emoji_updated:
+                    self.bot.save_config(guild_id, config)
             view = CompSignupView(self, guild_id)
             self.bot.add_view(view, message_id=comp_config.message_id)
 
-    def _build_comp_embed(self, guild: discord.Guild, comp_config: CompConfig) -> tuple[discord.Embed, Optional[discord.File]]:
+    def _build_comp_embed(self, guild: discord.Guild, comp_config: CompConfig) -> discord.Embed:
         embed = discord.Embed(title="Guild Composition Signup", color=discord.Color.dark_teal())
         if comp_config.post_day is not None and comp_config.post_time:
             embed.description = (
@@ -723,19 +780,18 @@ class CompCog(commands.GroupCog, name="comp"):
 
         for entry in comp_config.classes:
             signups = comp_config.signups.get(entry.name, [])
-            requirement = "Optional"
+            emoji = self._get_class_emoji(guild, entry)
+            prefix = f"{emoji} " if emoji else ""
+            current_total = len(signups)
             if entry.required is not None:
-                requirement = f"Needed: {entry.required}"
-            value = f"{requirement}\nTotal: {len(signups)}\n{_format_signups(guild, signups)}"
-            embed.add_field(name=entry.name, value=value, inline=True)
+                title = f"{prefix}{entry.name} ({current_total}/{entry.required})"
+            else:
+                title = f"{prefix}{entry.name} ({current_total})"
+            embed.add_field(name=title, value=_format_signups(guild, signups), inline=True)
 
         embed.set_footer(text="Select the dropdown again to remove yourself from a class.")
         embed.timestamp = discord.utils.utcnow()
-
-        file = _build_icon_sheet(comp_config.classes)
-        if file:
-            embed.set_image(url=f"attachment://{ICON_SHEET_FILENAME}")
-        return embed, file
+        return embed
 
 
 async def setup(bot: GW2ToolsBot) -> None:  # pragma: no cover - discord.py lifecycle
