@@ -10,6 +10,33 @@ from typing import Any, Dict, List, Optional
 
 ISOFORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
+ZERO_WIDTH_CHARS = {
+    "\u200b",  # zero width space
+    "\u200c",  # zero width non-joiner
+    "\u200d",  # zero width joiner
+    "\u2060",  # word joiner
+    "\ufeff",  # zero width no-break space / BOM
+}
+ZERO_WIDTH_TRANSLATION = {ord(char): None for char in ZERO_WIDTH_CHARS}
+
+
+def normalise_timezone(value: str) -> str:
+    """Return a cleaned timezone string suitable for IANA lookup."""
+
+    if value is None:
+        cleaned = ""
+    else:
+        cleaned = str(value)
+
+    # Remove zero width characters that sneak through Discord inputs
+    if ZERO_WIDTH_TRANSLATION:
+        cleaned = cleaned.translate(ZERO_WIDTH_TRANSLATION)
+
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return "UTC"
+    return cleaned
+
 
 def utcnow() -> str:
     """Return the current UTC timestamp formatted for storage."""
@@ -97,8 +124,7 @@ class CompConfig:
             post_days.append(post_day)
 
         timezone_value = payload.get("timezone", "UTC")
-        if isinstance(timezone_value, str):
-            timezone_value = timezone_value.strip() or "UTC"
+        timezone_value = normalise_timezone(timezone_value)
         return cls(
             channel_id=payload.get("channel_id"),
             post_days=post_days,
