@@ -22,6 +22,32 @@ from ..storage import CompClassConfig, CompConfig, GuildConfig, normalise_timezo
 
 LOGGER = logging.getLogger(__name__)
 
+# Common timezone abbreviations mapped to canonical IANA identifiers so users can
+# supply friendly labels without memorising long region names.
+TIMEZONE_ALIASES = {
+    "ACDT": "Australia/Adelaide",
+    "ACST": "Australia/Darwin",
+    "AKDT": "America/Anchorage",
+    "AKST": "America/Anchorage",
+    "AST": "America/Halifax",
+    "ADT": "America/Halifax",
+    "BST": "Europe/London",
+    "CDT": "America/Chicago",
+    "CST": "America/Chicago",
+    "CEST": "Europe/Paris",
+    "CET": "Europe/Paris",
+    "EDT": "America/New_York",
+    "EST": "America/New_York",
+    "GMT": "Etc/GMT",
+    "HST": "Pacific/Honolulu",
+    "IST": "Europe/Dublin",
+    "MDT": "America/Denver",
+    "MST": "America/Denver",
+    "PDT": "America/Los_Angeles",
+    "PST": "America/Los_Angeles",
+    "UTC": "UTC",
+}
+
 WIKI_ICON_PATH = constants.MEDIA_PATH / "gw2wikiicons"
 SELECT_CUSTOM_ID_PREFIX = "gw2tools:comp:signup"
 
@@ -71,11 +97,20 @@ def _format_day_names(values: Sequence[int]) -> str:
 
 def _resolve_timezone(value: str, *, strict: bool = True) -> tzinfo:
     cleaned = normalise_timezone(value)
-    if cleaned.upper() == "UTC":
+    alias_key = cleaned.upper()
+    if alias_key == "UTC":
         return timezone.utc
     try:
         return ZoneInfo(cleaned)
     except ZoneInfoNotFoundError:
+        alias_target = TIMEZONE_ALIASES.get(alias_key)
+        if alias_target and alias_target != cleaned:
+            try:
+                return ZoneInfo(alias_target)
+            except ZoneInfoNotFoundError:
+                LOGGER.warning(
+                    "Timezone alias '%s' resolved to unknown zone '%s'", alias_key, alias_target
+                )
         if strict:
             raise ValueError(f"Unknown timezone: {cleaned}") from None
         LOGGER.warning("Unknown timezone '%s', defaulting to UTC", cleaned)

@@ -70,7 +70,7 @@ The RSS poller wakes up every 10 minutes. When it finds new entries it posts a r
 
 Guild moderators can organise strike, raid, or WvW squad signups through the `/comp` command group. The workflow is designed so admins can configure everything in a single flow and players can register themselves without additional permissions.
 
-1. Run `/comp manage` to open the configuration view. Pick the channel where future posts should appear, set the day or comma-separated days and time the signup should be published, and choose whether the schedule repeats weekly or is a one-off announcement.
+1. Run `/comp manage` to open the configuration view. Pick the channel where future posts should appear, set the day or comma-separated days and time the signup should be published, and choose whether the schedule repeats weekly or is a one-off announcement. The timezone field accepts full IANA names such as `America/Los_Angeles` as well as common abbreviations like `PST` or `EST`.
 2. Click **Edit composition** to open the class editor modal. Add each profession or elite specialisation you want in the squad, optionally specifying the number of slots available. Class icons are sourced from `media/gw2wikiicons`, and the tool builds a grid of icons for the embed automatically.
 3. Use **Post preview** to review the generated embed before saving. When you confirm the settings the bot stores them in the guild configuration and schedules the next post.
 4. When the scheduled time arrives the bot publishes an embed containing each configured class as an inline field. A dropdown menu appears under the message so members can select the class they want to play; the bot tracks selections, prevents users from taking multiple slots, and updates the counts instantly.
