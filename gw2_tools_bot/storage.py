@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,13 @@ ZERO_WIDTH_CHARS = {
     "\u200b",  # zero width space
     "\u200c",  # zero width non-joiner
     "\u200d",  # zero width joiner
+    "\u200e",  # left-to-right mark
+    "\u200f",  # right-to-left mark
+    "\u202a",  # left-to-right embedding
+    "\u202b",  # right-to-left embedding
+    "\u202c",  # pop directional formatting
+    "\u202d",  # left-to-right override
+    "\u202e",  # right-to-left override
     "\u2060",  # word joiner
     "\ufeff",  # zero width no-break space / BOM
 }
@@ -32,7 +40,17 @@ def normalise_timezone(value: str) -> str:
     if ZERO_WIDTH_TRANSLATION:
         cleaned = cleaned.translate(ZERO_WIDTH_TRANSLATION)
 
+    # Drop any remaining control / format characters that break ZoneInfo lookup
+    cleaned = "".join(
+        ch for ch in cleaned if unicodedata.category(ch) not in {"Cf", "Cc"}
+    )
+
+    # Replace non-breaking spaces with normal spaces so stripping works reliably
+    cleaned = cleaned.replace("\u00a0", " ").replace("\u202f", " ")
+
     cleaned = cleaned.strip()
+    if "  " in cleaned:
+        cleaned = " ".join(cleaned.split())
     if not cleaned:
         return "UTC"
     return cleaned
@@ -233,6 +251,8 @@ class StorageManager:
         return GuildConfig(**payload)
 
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
+        if config.comp:
+            config.comp.timezone = normalise_timezone(config.comp.timezone)
         path = self._guild_path(guild_id) / "config.json"
         self._write_json(path, asdict(config))
 
