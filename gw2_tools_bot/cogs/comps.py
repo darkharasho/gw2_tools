@@ -5,9 +5,10 @@ import asyncio
 import calendar
 import io
 import logging
+import os
 import re
 from datetime import datetime, time as time_cls, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
 
 import discord
 from discord import app_commands
@@ -174,14 +175,11 @@ class CompSignupSelect(discord.ui.Select):
         config = view.cog.bot.get_config(view.guild_id).comp
         _sanitize_signups(config)
         options: List[discord.SelectOption] = []
-        guild = view.cog.bot.get_guild(view.guild_id)
         for entry in config.classes:
             description = "Sign up for this class"
             if entry.required is not None:
                 description = f"{entry.required} needed"
-            emoji = None
-            if guild:
-                emoji = view.cog._get_class_emoji(guild, entry)
+            emoji = view.cog._get_class_emoji(entry)
             options.append(
                 discord.SelectOption(
                     label=entry.name,
@@ -498,6 +496,13 @@ class CompCog(commands.GroupCog, name="comp"):
         self.bot = bot
         self.poster_loop.start()
         self._view_init_task: asyncio.Task[None] | None = None
+        env_home = os.getenv("GW2TOOLS_EMOJI_GUILD_ID")
+        try:
+            self.emoji_home_guild_id: Optional[int] = int(env_home) if env_home else None
+        except ValueError:
+            LOGGER.warning("Invalid GW2TOOLS_EMOJI_GUILD_ID value '%s'", env_home)
+            self.emoji_home_guild_id = None
+        self._emoji_creation_failures: Set[int] = set()
 
     async def cog_load(self) -> None:
         await super().cog_load()
@@ -593,71 +598,119 @@ class CompCog(commands.GroupCog, name="comp"):
 
         await self.post_composition(guild.id, reset_signups=True)
 
+    def _can_manage_emojis(self, guild: discord.Guild) -> bool:
+        me = guild.me
+        permissions = getattr(me, "guild_permissions", None) if me else None
+        if permissions is None:
+            return False
+        return bool(
+            getattr(permissions, "manage_emojis_and_stickers", False)
+            or getattr(permissions, "manage_emojis", False)
+        )
+
+    def _has_emoji_capacity(self, guild: discord.Guild) -> bool:
+        limit = getattr(guild, "emoji_limit", None)
+        if limit is None:
+            return True
+        try:
+            current = len(guild.emojis)
+        except Exception:  # pragma: no cover - defensive
+            return True
+        return current < limit
+
+    def _iter_emoji_host_guilds(self, primary: Optional[discord.Guild]) -> Iterable[discord.Guild]:
+        seen: Set[int] = set()
+        if self.emoji_home_guild_id:
+            home = self.bot.get_guild(self.emoji_home_guild_id)
+            if home is not None:
+                seen.add(home.id)
+                yield home
+        if primary is not None and primary.id not in seen:
+            seen.add(primary.id)
+            yield primary
+        for guild in self.bot.guilds:
+            if guild.id in seen:
+                continue
+            seen.add(guild.id)
+            yield guild
+
     async def ensure_class_emojis(self, guild: discord.Guild, comp_config: CompConfig) -> bool:
         if not comp_config.classes:
             return False
 
-        me = guild.me
-        permissions = getattr(me, "guild_permissions", None) if me else None
-        can_manage = False
-        if permissions is not None:
-            can_manage = bool(
-                getattr(permissions, "manage_emojis_and_stickers", False)
-                or getattr(permissions, "manage_emojis", False)
-            )
-
         updated = False
+        available_by_name = {emoji.name: emoji for emoji in self.bot.emojis if emoji.name}
+        hosts = list(self._iter_emoji_host_guilds(guild))
         for entry in comp_config.classes:
-            emoji = None
+            emoji_obj: Optional[discord.Emoji] = None
             if entry.emoji_id:
-                emoji = discord.utils.get(guild.emojis, id=entry.emoji_id)
-                if emoji is None:
+                emoji_obj = self.bot.get_emoji(entry.emoji_id)
+                if emoji_obj is None:
                     entry.emoji_id = None
                     updated = True
-
-            if emoji is not None:
+            if emoji_obj:
                 continue
 
             emoji_name = _emoji_name_for_class(entry.name)
-            emoji = discord.utils.get(guild.emojis, name=emoji_name)
-            if emoji:
-                if entry.emoji_id != emoji.id:
-                    entry.emoji_id = emoji.id
+            emoji_obj = available_by_name.get(emoji_name)
+            if emoji_obj:
+                if entry.emoji_id != emoji_obj.id:
+                    entry.emoji_id = emoji_obj.id
                     updated = True
-                continue
-
-            if not can_manage:
                 continue
 
             icon_bytes = _load_icon_bytes(entry.name)
             if not icon_bytes:
                 continue
 
-            try:
-                emoji = await guild.create_custom_emoji(
-                    name=emoji_name,
-                    image=icon_bytes,
-                    reason="GW2 Tools composition class icon",
-                )
-            except discord.Forbidden:
-                LOGGER.warning("Missing permissions to create emojis in guild %s", guild.id)
-                break
-            except discord.HTTPException as exc:
-                LOGGER.warning("Failed to create emoji '%s' in guild %s: %s", emoji_name, guild.id, exc)
-                continue
+            created = False
+            for host in hosts:
+                if host.id in self._emoji_creation_failures:
+                    continue
+                if not self._can_manage_emojis(host):
+                    continue
+                if not self._has_emoji_capacity(host):
+                    continue
+                try:
+                    new_emoji = await host.create_custom_emoji(
+                        name=emoji_name,
+                        image=icon_bytes,
+                        reason="GW2 Tools composition class icon",
+                    )
+                except discord.Forbidden:
+                    LOGGER.warning("Missing permissions to create emojis in guild %s", host.id)
+                    self._emoji_creation_failures.add(host.id)
+                    continue
+                except discord.HTTPException as exc:
+                    LOGGER.warning("Failed to create emoji '%s' in guild %s: %s", emoji_name, host.id, exc)
+                    continue
+                else:
+                    entry.emoji_id = new_emoji.id
+                    available_by_name[emoji_name] = new_emoji
+                    updated = True
+                    created = True
+                    break
 
-            entry.emoji_id = emoji.id
-            updated = True
+            if not created and entry.emoji_id is None:
+                LOGGER.debug(
+                    "No available emoji slot for class '%s' in guild %s", entry.name, guild.id
+                )
 
         return updated
 
-    def _get_class_emoji(self, guild: discord.Guild, entry: CompClassConfig) -> Optional[discord.Emoji]:
+    def _get_class_emoji(
+        self, entry: CompClassConfig
+    ) -> Optional[Union[discord.Emoji, discord.PartialEmoji]]:
         if entry.emoji_id:
-            emoji = discord.utils.get(guild.emojis, id=entry.emoji_id)
+            emoji = self.bot.get_emoji(entry.emoji_id)
             if emoji:
                 return emoji
+            return discord.PartialEmoji(name=_emoji_name_for_class(entry.name), id=entry.emoji_id)
         emoji_name = _emoji_name_for_class(entry.name)
-        return discord.utils.get(guild.emojis, name=emoji_name)
+        emoji = discord.utils.get(self.bot.emojis, name=emoji_name)
+        if emoji:
+            return emoji
+        return None
 
     async def post_composition(self, guild_id: int, *, reset_signups: bool) -> None:
         guild = self.bot.get_guild(guild_id)
@@ -780,7 +833,7 @@ class CompCog(commands.GroupCog, name="comp"):
 
         for entry in comp_config.classes:
             signups = comp_config.signups.get(entry.name, [])
-            emoji = self._get_class_emoji(guild, entry)
+            emoji = self._get_class_emoji(entry)
             prefix = f"{emoji} " if emoji else ""
             current_total = len(signups)
             if entry.required is not None:
