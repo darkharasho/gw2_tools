@@ -161,10 +161,17 @@ def _build_summary_embed(guild: discord.Guild, config: CompConfig) -> discord.Em
 
 
 class CompSignupView(discord.ui.View):
-    def __init__(self, cog: "CompCog", guild_id: int):
+    def __init__(
+        self,
+        cog: "CompCog",
+        guild_id: int,
+        *,
+        channel: Optional[discord.abc.GuildChannel] = None,
+    ):
         super().__init__(timeout=None)
         self.cog = cog
         self.guild_id = guild_id
+        self.channel = channel
         self.add_item(CompSignupSelect(self))
 
 
@@ -174,11 +181,19 @@ class CompSignupSelect(discord.ui.Select):
         config = view.cog.bot.get_config(view.guild_id).comp
         _sanitize_signups(config)
         options: List[discord.SelectOption] = []
+        guild = view.cog.bot.get_guild(view.guild_id)
+        channel = view.channel
+        if channel is None and guild and config.channel_id:
+            channel = guild.get_channel(config.channel_id)
         for entry in config.classes:
             description = "Sign up for this class"
             if entry.required is not None:
                 description = f"{entry.required} needed"
-            emoji = view.cog._get_class_emoji(entry)
+            emoji = None
+            if guild:
+                emoji = view.cog._get_class_emoji(
+                    entry, guild=guild, channel=channel
+                )
             options.append(
                 discord.SelectOption(
                     label=entry.name,
@@ -738,17 +753,38 @@ class CompCog(commands.GroupCog, name="comp"):
         return updated
 
     def _get_class_emoji(
-        self, entry: CompClassConfig
+        self,
+        entry: CompClassConfig,
+        *,
+        guild: Optional[discord.Guild],
+        channel: Optional[discord.abc.GuildChannel] = None,
     ) -> Optional[Union[discord.Emoji, discord.PartialEmoji]]:
+        if guild is None:
+            return None
+
+        allow_external = self._can_use_external_emojis(guild, channel)
         if entry.emoji_id:
             emoji = self.bot.get_emoji(entry.emoji_id)
+            if emoji and (emoji.guild_id == guild.id or allow_external):
+                return emoji
+            guild_emoji = discord.utils.get(guild.emojis, id=entry.emoji_id)
+            if guild_emoji:
+                return guild_emoji
+            if allow_external and entry.emoji_id:
+                return discord.PartialEmoji(
+                    name=_emoji_name_for_class(entry.name), id=entry.emoji_id
+                )
+            return None
+
+        emoji_name = _emoji_name_for_class(entry.name)
+        if allow_external:
+            emoji = discord.utils.get(self.bot.emojis, name=emoji_name)
             if emoji:
                 return emoji
-            return discord.PartialEmoji(name=_emoji_name_for_class(entry.name), id=entry.emoji_id)
-        emoji_name = _emoji_name_for_class(entry.name)
-        emoji = discord.utils.get(self.bot.emojis, name=emoji_name)
-        if emoji:
-            return emoji
+        else:
+            emoji = discord.utils.get(guild.emojis, name=emoji_name)
+            if emoji:
+                return emoji
         return None
 
     async def post_composition(self, guild_id: int, *, reset_signups: bool) -> None:
@@ -776,12 +812,14 @@ class CompCog(commands.GroupCog, name="comp"):
         if reset_signups:
             comp_config.signups = {entry.name: [] for entry in comp_config.classes}
 
-        emoji_updated = await self.ensure_class_emojis(guild, comp_config, channel=channel)
+        emoji_updated = await self.ensure_class_emojis(
+            guild, comp_config, channel=channel
+        )
         if emoji_updated:
             self.bot.save_config(guild_id, config)
 
-        embed = self._build_comp_embed(guild, comp_config)
-        view = CompSignupView(self, guild_id)
+        embed = self._build_comp_embed(guild, comp_config, channel=channel)
+        view = CompSignupView(self, guild_id, channel=channel)
 
         message = None
         if comp_config.message_id:
@@ -838,8 +876,8 @@ class CompCog(commands.GroupCog, name="comp"):
         if emoji_updated:
             self.bot.save_config(guild_id, config)
 
-        embed = self._build_comp_embed(guild, comp_config)
-        view = CompSignupView(self, guild_id)
+        embed = self._build_comp_embed(guild, comp_config, channel=channel)
+        view = CompSignupView(self, guild_id, channel=channel)
         try:
             await message.edit(embed=embed, view=view)
         except (discord.Forbidden, discord.HTTPException):
@@ -864,10 +902,19 @@ class CompCog(commands.GroupCog, name="comp"):
                 )
                 if emoji_updated:
                     self.bot.save_config(guild_id, config)
-            view = CompSignupView(self, guild_id)
+            view = CompSignupView(self, guild_id, channel=channel)
             self.bot.add_view(view, message_id=comp_config.message_id)
 
-    def _build_comp_embed(self, guild: discord.Guild, comp_config: CompConfig) -> discord.Embed:
+    def _build_comp_embed(
+        self,
+        guild: discord.Guild,
+        comp_config: CompConfig,
+        *,
+        channel: Optional[discord.abc.GuildChannel] = None,
+    ) -> discord.Embed:
+        if channel is None and comp_config.channel_id:
+            resolved_channel = guild.get_channel(comp_config.channel_id)
+            channel = resolved_channel
         embed = discord.Embed(title="Guild Composition Signup", color=discord.Color.dark_teal())
         if comp_config.post_day is not None and comp_config.post_time:
             embed.description = (
@@ -879,7 +926,7 @@ class CompCog(commands.GroupCog, name="comp"):
 
         for entry in comp_config.classes:
             signups = comp_config.signups.get(entry.name, [])
-            emoji = self._get_class_emoji(entry)
+            emoji = self._get_class_emoji(entry, guild=guild, channel=channel)
             prefix = f"{emoji} " if emoji else ""
             current_total = len(signups)
             if entry.required is not None:
