@@ -773,7 +773,9 @@ class CompCog(commands.GroupCog, name="comp"):
                 if last_local.date() == now.date() and last_local >= target_dt:
                     return
 
-        await self.post_composition(guild.id, reset_signups=True)
+        await self.post_composition(
+            guild.id, reset_signups=True, force_new_message=True
+        )
 
     def _can_manage_emojis(self, guild: discord.Guild) -> bool:
         me = guild.me
