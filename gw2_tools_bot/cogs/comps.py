@@ -82,6 +82,23 @@ def _resolve_timezone(value: str, *, strict: bool = True) -> tzinfo:
         return timezone.utc
 
 
+def _parse_iso_datetime(value: str) -> Optional[datetime]:
+    """Parse stored ISO timestamps, handling ``Z`` suffixes and naive values."""
+
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _icon_path_for_class(name: str) -> Optional[str]:
     candidates: List[str] = []
     stripped = re.sub(r"[^A-Za-z]", "", name)
@@ -682,12 +699,12 @@ class CompCog(commands.GroupCog, name="comp"):
 
         last_post_at = comp_config.last_post_at
         if last_post_at:
-            try:
-                last_post_dt = datetime.fromisoformat(last_post_at)
-            except ValueError:
-                last_post_dt = None
+            last_post_dt = _parse_iso_datetime(last_post_at)
             if last_post_dt is not None:
-                last_local = last_post_dt.astimezone(tz)
+                try:
+                    last_local = last_post_dt.astimezone(tz)
+                except ValueError:
+                    last_local = last_post_dt.replace(tzinfo=timezone.utc).astimezone(tz)
                 if last_local.date() == now.date() and last_local >= target_dt:
                     return
 
