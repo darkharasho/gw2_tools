@@ -7,7 +7,7 @@ import io
 import logging
 import os
 import re
-from datetime import datetime, time as time_cls, timezone
+from datetime import datetime, time as time_cls, timezone, tzinfo
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
 
 import discord
@@ -69,12 +69,17 @@ def _format_day_names(values: Sequence[int]) -> str:
     return ", ".join(names)
 
 
-def _resolve_timezone(value: str) -> ZoneInfo:
+def _resolve_timezone(value: str, *, strict: bool = True) -> tzinfo:
     cleaned = normalise_timezone(value)
+    if cleaned.upper() == "UTC":
+        return timezone.utc
     try:
         return ZoneInfo(cleaned)
     except ZoneInfoNotFoundError:
-        raise ValueError(f"Unknown timezone: {cleaned}") from None
+        if strict:
+            raise ValueError(f"Unknown timezone: {cleaned}") from None
+        LOGGER.warning("Unknown timezone '%s', defaulting to UTC", cleaned)
+        return timezone.utc
 
 
 def _icon_path_for_class(name: str) -> Optional[str]:
@@ -658,7 +663,7 @@ class CompCog(commands.GroupCog, name="comp"):
             return
 
         try:
-            tz = _resolve_timezone(comp_config.timezone or "UTC")
+            tz = _resolve_timezone(comp_config.timezone or "UTC", strict=False)
         except ValueError:
             LOGGER.warning("Invalid timezone '%s' for guild %s", comp_config.timezone, guild.id)
             return
