@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import constants
 from ..bot import GW2ToolsBot
-from ..storage import CompClassConfig, CompConfig, GuildConfig
+from ..storage import CompClassConfig, CompConfig, GuildConfig, normalise_timezone
 
 LOGGER = logging.getLogger(__name__)
 
@@ -70,9 +70,7 @@ def _format_day_names(values: Sequence[int]) -> str:
 
 
 def _resolve_timezone(value: str) -> ZoneInfo:
-    cleaned = (value or "").strip()
-    if not cleaned:
-        cleaned = "UTC"
+    cleaned = normalise_timezone(value)
     try:
         return ZoneInfo(cleaned)
     except ZoneInfoNotFoundError:
@@ -332,7 +330,7 @@ class ScheduleModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         day_value = str(self.day_input.value).strip()
         time_value = str(self.time_input.value).strip()
-        tz_value = str(self.tz_input.value).strip() or "UTC"
+        tz_value = normalise_timezone(self.tz_input.value)
 
         comp_config = self.config_view.config.comp
 
@@ -345,7 +343,7 @@ class ScheduleModal(discord.ui.Modal):
         if not day_value and not time_value:
             comp_config.post_days = []
             comp_config.post_time = None
-            comp_config.timezone = tz_value or "UTC"
+            comp_config.timezone = tz_value
             self.config_view.persist()
             await self.config_view.refresh_summary(interaction)
             await interaction.response.send_message("Posting schedule cleared.", ephemeral=True)
