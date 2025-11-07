@@ -401,7 +401,12 @@ class ClassesModal(discord.ui.Modal):
         comp_config = self.config_view.config.comp
         comp_config.classes = classes
         _sanitize_signups(comp_config)
-        await self.config_view.cog.ensure_class_emojis(self.config_view.guild, comp_config)
+        channel = None
+        if comp_config.channel_id:
+            channel = self.config_view.guild.get_channel(comp_config.channel_id)
+        await self.config_view.cog.ensure_class_emojis(
+            self.config_view.guild, comp_config, channel=channel
+        )
         self.config_view.persist()
         await self.config_view.cog.refresh_signup_message(self.config_view.guild.id)
         await self.config_view.refresh_summary(interaction)
@@ -633,26 +638,61 @@ class CompCog(commands.GroupCog, name="comp"):
             seen.add(guild.id)
             yield guild
 
-    async def ensure_class_emojis(self, guild: discord.Guild, comp_config: CompConfig) -> bool:
+    def _can_use_external_emojis(
+        self, guild: discord.Guild, channel: Optional[discord.abc.GuildChannel] = None
+    ) -> bool:
+        me = guild.me
+        if me is None:
+            return True
+        permissions: Optional[discord.Permissions]
+        try:
+            if channel is not None:
+                permissions = channel.permissions_for(me)
+            else:
+                permissions = getattr(me, "guild_permissions", None)
+        except Exception:  # pragma: no cover - defensive
+            permissions = None
+        if permissions is None:
+            return True
+        return getattr(permissions, "use_external_emojis", True)
+
+    async def ensure_class_emojis(
+        self,
+        guild: discord.Guild,
+        comp_config: CompConfig,
+        *,
+        channel: Optional[discord.abc.GuildChannel] = None,
+    ) -> bool:
         if not comp_config.classes:
             return False
 
         updated = False
-        available_by_name = {emoji.name: emoji for emoji in self.bot.emojis if emoji.name}
+        allow_external = self._can_use_external_emojis(guild, channel)
+        available_by_name: Dict[str, discord.Emoji] = {}
+        for emoji in self.bot.emojis:
+            if not emoji.name:
+                continue
+            if emoji.guild_id == guild.id or allow_external:
+                available_by_name[emoji.name] = emoji
         hosts = list(self._iter_emoji_host_guilds(guild))
+        if not allow_external:
+            hosts = [host for host in hosts if host.id == guild.id]
         for entry in comp_config.classes:
             emoji_obj: Optional[discord.Emoji] = None
             if entry.emoji_id:
                 emoji_obj = self.bot.get_emoji(entry.emoji_id)
-                if emoji_obj is None:
+                if emoji_obj is None or (
+                    emoji_obj.guild_id != guild.id and not allow_external
+                ):
                     entry.emoji_id = None
+                    emoji_obj = None
                     updated = True
             if emoji_obj:
                 continue
 
             emoji_name = _emoji_name_for_class(entry.name)
             emoji_obj = available_by_name.get(emoji_name)
-            if emoji_obj:
+            if emoji_obj and (emoji_obj.guild_id == guild.id or allow_external):
                 if entry.emoji_id != emoji_obj.id:
                     entry.emoji_id = emoji_obj.id
                     updated = True
@@ -736,7 +776,7 @@ class CompCog(commands.GroupCog, name="comp"):
         if reset_signups:
             comp_config.signups = {entry.name: [] for entry in comp_config.classes}
 
-        emoji_updated = await self.ensure_class_emojis(guild, comp_config)
+        emoji_updated = await self.ensure_class_emojis(guild, comp_config, channel=channel)
         if emoji_updated:
             self.bot.save_config(guild_id, config)
 
@@ -794,7 +834,7 @@ class CompCog(commands.GroupCog, name="comp"):
             self.bot.save_config(guild_id, config)
             return
 
-        emoji_updated = await self.ensure_class_emojis(guild, comp_config)
+        emoji_updated = await self.ensure_class_emojis(guild, comp_config, channel=channel)
         if emoji_updated:
             self.bot.save_config(guild_id, config)
 
@@ -814,7 +854,14 @@ class CompCog(commands.GroupCog, name="comp"):
             _sanitize_signups(comp_config)
             guild = self.bot.get_guild(guild_id)
             if guild:
-                emoji_updated = await self.ensure_class_emojis(guild, comp_config)
+                channel = (
+                    guild.get_channel(comp_config.channel_id)
+                    if comp_config.channel_id
+                    else None
+                )
+                emoji_updated = await self.ensure_class_emojis(
+                    guild, comp_config, channel=channel
+                )
                 if emoji_updated:
                     self.bot.save_config(guild_id, config)
             view = CompSignupView(self, guild_id)
