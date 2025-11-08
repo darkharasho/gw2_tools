@@ -1,15 +1,19 @@
 """Guild Wars 2 game update notes monitoring cog."""
 from __future__ import annotations
 
+import gzip
 import logging
 import os
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Sequence
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
+import brotli
 import discord
+import zstandard as zstd
 from bs4 import BeautifulSoup
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -32,10 +36,10 @@ DEFAULT_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    # Restrict accepted encodings to formats supported by the default aiohttp
-    # installation so we do not trigger zstandard responses that require
-    # optional dependencies to decode.
-    "Accept-Encoding": "gzip, deflate",
+    # Mirror a modern browser's accepted encodings so forum middleware does not
+    # flag the scraper as atypical.  We handle decompression manually to avoid
+    # optional runtime dependencies within aiohttp itself.
+    "Accept-Encoding": "gzip, deflate, br, zstd",
     "Referer": "https://en-forum.guildwars2.com/",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
@@ -90,6 +94,7 @@ class UpdateNotesCog(commands.Cog):
                 timeout=FETCH_TIMEOUT,
                 headers=DEFAULT_HEADERS,
                 cookie_jar=aiohttp.CookieJar(unsafe=True),
+                auto_decompress=False,
             )
             self._session_bootstrapped = False
         return self._session
@@ -166,16 +171,9 @@ class UpdateNotesCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _fetch_entries(self) -> List[PatchNotesEntry]:
-        await self._bootstrap_session()
-        session = await self._get_session()
-        try:
-            async with session.get(
-                DEV_TRACKER_URL,
-            ) as response:
-                response.raise_for_status()
-                html = await response.text()
-        except aiohttp.ClientError:
-            LOGGER.warning("Failed to fetch Guild Wars 2 dev tracker", exc_info=True)
+        html = await self._fetch_html(DEV_TRACKER_URL)
+        if html is None:
+            LOGGER.warning("Failed to fetch Guild Wars 2 dev tracker")
             return []
 
         soup = BeautifulSoup(html, "html.parser")
@@ -275,15 +273,8 @@ class UpdateNotesCog(commands.Cog):
         if not entry.comment_id:
             return None
 
-        await self._bootstrap_session()
-        session = await self._get_session()
-        try:
-            async with session.get(
-                entry.url,
-            ) as response:
-                response.raise_for_status()
-                html = await response.text()
-        except aiohttp.ClientError:
+        html = await self._fetch_html(entry.url)
+        if html is None:
             LOGGER.warning("Failed to fetch game update notes content from %s", entry.url)
             return None
 
@@ -348,6 +339,69 @@ class UpdateNotesCog(commands.Cog):
         if len(value) <= limit:
             return value
         return value[: limit - 1].rstrip() + "…"
+
+    async def _fetch_html(self, url: str, retry_on_forbidden: bool = True) -> Optional[str]:
+        await self._bootstrap_session()
+        session = await self._get_session()
+
+        try:
+            async with session.get(url) as response:
+                try:
+                    response.raise_for_status()
+                except aiohttp.ClientResponseError as error:
+                    if error.status == 403 and retry_on_forbidden:
+                        LOGGER.info("Dev tracker request forbidden, refreshing session")
+                        await self._reset_session()
+                        return await self._fetch_html(url, retry_on_forbidden=False)
+                    raise
+
+                return await self._read_response_text(response)
+        except aiohttp.ClientResponseError:
+            LOGGER.warning("Forbidden response received for %s", url, exc_info=True)
+        except aiohttp.ClientError:
+            LOGGER.warning("Failed to fetch %s", url, exc_info=True)
+        return None
+
+    async def _reset_session(self) -> None:
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
+        self._session_bootstrapped = False
+
+    async def _read_response_text(self, response: aiohttp.ClientResponse) -> str:
+        raw = await response.read()
+        encodings = [
+            encoding.strip().lower()
+            for encoding in response.headers.get("Content-Encoding", "").split(",")
+            if encoding.strip()
+        ]
+
+        data = raw
+        for encoding in encodings:
+            try:
+                data = self._decompress_bytes(data, encoding)
+            except Exception:  # pragma: no cover - defensive logging for unexpected encodings
+                LOGGER.warning("Failed to decompress %s encoded response", encoding, exc_info=True)
+                break
+
+        charset = response.charset or "utf-8"
+        return data.decode(charset, errors="replace")
+
+    def _decompress_bytes(self, data: bytes, encoding: str) -> bytes:
+        if encoding == "gzip":
+            return gzip.decompress(data)
+        if encoding == "deflate":
+            try:
+                return zlib.decompress(data)
+            except zlib.error:
+                return zlib.decompress(data, -zlib.MAX_WBITS)
+        if encoding == "br":
+            return brotli.decompress(data)
+        if encoding in {"zstd", "zstandard"}:
+            return zstd.ZstdDecompressor().decompress(data)
+        if encoding == "identity":
+            return data
+        raise ValueError(f"Unsupported content encoding: {encoding}")
 
     if not PRODUCTION:
 
