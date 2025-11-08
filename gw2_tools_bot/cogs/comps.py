@@ -319,6 +319,42 @@ class CompSignupSelect(discord.ui.Select):
                 current = name
                 break
 
+        entry = discord.utils.get(comp_config.classes, name=selection)
+        target_signups = comp_config.signups.setdefault(selection, [])
+
+        guild = interaction.guild or self.comp_view.cog.bot.get_guild(self.comp_view.guild_id)
+        channel = self.comp_view.channel
+        if channel is None and interaction.channel and isinstance(
+            interaction.channel, discord.abc.GuildChannel
+        ):
+            channel = interaction.channel
+        if channel is None and guild and comp_config.channel_id:
+            channel = guild.get_channel(comp_config.channel_id)
+        if guild is None and channel is not None:
+            guild = channel.guild
+
+        def resolve_emoji_text() -> str:
+            if entry and guild:
+                emoji_obj = self.comp_view.cog._get_class_emoji(entry, guild=guild, channel=channel)
+                if emoji_obj:
+                    return f"{emoji_obj} "
+            if selection == ABSENT_OPTION_NAME:
+                return f"{ABSENT_EMOJI} "
+            return ""
+
+        if (
+            selection != ABSENT_OPTION_NAME
+            and entry
+            and entry.required is not None
+            and user_id not in target_signups
+            and len(target_signups) >= entry.required
+        ):
+            emoji_text = resolve_emoji_text()
+            await interaction.response.send_message(
+                f"{emoji_text}**{selection}** is already full.", ephemeral=True
+            )
+            return
+
         removed = False
         if current == selection:
             comp_config.signups[selection].remove(user_id)
@@ -326,9 +362,8 @@ class CompSignupSelect(discord.ui.Select):
         else:
             if current:
                 comp_config.signups[current].remove(user_id)
-            signups = comp_config.signups.setdefault(selection, [])
-            if user_id not in signups:
-                signups.append(user_id)
+            if user_id not in target_signups:
+                target_signups.append(user_id)
 
         self.comp_view.cog.bot.save_config(self.comp_view.guild_id, config)
         await self.comp_view.cog.refresh_signup_message(self.comp_view.guild_id)
@@ -336,27 +371,7 @@ class CompSignupSelect(discord.ui.Select):
         if removed:
             await interaction.response.send_message(f"Removed you from **{selection}**.", ephemeral=True)
         else:
-            emoji_text = ""
-            entry = discord.utils.get(comp_config.classes, name=selection)
-            if entry:
-                guild = interaction.guild or self.comp_view.cog.bot.get_guild(self.comp_view.guild_id)
-                channel = self.comp_view.channel
-                if channel is None and interaction.channel and isinstance(
-                    interaction.channel, discord.abc.GuildChannel
-                ):
-                    channel = interaction.channel
-                if channel is None and guild and comp_config.channel_id:
-                    channel = guild.get_channel(comp_config.channel_id)
-                if guild is None and channel is not None:
-                    guild = channel.guild
-                if guild:
-                    emoji_obj = self.comp_view.cog._get_class_emoji(
-                        entry, guild=guild, channel=channel
-                    )
-                    if emoji_obj:
-                        emoji_text = f"{emoji_obj} "
-            elif selection == ABSENT_OPTION_NAME:
-                emoji_text = f"{ABSENT_EMOJI} "
+            emoji_text = resolve_emoji_text()
             message = f"Signed you up for {emoji_text}**{selection}**."
             await interaction.response.send_message(message, ephemeral=True)
 
