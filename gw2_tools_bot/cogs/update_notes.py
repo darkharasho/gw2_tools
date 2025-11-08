@@ -28,7 +28,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing helper
 LOGGER = logging.getLogger(__name__)
 
 
-DEV_TRACKER_URL = "https://en-forum.guildwars2.com/discover/6/"
+FORUM_BASE_URL = "https://en-forum.guildwars2.com/"
+DEV_TRACKER_URL = f"{FORUM_BASE_URL}discover/6/"
 EMBED_THUMBNAIL_URL = (
     "https://wiki.guildwars2.com/images/thumb/c/cd/"
     "Visions_of_Eternity_logo.png/244px-Visions_of_Eternity_logo.png"
@@ -38,6 +39,19 @@ SCRAPER_BROWSER_SIGNATURE = {
     "platform": "windows",
     "desktop": True,
     "mobile": False,
+}
+
+SCRAPER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Referer": "https://en-forum.guildwars2.com/",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
 }
 
 
@@ -85,6 +99,8 @@ class UpdateNotesCog(commands.Cog):
                     cloudscraper.create_scraper,
                     browser=SCRAPER_BROWSER_SIGNATURE,
                 )
+                self._scraper.headers.update(SCRAPER_HEADERS)
+                await asyncio.to_thread(self._prime_scraper, self._scraper)
             return self._scraper
 
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
@@ -419,8 +435,19 @@ class UpdateNotesCog(commands.Cog):
                 self._scraper = None
 
     @staticmethod
+    def _prime_scraper(scraper: "CloudScraper") -> None:
+        try:
+            response = scraper.get(FORUM_BASE_URL, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException:
+            LOGGER.debug("Unable to warm up dev tracker scraper", exc_info=True)
+
+    @staticmethod
     def _request_text(scraper: "CloudScraper", url: str) -> str:
         response = scraper.get(url, timeout=30)
+        if response.status_code == 403:
+            UpdateNotesCog._prime_scraper(scraper)
+            response = scraper.get(url, timeout=30)
         response.raise_for_status()
         response.encoding = response.encoding or "utf-8"
         return response.text
