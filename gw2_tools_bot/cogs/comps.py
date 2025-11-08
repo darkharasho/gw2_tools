@@ -70,6 +70,10 @@ TIMEZONE_ALIAS_FALLBACKS = {
     "UTC": timezone.utc,
 }
 
+# Track aliases that we have already warned about so we avoid spamming logs when
+# the same timezone is requested repeatedly.
+_MISSING_TIMEZONE_WARNINGS: set[str] = set()
+
 WIKI_ICON_PATH = constants.MEDIA_PATH / "gw2wikiicons"
 SELECT_CUSTOM_ID_PREFIX = "gw2tools:comp:signup"
 
@@ -130,9 +134,11 @@ def _resolve_timezone(value: str, *, strict: bool = True) -> tzinfo:
             try:
                 return ZoneInfo(alias_target)
             except ZoneInfoNotFoundError:
-                LOGGER.warning(
-                    "Timezone alias '%s' resolved to unknown zone '%s'", alias_key, alias_target
-                )
+                if alias_key not in _MISSING_TIMEZONE_WARNINGS:
+                    LOGGER.warning(
+                        "Timezone alias '%s' resolved to unknown zone '%s'", alias_key, alias_target
+                    )
+                    _MISSING_TIMEZONE_WARNINGS.add(alias_key)
         fallback_tz = TIMEZONE_ALIAS_FALLBACKS.get(alias_key)
         if fallback_tz is not None:
             LOGGER.debug(
