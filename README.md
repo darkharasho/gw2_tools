@@ -7,6 +7,7 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
 - **Per-guild configuration** – `/config` lets server administrators choose which roles can interact with the bot and which channel or forum should receive build posts. Settings can be delivered in a DM or as an ephemeral popup and persist independently for every guild.
 - **Build management workflows** – `/builds` supports adding, editing, and deleting Guild Wars 2 builds. Each record stores the profession or elite specialisation, URLs, chat codes, optional descriptions, and audit metadata about who made the latest changes.
 - **RSS announcements** – `/rss set` subscribes the guild to an RSS or Atom feed and posts new entries into the channel you specify. `/rss list` shows paginated embeds of the configured feeds, and `/rss delete` opens a dropdown so you can pick which subscription to remove without touching other guilds.
+- **Game update notes notifications** – Subscribe a channel to the official forum's dev tracker so the latest Guild Wars 2 patch notes appear automatically, complete with timestamps and summaries.
 - **Scheduled compositions** – `/comp manage` lets moderators schedule recurring composition posts, choose the destination channel, maintain dropdown signups that keep headcounts per profession in sync with reactions, and swap between saved presets for different activities.
 - **Rich embeds and forum integration** – Build posts automatically use the profession's colour palette and icon from `media/gw2classicons`, include the chat code in a code block, and update or create forum threads when the configured channel is a forum.
 - **Isolated storage** – Configuration and build data are written to `gw2_tools_bot/data/guild_<guild_id>/` so that each Discord server's information is kept separate.
@@ -54,6 +55,16 @@ media/
 ```
 
 Persistent data (configurations and builds) will appear under `gw2_tools_bot/data/` after you run the bot locally.
+
+## Posting game update notes automatically
+
+Keep your community informed about the latest Guild Wars 2 release notes without copying them manually. Moderators can enable automated notifications through the existing `/config` command:
+
+1. Run `/config` and open the configuration view for your guild.
+2. Use the **Game update notes** dropdown to pick the channel (text or announcement) that should receive patch notifications. Choose **Clear** if you want to disable the feature later.
+3. The bot polls the official forum dev tracker every 15 minutes. When new "Game Update Notes" posts appear, it sends a rich embed containing the headline, publication timestamp, and a condensed summary, falling back to a generic message if no summary is available.
+
+When you're developing locally or testing in staging (set the `PRODUCTION` environment variable to `false`), a helper slash command—`/update_notes_force_notification`—is registered to let authorised moderators trigger the most recent notification on demand. This is useful for verifying permissions or previewing the embed formatting without waiting for the scheduler.
 
 ## Managing RSS feed subscriptions
 

@@ -86,6 +86,34 @@ class ArcDpsChannelSelect(discord.ui.ChannelSelect):
         await interaction.response.send_message(message, ephemeral=True)
 
 
+class UpdateNotesChannelSelect(discord.ui.ChannelSelect):
+    def __init__(
+        self, view: "ConfigView", default_channel: Optional[discord.abc.GuildChannel]
+    ) -> None:
+        super().__init__(
+            placeholder="Select the channel for game update notes notifications",
+            channel_types=(
+                discord.ChannelType.text,
+                discord.ChannelType.news,
+            ),
+            min_values=0,
+            max_values=1,
+            default_values=[default_channel] if default_channel else None,
+        )
+        self.config_view = view
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values:
+            channel = self.values[0]
+            self.config_view.config.update_notes_channel_id = channel.id
+            message = f"Game update notes channel set to {channel.mention}."
+        else:
+            self.config_view.config.update_notes_channel_id = None
+            message = "Game update notes notifications disabled."
+        self.config_view.persist()
+        await interaction.response.send_message(message, ephemeral=True)
+
+
 class ResetRolesButton(discord.ui.Button["ConfigView"]):
     def __init__(self) -> None:
         super().__init__(style=discord.ButtonStyle.danger, label="Reset to admins")
@@ -119,10 +147,16 @@ class ConfigView(discord.ui.View):
         default_arcdps_channel = (
             guild.get_channel(config.arcdps_channel_id) if config.arcdps_channel_id else None
         )
+        default_update_notes_channel = (
+            guild.get_channel(config.update_notes_channel_id)
+            if config.update_notes_channel_id
+            else None
+        )
 
         self.add_item(ModeratorRoleSelect(self, default_roles))
         self.add_item(BuildChannelSelect(self, default_channel))
         self.add_item(ArcDpsChannelSelect(self, default_arcdps_channel))
+        self.add_item(UpdateNotesChannelSelect(self, default_update_notes_channel))
         self.add_item(ResetRolesButton())
         self.add_item(CloseButton())
 
