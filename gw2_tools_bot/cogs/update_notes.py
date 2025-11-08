@@ -257,26 +257,26 @@ class UpdateNotesCog(commands.Cog):
             or entry.summary
             or "New Guild Wars 2 game update notes are available."
         )
-        segments = self._chunk_text(description, 4000)
-        if not segments:
-            segments = ["New Guild Wars 2 game update notes are available."]
+        truncated_description = self._truncate(description, 4000)
+        if not truncated_description:
+            truncated_description = "New Guild Wars 2 game update notes are available."
 
         embeds: List[discord.Embed] = []
         parsed_timestamp = self._parse_timestamp(entry.published_at)
-        for index, segment in enumerate(segments):
-            title = entry.title if index == 0 else f"{entry.title} (cont. {index})"
-            embed = discord.Embed(
-                title=title,
-                url=entry.url,
-                description=segment,
-                color=self.EMBED_COLOR,
-            )
-            if index == 0:
-                if parsed_timestamp:
-                    embed.timestamp = parsed_timestamp
-                embed.set_thumbnail(url=EMBED_THUMBNAIL_URL)
+        embed = discord.Embed(
+            title=entry.title,
+            url=entry.url,
+            description=truncated_description,
+            color=self.EMBED_COLOR,
+        )
+        if parsed_timestamp:
+            embed.timestamp = parsed_timestamp
+        embed.set_thumbnail(url=EMBED_THUMBNAIL_URL)
+        if truncated_description != description:
+            embed.set_footer(text="Guild Wars 2 Forums – Game Update Notes (truncated)")
+        else:
             embed.set_footer(text="Guild Wars 2 Forums – Game Update Notes")
-            embeds.append(embed)
+        embeds.append(embed)
         return embeds
 
     def _parse_timestamp(self, value: Optional[str]) -> Optional[datetime]:
@@ -337,36 +337,6 @@ class UpdateNotesCog(commands.Cog):
             else:
                 adjusted.append(line)
         return "\n".join(adjusted)
-
-    def _chunk_text(self, text: str, limit: int, max_chunks: int = 10) -> List[str]:
-        remaining = text.strip()
-        if not remaining:
-            return []
-
-        chunks: List[str] = []
-        while remaining and len(chunks) < max_chunks:
-            if len(remaining) <= limit:
-                chunks.append(remaining)
-                break
-
-            cut = self._find_chunk_cut(remaining, limit)
-            chunk = remaining[:cut].rstrip()
-            if not chunk:
-                chunk = remaining[:limit].rstrip()
-            chunks.append(chunk)
-            remaining = remaining[cut:].lstrip("\n ")
-
-        if remaining and chunks:
-            chunks[-1] = self._truncate(chunks[-1], limit)
-
-        return chunks
-
-    def _find_chunk_cut(self, text: str, limit: int) -> int:
-        for separator in ("\n\n", "\n", " "):
-            index = text.rfind(separator, 0, limit)
-            if index > 0:
-                return index + len(separator)
-        return limit
 
     async def _fetch_url(self, url: str, retries: int = 3) -> Optional[str]:
         last_error: Optional[BaseException] = None
