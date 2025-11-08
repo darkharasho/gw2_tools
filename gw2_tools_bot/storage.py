@@ -155,6 +155,21 @@ class CompConfig:
             last_post_at=payload.get("last_post_at"),
         )
 
+    def copy(self, *, include_runtime_fields: bool = True) -> "CompConfig":
+        """Return a duplicate of this configuration.
+
+        When ``include_runtime_fields`` is ``False`` transient values such as
+        signups, stored message identifiers, and timestamps are stripped. This
+        is useful when persisting reusable presets.
+        """
+
+        payload = asdict(self)
+        if not include_runtime_fields:
+            payload["signups"] = {}
+            payload["message_id"] = None
+            payload["last_post_at"] = None
+        return CompConfig.from_dict(payload)
+
 
 @dataclass
 class GuildConfig:
@@ -164,10 +179,39 @@ class GuildConfig:
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
     comp: CompConfig = field(default_factory=CompConfig)
+    comp_active_preset: Optional[str] = None
 
     @classmethod
     def default(cls) -> "GuildConfig":
         return cls(moderator_role_ids=[], comp=CompConfig())
+
+
+@dataclass
+class CompPreset:
+    """Named reusable composition configuration."""
+
+    name: str
+    config: CompConfig
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "CompPreset":
+        raw_name = payload.get("name")
+        if not isinstance(raw_name, str):
+            raise ValueError("Preset name must be a string")
+        name = raw_name.strip()
+        if not name:
+            raise ValueError("Preset name cannot be empty")
+        config_payload = payload.get("config")
+        if not isinstance(config_payload, dict):
+            config_payload = {}
+        config = CompConfig.from_dict(config_payload)
+        return cls(name=name, config=config)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "config": asdict(self.config.copy(include_runtime_fields=False)),
+        }
 
 
 @dataclass
@@ -248,13 +292,43 @@ class StorageManager:
             payload["comp"] = CompConfig.from_dict(comp_payload)
         else:
             payload["comp"] = CompConfig()
+        active_preset = payload.get("comp_active_preset")
+        if isinstance(active_preset, str):
+            payload["comp_active_preset"] = active_preset.strip() or None
+        else:
+            payload["comp_active_preset"] = None
         return GuildConfig(**payload)
 
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
         if config.comp:
             config.comp.timezone = normalise_timezone(config.comp.timezone)
+        if config.comp_active_preset:
+            cleaned = str(config.comp_active_preset).strip()
+            config.comp_active_preset = cleaned or None
         path = self._guild_path(guild_id) / "config.json"
         self._write_json(path, asdict(config))
+
+    # ------------------------------------------------------------------
+    # Composition presets
+    # ------------------------------------------------------------------
+    def get_comp_presets(self, guild_id: int) -> List[CompPreset]:
+        path = self._guild_path(guild_id) / "comp_presets.json"
+        payload = self._read_json(path, [])
+        presets: List[CompPreset] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            try:
+                presets.append(CompPreset.from_dict(item))
+            except ValueError:
+                continue
+        presets.sort(key=lambda preset: preset.name.casefold())
+        return presets
+
+    def save_comp_presets(self, guild_id: int, presets: List[CompPreset]) -> None:
+        path = self._guild_path(guild_id) / "comp_presets.json"
+        serialized = [preset.to_dict() for preset in presets]
+        self._write_json(path, serialized)
 
     # ------------------------------------------------------------------
     # ArcDPS updates
