@@ -32,9 +32,21 @@ DEFAULT_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
     "Referer": "https://en-forum.guildwars2.com/",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Sec-GPC": "1",
+    "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
 }
 DEV_TRACKER_URL = "https://en-forum.guildwars2.com/discover/6/"
+FORUM_BASE_URL = "https://en-forum.guildwars2.com/"
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
@@ -60,6 +72,7 @@ class UpdateNotesCog(commands.Cog):
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
+        self._session_bootstrapped = False
         self._poll_updates.start()
 
     def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -70,8 +83,29 @@ class UpdateNotesCog(commands.Cog):
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self._session or self._session.closed:
-            self._session = aiohttp.ClientSession(timeout=FETCH_TIMEOUT)
+            self._session = aiohttp.ClientSession(
+                timeout=FETCH_TIMEOUT,
+                headers=DEFAULT_HEADERS,
+                cookie_jar=aiohttp.CookieJar(unsafe=True),
+            )
+            self._session_bootstrapped = False
         return self._session
+
+    async def _bootstrap_session(self) -> None:
+        session = await self._get_session()
+        if self._session_bootstrapped:
+            return
+
+        try:
+            async with session.get(FORUM_BASE_URL) as response:
+                # Some forum mitigations only lift after an initial navigation
+                # to the base domain which sets cookies and challenges the
+                # client.  Do not raise for status here so we can retry later
+                # if the warm-up request failed with a transient error.
+                if response.status < 400:
+                    self._session_bootstrapped = True
+        except aiohttp.ClientError:
+            LOGGER.debug("Forum session bootstrap failed", exc_info=True)
 
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poll_updates(self) -> None:
@@ -129,11 +163,11 @@ class UpdateNotesCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _fetch_entries(self) -> List[PatchNotesEntry]:
+        await self._bootstrap_session()
         session = await self._get_session()
         try:
             async with session.get(
                 DEV_TRACKER_URL,
-                headers=DEFAULT_HEADERS,
             ) as response:
                 response.raise_for_status()
                 html = await response.text()
@@ -238,11 +272,11 @@ class UpdateNotesCog(commands.Cog):
         if not entry.comment_id:
             return None
 
+        await self._bootstrap_session()
         session = await self._get_session()
         try:
             async with session.get(
                 entry.url,
-                headers=DEFAULT_HEADERS,
             ) as response:
                 response.raise_for_status()
                 html = await response.text()
