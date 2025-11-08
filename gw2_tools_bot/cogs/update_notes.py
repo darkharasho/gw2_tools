@@ -97,7 +97,9 @@ class UpdateNotesCog(commands.Cog):
                 )
                 continue
 
-            new_entries = self._resolve_new_entries(entries, status.last_entry_id)
+            new_entries = self._resolve_new_entries(
+                entries, status.last_entry_id, status.last_entry_published_at
+            )
             if not new_entries:
                 continue
 
@@ -106,7 +108,7 @@ class UpdateNotesCog(commands.Cog):
                 continue
 
             for entry in new_entries:
-                body = entry.summary or await self._fetch_entry_body(entry)
+                body = await self._fetch_entry_body(entry) or entry.summary
                 embeds = self._build_embeds(entry, body)
                 try:
                     for embed in embeds:
@@ -224,21 +226,30 @@ class UpdateNotesCog(commands.Cog):
         return parsed.astimezone(timezone.utc).isoformat()
 
     def _resolve_new_entries(
-        self, entries: Sequence[PatchNotesEntry], last_entry_id: Optional[str]
+        self,
+        entries: Sequence[PatchNotesEntry],
+        last_entry_id: Optional[str],
+        last_entry_published_at: Optional[str],
     ) -> List[PatchNotesEntry]:
         if not entries:
             return []
 
         collected: List[PatchNotesEntry] = []
-        for entry in reversed(entries):
+        cutoff = self._parse_timestamp(last_entry_published_at)
+        for entry in entries:
             if last_entry_id and (
                 entry.entry_id == last_entry_id
                 or last_entry_id in entry.legacy_entry_ids
             ):
-                collected.clear()
-                continue
+                break
+
+            entry_timestamp = self._parse_timestamp(entry.published_at)
+            if cutoff and entry_timestamp and entry_timestamp <= cutoff:
+                break
+
             collected.append(entry)
-        return collected
+
+        return list(reversed(collected))
 
     async def _resolve_channel(
         self, guild: discord.Guild, channel_id: int
@@ -436,7 +447,7 @@ class UpdateNotesCog(commands.Cog):
                 return
 
             entry = entries[0]
-            body = entry.summary or await self._fetch_entry_body(entry)
+            body = await self._fetch_entry_body(entry) or entry.summary
             embeds = self._build_embeds(entry, body)
             for embed in embeds:
                 await channel.send(embed=embed)
