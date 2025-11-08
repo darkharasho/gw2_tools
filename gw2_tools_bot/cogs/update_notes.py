@@ -7,14 +7,13 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Sequence, TYPE_CHECKING
-from urllib.parse import parse_qs, urlparse
+from email.utils import parsedate_to_datetime
+from typing import List, Optional, Sequence
+import xml.etree.ElementTree as ET
 
-import cloudscraper
 import discord
 import requests
 from bs4 import BeautifulSoup
-from cloudscraper.exceptions import CloudflareChallengeError
 from discord import app_commands
 from discord.ext import commands, tasks
 from markdownify import markdownify as html_to_markdown
@@ -22,50 +21,19 @@ from markdownify import markdownify as html_to_markdown
 from ..bot import GW2ToolsBot
 from ..storage import UpdateNotesStatus
 
-if TYPE_CHECKING:  # pragma: no cover - typing helper
-    from cloudscraper import CloudScraper
-
 LOGGER = logging.getLogger(__name__)
 
 
-FORUM_BASE_URL = "https://en-forum.guildwars2.com/"
-DEV_TRACKER_URL = f"{FORUM_BASE_URL}discover/6/"
+GAME_UPDATE_NOTES_FEED_URL = (
+    "https://en-forum.guildwars2.com/forums/forum/6-game-update-notes.xml/"
+)
 EMBED_THUMBNAIL_URL = (
     "https://wiki.guildwars2.com/images/thumb/c/cd/"
     "Visions_of_Eternity_logo.png/244px-Visions_of_Eternity_logo.png"
 )
-SCRAPER_BROWSER_SIGNATURE = {
-    "browser": "chrome",
-    "platform": "windows",
-    "desktop": True,
-    "mobile": False,
-}
-
-SCRAPER_DELAY_SECONDS = 10
-
-SCRAPER_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
+REQUEST_HEADERS = {
+    "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-    "Pragma": "no-cache",
-    "Priority": "u=0, i",
-    "Referer": FORUM_BASE_URL,
-    "Sec-CH-UA": '"Not A(Brand";v="99", "Google Chrome";v="124", "Chromium";v="124"',
-    "Sec-CH-UA-Arch": '"x86"',
-    "Sec-CH-UA-Bitness": '"64"',
-    "Sec-CH-UA-Full-Version": '"124.0.6367.45"',
-    "Sec-CH-UA-Full-Version-List": '"Not A(Brand";v="99.0.0.0", "Google Chrome";v="124.0.6367.45", "Chromium";v="124.0.6367.45"',
-    "Sec-CH-UA-Model": '""',
-    "Sec-CH-UA-Mobile": "?0",
-    "Sec-CH-UA-Platform": '"Windows"',
-    "Sec-CH-UA-Platform-Version": '"15.0.0"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -75,7 +43,7 @@ SCRAPER_HEADERS = {
 
 @dataclass
 class PatchNotesEntry:
-    """Structured representation of a dev tracker entry."""
+    """Structured representation of a game update notes entry."""
 
     entry_id: str
     title: str
@@ -86,7 +54,7 @@ class PatchNotesEntry:
 
 
 class UpdateNotesCog(commands.Cog):
-    """Poll the official forum dev tracker for new game update notes."""
+    """Poll the official forum feed for new game update notes."""
 
     CHECK_INTERVAL_MINUTES = 15
     EMBED_COLOR = discord.Color.dark_gold()
@@ -94,33 +62,13 @@ class UpdateNotesCog(commands.Cog):
 
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
-        self._scraper: Optional["CloudScraper"] = None
-        self._scraper_lock = asyncio.Lock()
+        self._session = requests.Session()
+        self._session.headers.update(REQUEST_HEADERS)
         self._poll_updates.start()
 
     def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         self._poll_updates.cancel()
-        if self._scraper is not None:
-            self.bot.loop.create_task(self._close_scraper())
-        self._scraper = None
-
-    async def _close_scraper(self) -> None:
-        async with self._scraper_lock:
-            if self._scraper is not None:
-                await asyncio.to_thread(self._scraper.close)
-                self._scraper = None
-
-    async def _get_scraper(self) -> "CloudScraper":
-        async with self._scraper_lock:
-            if self._scraper is None:
-                self._scraper = await asyncio.to_thread(
-                    cloudscraper.create_scraper,
-                    delay=SCRAPER_DELAY_SECONDS,
-                    browser=SCRAPER_BROWSER_SIGNATURE,
-                )
-                self._scraper.headers.update(SCRAPER_HEADERS)
-                await asyncio.to_thread(self._prime_scraper, self._scraper)
-            return self._scraper
+        self._session.close()
 
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poll_updates(self) -> None:
@@ -158,7 +106,7 @@ class UpdateNotesCog(commands.Cog):
                 continue
 
             for entry in new_entries:
-                body = await self._fetch_entry_body(entry)
+                body = entry.summary or await self._fetch_entry_body(entry)
                 embeds = self._build_embeds(entry, body)
                 try:
                     if len(embeds) == 1:
@@ -181,65 +129,70 @@ class UpdateNotesCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _fetch_entries(self) -> List[PatchNotesEntry]:
-        html = await self._fetch_html(DEV_TRACKER_URL)
-        if html is None:
-            LOGGER.warning("Failed to fetch Guild Wars 2 dev tracker")
+        feed = await self._fetch_url(GAME_UPDATE_NOTES_FEED_URL)
+        if feed is None:
+            LOGGER.warning("Failed to fetch Guild Wars 2 game update notes feed")
             return []
 
-        soup = BeautifulSoup(html, "html.parser")
+        try:
+            document = ET.fromstring(feed)
+        except ET.ParseError:
+            LOGGER.warning("Failed to parse Guild Wars 2 game update notes feed", exc_info=True)
+            return []
+
         entries: List[PatchNotesEntry] = []
-        for item in soup.select("li.ipsStreamItem"):
-            entry = self._parse_entry(item)
-            if not entry:
-                continue
-            entries.append(entry)
+        for item in document.findall(".//item"):
+            entry = self._parse_feed_entry(item)
+            if entry:
+                entries.append(entry)
         return entries
 
-    def _parse_entry(self, item) -> Optional[PatchNotesEntry]:
-        title_anchor = item.select_one(".ipsStreamItem_title a")
-        if not title_anchor:
+    def _parse_feed_entry(self, item: ET.Element) -> Optional[PatchNotesEntry]:
+        title = self._get_child_text(item, "title")
+        if not title:
             return None
 
-        title = title_anchor.get_text(strip=True)
-        if "game update notes" not in title.lower():
-            return None
-
-        url = title_anchor.get("href")
+        url = self._get_child_text(item, "link")
         if not url:
             return None
 
-        entry_id, comment_id = self._extract_entry_identifier(url, item)
-        published_at = None
-        timestamp = item.select_one("time")
-        if timestamp and timestamp.get("datetime"):
-            published_at = timestamp.get("datetime")
-
-        summary_element = item.select_one(".ipsStreamItem_snippet")
-        summary = self._normalise_text(
-            summary_element.get_text("\n", strip=True) if summary_element else ""
-        )
+        guid = self._get_child_text(item, "guid") or url
+        description_html = self._get_child_text(item, "description")
+        summary = self._render_feed_description(description_html)
+        published_at = self._normalise_pub_date(self._get_child_text(item, "pubDate"))
 
         return PatchNotesEntry(
-            entry_id=entry_id,
-            title=title,
+            entry_id=guid,
+            title=title.strip(),
             url=url,
-            comment_id=comment_id,
+            comment_id=None,
             published_at=published_at,
             summary=summary,
         )
 
-    def _extract_entry_identifier(
-        self, url: str, item
-    ) -> tuple[str, Optional[str]]:
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
-        comment_values = query.get("comment")
-        comment_id: Optional[str] = None
-        if comment_values:
-            comment_id = str(comment_values[0])
+    def _get_child_text(self, element: ET.Element, tag: str) -> str:
+        child = element.find(tag)
+        if child is None or child.text is None:
+            return ""
+        return child.text.strip()
 
-        entry_id = comment_id or item.get("data-timestamp") or url
-        return str(entry_id), comment_id
+    def _render_feed_description(self, description_html: str) -> str:
+        if not description_html:
+            return ""
+        fragment = BeautifulSoup(description_html, "html.parser")
+        return self._render_comment_content(fragment)
+
+    def _normalise_pub_date(self, value: str) -> Optional[str]:
+        if not value:
+            return None
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            LOGGER.debug("Unable to parse feed timestamp: %s", value)
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
 
     def _resolve_new_entries(
         self, entries: Sequence[PatchNotesEntry], last_entry_id: Optional[str]
@@ -283,7 +236,7 @@ class UpdateNotesCog(commands.Cog):
         if not entry.comment_id:
             return None
 
-        html = await self._fetch_html(entry.url)
+        html = await self._fetch_url(entry.url)
         if html is None:
             LOGGER.warning("Failed to fetch game update notes content from %s", entry.url)
             return None
@@ -324,7 +277,7 @@ class UpdateNotesCog(commands.Cog):
                 if parsed_timestamp:
                     embed.timestamp = parsed_timestamp
                 embed.set_thumbnail(url=EMBED_THUMBNAIL_URL)
-            embed.set_footer(text="Guild Wars 2 Forums – Dev Tracker")
+            embed.set_footer(text="Guild Wars 2 Forums – Game Update Notes")
             embeds.append(embed)
         return embeds
 
@@ -337,25 +290,11 @@ class UpdateNotesCog(commands.Cog):
         try:
             parsed = datetime.fromisoformat(candidate)
         except ValueError:
-            LOGGER.debug("Unable to parse dev tracker timestamp: %s", value)
+            LOGGER.debug("Unable to parse game update notes timestamp: %s", value)
             return None
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed
-
-    def _normalise_text(self, text: str) -> str:
-        cleaned_lines: List[str] = []
-        previous_blank = True
-        for raw_line in text.replace("\r", "\n").split("\n"):
-            line = " ".join(raw_line.replace("\xa0", " ").split())
-            if not line:
-                if not previous_blank:
-                    cleaned_lines.append("")
-                previous_blank = True
-                continue
-            cleaned_lines.append(line)
-            previous_blank = False
-        return "\n".join(cleaned_lines).strip()
 
     def _truncate(self, value: str, limit: int) -> str:
         if len(value) <= limit:
@@ -431,45 +370,28 @@ class UpdateNotesCog(commands.Cog):
                 return index + len(separator)
         return limit
 
-    async def _fetch_html(self, url: str, retries: int = 3) -> Optional[str]:
+    async def _fetch_url(self, url: str, retries: int = 3) -> Optional[str]:
         last_error: Optional[BaseException] = None
         for attempt in range(retries):
-            scraper = await self._get_scraper()
             try:
-                return await asyncio.to_thread(self._request_text, scraper, url)
-            except (CloudflareChallengeError, requests.RequestException) as error:
+                response = await asyncio.to_thread(self._session.get, url, timeout=30)
+                response.raise_for_status()
+                response.encoding = response.encoding or "utf-8"
+                return response.text
+            except requests.RequestException as error:
                 last_error = error
-                LOGGER.warning("Failed to fetch %s (attempt %s/%s)", url, attempt + 1, retries, exc_info=True)
-                await self._refresh_scraper()
+                LOGGER.warning(
+                    "Failed to fetch %s (attempt %s/%s)",
+                    url,
+                    attempt + 1,
+                    retries,
+                    exc_info=True,
+                )
                 if attempt + 1 < retries:
-                    await asyncio.sleep(min(5, 2 ** attempt))
+                    await asyncio.sleep(min(5, 2**attempt))
         if last_error is not None:
             LOGGER.warning("Giving up on %s after repeated failures", url, exc_info=last_error)
         return None
-
-    async def _refresh_scraper(self) -> None:
-        async with self._scraper_lock:
-            if self._scraper is not None:
-                await asyncio.to_thread(self._scraper.close)
-                self._scraper = None
-
-    @staticmethod
-    def _prime_scraper(scraper: "CloudScraper") -> None:
-        try:
-            response = scraper.get(FORUM_BASE_URL, timeout=30)
-            response.raise_for_status()
-        except requests.RequestException:
-            LOGGER.debug("Unable to warm up dev tracker scraper", exc_info=True)
-
-    @staticmethod
-    def _request_text(scraper: "CloudScraper", url: str) -> str:
-        response = scraper.get(url, timeout=30)
-        if response.status_code == 403:
-            UpdateNotesCog._prime_scraper(scraper)
-            response = scraper.get(url, timeout=30)
-        response.raise_for_status()
-        response.encoding = response.encoding or "utf-8"
-        return response.text
 
     if not PRODUCTION:
 
@@ -512,7 +434,7 @@ class UpdateNotesCog(commands.Cog):
                 return
 
             entry = entries[0]
-            body = await self._fetch_entry_body(entry)
+            body = entry.summary or await self._fetch_entry_body(entry)
             embeds = self._build_embeds(entry, body)
             if len(embeds) == 1:
                 await channel.send(embed=embeds[0])
