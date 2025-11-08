@@ -2,13 +2,58 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+import unicodedata
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
 ISOFORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+ZERO_WIDTH_CHARS = {
+    "\u200b",  # zero width space
+    "\u200c",  # zero width non-joiner
+    "\u200d",  # zero width joiner
+    "\u200e",  # left-to-right mark
+    "\u200f",  # right-to-left mark
+    "\u202a",  # left-to-right embedding
+    "\u202b",  # right-to-left embedding
+    "\u202c",  # pop directional formatting
+    "\u202d",  # left-to-right override
+    "\u202e",  # right-to-left override
+    "\u2060",  # word joiner
+    "\ufeff",  # zero width no-break space / BOM
+}
+ZERO_WIDTH_TRANSLATION = {ord(char): None for char in ZERO_WIDTH_CHARS}
+
+
+def normalise_timezone(value: str) -> str:
+    """Return a cleaned timezone string suitable for IANA lookup."""
+
+    if value is None:
+        cleaned = ""
+    else:
+        cleaned = str(value)
+
+    # Remove zero width characters that sneak through Discord inputs
+    if ZERO_WIDTH_TRANSLATION:
+        cleaned = cleaned.translate(ZERO_WIDTH_TRANSLATION)
+
+    # Drop any remaining control / format characters that break ZoneInfo lookup
+    cleaned = "".join(
+        ch for ch in cleaned if unicodedata.category(ch) not in {"Cf", "Cc"}
+    )
+
+    # Replace non-breaking spaces with normal spaces so stripping works reliably
+    cleaned = cleaned.replace("\u00a0", " ").replace("\u202f", " ")
+
+    cleaned = cleaned.strip()
+    if "  " in cleaned:
+        cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        return "UTC"
+    return cleaned
 
 
 def utcnow() -> str:
@@ -18,16 +63,111 @@ def utcnow() -> str:
 
 
 @dataclass
+class CompClassConfig:
+    """Configuration for an individual class within a scheduled composition."""
+
+    name: str
+    required: Optional[int] = None
+    emoji_id: Optional[int] = None
+
+
+@dataclass
+class CompConfig:
+    """Composition scheduling and signup configuration."""
+
+    channel_id: Optional[int] = None
+    post_days: List[int] = field(default_factory=list)
+    post_time: Optional[str] = None
+    timezone: str = "UTC"
+    overview: str = ""
+    classes: List[CompClassConfig] = field(default_factory=list)
+    signups: Dict[str, List[int]] = field(default_factory=dict)
+    message_id: Optional[int] = None
+    last_post_at: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "CompConfig":
+        classes_payload = payload.get("classes", []) or []
+        classes: List[CompClassConfig] = []
+        for item in classes_payload:
+            if not isinstance(item, dict):
+                continue
+            try:
+                classes.append(CompClassConfig(**item))
+            except TypeError:
+                continue
+
+        signups_payload = payload.get("signups", {}) or {}
+        signups: Dict[str, List[int]] = {}
+        for class_name, values in signups_payload.items():
+            if not isinstance(class_name, str) or not isinstance(values, list):
+                continue
+            valid: List[int] = []
+            for raw in values:
+                if isinstance(raw, int):
+                    valid.append(raw)
+                elif isinstance(raw, str):
+                    try:
+                        valid.append(int(raw))
+                    except ValueError:
+                        continue
+            signups[class_name] = valid
+
+        post_days_payload = payload.get("post_days")
+        post_days: List[int] = []
+        if isinstance(post_days_payload, list):
+            for raw in post_days_payload:
+                candidate: Optional[int] = None
+                if isinstance(raw, int):
+                    candidate = raw
+                elif isinstance(raw, str):
+                    try:
+                        candidate = int(raw)
+                    except ValueError:
+                        candidate = None
+                if candidate is None:
+                    continue
+                if 0 <= candidate <= 6 and candidate not in post_days:
+                    post_days.append(candidate)
+
+        post_day = payload.get("post_day")
+        if post_days:
+            post_day = None
+        elif isinstance(post_day, str):
+            try:
+                post_day = int(post_day)
+            except ValueError:
+                post_day = None
+        if isinstance(post_day, int) and 0 <= post_day <= 6:
+            post_days.append(post_day)
+
+        timezone_value = payload.get("timezone", "UTC")
+        timezone_value = normalise_timezone(timezone_value)
+        return cls(
+            channel_id=payload.get("channel_id"),
+            post_days=post_days,
+            post_time=payload.get("post_time"),
+            timezone=timezone_value,
+            overview=payload.get("overview", ""),
+            classes=classes,
+            signups=signups,
+            message_id=payload.get("message_id"),
+            last_post_at=payload.get("last_post_at"),
+        )
+
+
+@dataclass
 class GuildConfig:
     """Server-specific configuration."""
 
     moderator_role_ids: List[int]
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
+    comp: CompConfig = field(default_factory=CompConfig)
 
     @classmethod
     def default(cls) -> "GuildConfig":
-        return cls(moderator_role_ids=[])
+        return cls(moderator_role_ids=[], comp=CompConfig())
 
 
 @dataclass
@@ -102,9 +242,17 @@ class StorageManager:
         payload = self._read_json(path, None)
         if not payload:
             return GuildConfig.default()
+        payload = dict(payload)
+        comp_payload = payload.get("comp")
+        if isinstance(comp_payload, dict):
+            payload["comp"] = CompConfig.from_dict(comp_payload)
+        else:
+            payload["comp"] = CompConfig()
         return GuildConfig(**payload)
 
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
+        if config.comp:
+            config.comp.timezone = normalise_timezone(config.comp.timezone)
         path = self._guild_path(guild_id) / "config.json"
         self._write_json(path, asdict(config))
 
