@@ -5,6 +5,5 @@ feedparser>=6.0.10
 Pillow>=10.3.0
 brotli>=1.1.0
 zstandard>=0.22.0
-cloudscraper>=1.2.71
 requests>=2.31.0
 markdownify>=0.13.1
