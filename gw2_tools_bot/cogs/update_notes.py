@@ -1,25 +1,23 @@
 """Guild Wars 2 game update notes monitoring cog."""
 from __future__ import annotations
 
-import gzip
+import asyncio
 import logging
 import os
-import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Sequence
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
-import brotli
 import discord
-import zstandard as zstd
 from bs4 import BeautifulSoup
 from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..storage import UpdateNotesStatus
+from ..http_utils import read_response_text
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,12 +32,15 @@ USER_AGENT = (
 )
 DEFAULT_HEADERS = {
     "User-Agent": USER_AGENT,
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"\
+        "image/avif,image/webp,image/apng,*/*;q=0.8,"\
+        "application/signed-exchange;v=b3;q=0.7"
+    ),
     "Accept-Language": "en-US,en;q=0.9",
-    # Mirror a modern browser's accepted encodings so forum middleware does not
-    # flag the scraper as atypical.  We handle decompression manually to avoid
-    # optional runtime dependencies within aiohttp itself.
     "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
     "Referer": "https://en-forum.guildwars2.com/",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
@@ -52,6 +53,25 @@ DEFAULT_HEADERS = {
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
 }
+
+HEADER_VARIANTS = [
+    DEFAULT_HEADERS,
+    {
+        **DEFAULT_HEADERS,
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Fetch-Site": "none",
+    },
+    {
+        "User-Agent": USER_AGENT,
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://en-forum.guildwars2.com/",
+        "Connection": "keep-alive",
+    },
+]
 DEV_TRACKER_URL = "https://en-forum.guildwars2.com/discover/6/"
 FORUM_BASE_URL = "https://en-forum.guildwars2.com/"
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
@@ -80,6 +100,7 @@ class UpdateNotesCog(commands.Cog):
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_bootstrapped = False
+        self._header_variant_index = 0
         self._poll_updates.start()
 
     def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -90,9 +111,10 @@ class UpdateNotesCog(commands.Cog):
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self._session or self._session.closed:
+            headers = HEADER_VARIANTS[self._header_variant_index].copy()
             self._session = aiohttp.ClientSession(
                 timeout=FETCH_TIMEOUT,
-                headers=DEFAULT_HEADERS,
+                headers=headers,
                 cookie_jar=aiohttp.CookieJar(unsafe=True),
                 auto_decompress=False,
             )
@@ -340,68 +362,39 @@ class UpdateNotesCog(commands.Cog):
             return value
         return value[: limit - 1].rstrip() + "…"
 
-    async def _fetch_html(self, url: str, retry_on_forbidden: bool = True) -> Optional[str]:
+    async def _fetch_html(self, url: str, retries: Optional[int] = None) -> Optional[str]:
         await self._bootstrap_session()
         session = await self._get_session()
+
+        if retries is None:
+            retries = len(HEADER_VARIANTS)
 
         try:
             async with session.get(url) as response:
                 try:
                     response.raise_for_status()
                 except aiohttp.ClientResponseError as error:
-                    if error.status == 403 and retry_on_forbidden:
+                    if error.status == 403 and retries:
                         LOGGER.info("Dev tracker request forbidden, refreshing session")
-                        await self._reset_session()
-                        return await self._fetch_html(url, retry_on_forbidden=False)
+                        await self._reset_session(advance_variant=True)
+                        await asyncio.sleep(1)
+                        return await self._fetch_html(url, retries=retries - 1)
                     raise
 
-                return await self._read_response_text(response)
+                return await read_response_text(response)
         except aiohttp.ClientResponseError:
             LOGGER.warning("Forbidden response received for %s", url, exc_info=True)
         except aiohttp.ClientError:
             LOGGER.warning("Failed to fetch %s", url, exc_info=True)
         return None
 
-    async def _reset_session(self) -> None:
+    async def _reset_session(self, *, advance_variant: bool = False) -> None:
         if self._session and not self._session.closed:
             await self._session.close()
         self._session = None
         self._session_bootstrapped = False
-
-    async def _read_response_text(self, response: aiohttp.ClientResponse) -> str:
-        raw = await response.read()
-        encodings = [
-            encoding.strip().lower()
-            for encoding in response.headers.get("Content-Encoding", "").split(",")
-            if encoding.strip()
-        ]
-
-        data = raw
-        for encoding in encodings:
-            try:
-                data = self._decompress_bytes(data, encoding)
-            except Exception:  # pragma: no cover - defensive logging for unexpected encodings
-                LOGGER.warning("Failed to decompress %s encoded response", encoding, exc_info=True)
-                break
-
-        charset = response.charset or "utf-8"
-        return data.decode(charset, errors="replace")
-
-    def _decompress_bytes(self, data: bytes, encoding: str) -> bytes:
-        if encoding == "gzip":
-            return gzip.decompress(data)
-        if encoding == "deflate":
-            try:
-                return zlib.decompress(data)
-            except zlib.error:
-                return zlib.decompress(data, -zlib.MAX_WBITS)
-        if encoding == "br":
-            return brotli.decompress(data)
-        if encoding in {"zstd", "zstandard"}:
-            return zstd.ZstdDecompressor().decompress(data)
-        if encoding == "identity":
-            return data
-        raise ValueError(f"Unsupported content encoding: {encoding}")
+        if advance_variant:
+            self._header_variant_index = (self._header_variant_index + 1) % len(HEADER_VARIANTS)
 
     if not PRODUCTION:
 
