@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import List, Optional, Sequence
+from urllib.parse import parse_qs, urlparse
 import xml.etree.ElementTree as ET
 
 import discord
@@ -24,9 +25,7 @@ from ..storage import UpdateNotesStatus
 LOGGER = logging.getLogger(__name__)
 
 
-GAME_UPDATE_NOTES_FEED_URL = (
-    "https://en-forum.guildwars2.com/forums/forum/6-game-update-notes.xml/"
-)
+GAME_UPDATE_NOTES_FEED_URL = "https://en-forum.guildwars2.com/discover/6.xml"
 EMBED_THUMBNAIL_URL = (
     "https://wiki.guildwars2.com/images/thumb/c/cd/"
     "Visions_of_Eternity_logo.png/244px-Visions_of_Eternity_logo.png"
@@ -51,6 +50,7 @@ class PatchNotesEntry:
     comment_id: Optional[str]
     published_at: Optional[str]
     summary: str
+    legacy_entry_ids: Sequence[str] = ()
 
 
 class UpdateNotesCog(commands.Cog):
@@ -149,23 +149,54 @@ class UpdateNotesCog(commands.Cog):
         title = self._get_child_text(item, "title")
         if not title:
             return None
+        if "game update notes" not in title.lower():
+            return None
 
         url = self._get_child_text(item, "link")
         if not url:
             return None
+
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        comment_values = query.get("comment")
+        comment_id: Optional[str] = None
+        if comment_values:
+            comment_id = str(comment_values[0])
 
         guid = self._get_child_text(item, "guid") or url
         description_html = self._get_child_text(item, "description")
         summary = self._render_feed_description(description_html)
         published_at = self._normalise_pub_date(self._get_child_text(item, "pubDate"))
 
+        entry_id = comment_id or guid
+        legacy_ids: List[str] = []
+        for candidate in (guid, url):
+            if candidate and candidate != entry_id:
+                legacy_ids.append(candidate)
+        if comment_id and comment_id != url and comment_id != guid:
+            # Ensure backwards compatibility with stored identifiers that may
+            # have included the numeric comment id as a string inside a URL.
+            legacy_ids.extend(
+                candidate
+                for candidate in (f"comment={comment_id}", f"/comment/{comment_id}")
+            )
+        # De-duplicate while preserving order for deterministic behaviour.
+        seen: set[str] = set()
+        unique_legacy_ids: List[str] = []
+        for candidate in legacy_ids:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            unique_legacy_ids.append(candidate)
+
         return PatchNotesEntry(
-            entry_id=guid,
+            entry_id=str(entry_id),
             title=title.strip(),
             url=url,
-            comment_id=None,
+            comment_id=comment_id,
             published_at=published_at,
             summary=summary,
+            legacy_entry_ids=tuple(unique_legacy_ids),
         )
 
     def _get_child_text(self, element: ET.Element, tag: str) -> str:
@@ -200,7 +231,10 @@ class UpdateNotesCog(commands.Cog):
 
         collected: List[PatchNotesEntry] = []
         for entry in reversed(entries):
-            if last_entry_id and entry.entry_id == last_entry_id:
+            if last_entry_id and (
+                entry.entry_id == last_entry_id
+                or last_entry_id in entry.legacy_entry_ids
+            ):
                 collected.clear()
                 continue
             collected.append(entry)
