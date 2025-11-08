@@ -614,7 +614,7 @@ class PostNowButton(discord.ui.Button["CompConfigView"]):
             await interaction.response.send_message("Configure at least one class before posting.", ephemeral=True)
             return
         await view.cog.post_composition(
-            view.guild.id, reset_signups=False, force_new_message=True
+            view.guild.id, reset_signups=True, force_new_message=True
         )
         await interaction.response.send_message("Composition post updated.", ephemeral=True)
 
@@ -988,6 +988,29 @@ class CompCog(commands.GroupCog, name="comp"):
             LOGGER.warning("Composition channel %s in guild %s is not a text channel", comp_config.channel_id, guild_id)
             return
 
+        message = None
+        if comp_config.message_id:
+            try:
+                message = await channel.fetch_message(comp_config.message_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                message = None
+
+        send_new_message = force_new_message or message is None
+
+        if force_new_message and message is not None:
+            try:
+                await message.edit(view=None)
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.debug(
+                    "Failed to clear view on previous comp message %s in guild %s",
+                    comp_config.message_id,
+                    guild_id,
+                )
+            message = None
+
+        if send_new_message:
+            reset_signups = True
+
         _sanitize_signups(comp_config)
 
         if reset_signups:
@@ -1002,24 +1025,6 @@ class CompCog(commands.GroupCog, name="comp"):
 
         embed = self._build_comp_embed(guild, comp_config, channel=channel)
         view = CompSignupView(self, guild_id, channel=channel)
-
-        message = None
-        if comp_config.message_id:
-            try:
-                message = await channel.fetch_message(comp_config.message_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                message = None
-
-        if force_new_message and message is not None:
-            try:
-                await message.edit(view=None)
-            except (discord.Forbidden, discord.HTTPException):
-                LOGGER.debug(
-                    "Failed to clear view on previous comp message %s in guild %s",
-                    comp_config.message_id,
-                    guild_id,
-                )
-            message = None
 
         if message is None:
             try:
