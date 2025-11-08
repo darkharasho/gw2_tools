@@ -3,17 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import calendar
-import io
 import logging
 import os
 import re
 from datetime import datetime, time as time_cls, timezone, tzinfo, timedelta
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from PIL import Image
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import constants
@@ -190,23 +188,6 @@ def _emoji_name_for_class(name: str) -> str:
     if len(cleaned) < 2:
         cleaned = "Class"
     return cleaned[:32]
-
-
-def _load_icon_bytes(name: str) -> Optional[bytes]:
-    icon_path = _icon_path_for_class(name)
-    if not icon_path:
-        return None
-    try:
-        with Image.open(icon_path) as source:
-            image = source.convert("RGBA")
-    except (FileNotFoundError, OSError):
-        return None
-
-    image.thumbnail((96, 96))
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
-
 
 def _format_signups(guild: discord.Guild, signups: Sequence[int]) -> str:
     if not signups:
@@ -929,12 +910,16 @@ class CompCog(commands.GroupCog, name="comp"):
         self.poster_loop.start()
         self._view_init_task: asyncio.Task[None] | None = None
         env_home = os.getenv("GW2TOOLS_EMOJI_GUILD_ID")
+        if not env_home:
+            raise RuntimeError(
+                "GW2TOOLS_EMOJI_GUILD_ID environment variable must be set to the guild containing class emojis."
+            )
         try:
-            self.emoji_home_guild_id: Optional[int] = int(env_home) if env_home else None
-        except ValueError:
-            LOGGER.warning("Invalid GW2TOOLS_EMOJI_GUILD_ID value '%s'", env_home)
-            self.emoji_home_guild_id = None
-        self._emoji_creation_failures: Set[int] = set()
+            self.emoji_home_guild_id: int = int(env_home)
+        except ValueError as exc:
+            raise RuntimeError(
+                "GW2TOOLS_EMOJI_GUILD_ID must be an integer guild identifier."
+            ) from exc
 
     async def cog_load(self) -> None:
         await super().cog_load()
@@ -1030,42 +1015,6 @@ class CompCog(commands.GroupCog, name="comp"):
             guild.id, reset_signups=True, force_new_message=True
         )
 
-    def _can_manage_emojis(self, guild: discord.Guild) -> bool:
-        me = guild.me
-        permissions = getattr(me, "guild_permissions", None) if me else None
-        if permissions is None:
-            return False
-        return bool(
-            getattr(permissions, "manage_emojis_and_stickers", False)
-            or getattr(permissions, "manage_emojis", False)
-        )
-
-    def _has_emoji_capacity(self, guild: discord.Guild) -> bool:
-        limit = getattr(guild, "emoji_limit", None)
-        if limit is None:
-            return True
-        try:
-            current = len(guild.emojis)
-        except Exception:  # pragma: no cover - defensive
-            return True
-        return current < limit
-
-    def _iter_emoji_host_guilds(self, primary: Optional[discord.Guild]) -> Iterable[discord.Guild]:
-        seen: Set[int] = set()
-        if self.emoji_home_guild_id:
-            home = self.bot.get_guild(self.emoji_home_guild_id)
-            if home is not None:
-                seen.add(home.id)
-                yield home
-        if primary is not None and primary.id not in seen:
-            seen.add(primary.id)
-            yield primary
-        for guild in self.bot.guilds:
-            if guild.id in seen:
-                continue
-            seen.add(guild.id)
-            yield guild
-
     def _can_use_external_emojis(
         self, guild: discord.Guild, channel: Optional[discord.abc.GuildChannel] = None
     ) -> bool:
@@ -1096,15 +1045,21 @@ class CompCog(commands.GroupCog, name="comp"):
 
         updated = False
         allow_external = self._can_use_external_emojis(guild, channel)
+        emoji_home = self.bot.get_guild(self.emoji_home_guild_id)
+        if emoji_home is None:
+            LOGGER.warning(
+                "Emoji home guild %s is not accessible; ensure the bot is a member.",
+                self.emoji_home_guild_id,
+            )
         available_by_name: Dict[str, discord.Emoji] = {}
         for emoji in self.bot.emojis:
             if not emoji.name:
                 continue
-            if emoji.guild_id == guild.id or allow_external:
+            if emoji.guild_id == guild.id:
                 available_by_name[emoji.name] = emoji
-        hosts = list(self._iter_emoji_host_guilds(guild))
-        if not allow_external:
-            hosts = [host for host in hosts if host.id == guild.id]
+                continue
+            if allow_external and emoji_home and emoji.guild_id == emoji_home.id:
+                available_by_name.setdefault(emoji.name, emoji)
         for entry in comp_config.classes:
             emoji_obj: Optional[discord.Emoji] = None
             if entry.emoji_id:
@@ -1125,43 +1080,9 @@ class CompCog(commands.GroupCog, name="comp"):
                     entry.emoji_id = emoji_obj.id
                     updated = True
                 continue
-
-            icon_bytes = _load_icon_bytes(entry.name)
-            if not icon_bytes:
-                continue
-
-            created = False
-            for host in hosts:
-                if host.id in self._emoji_creation_failures:
-                    continue
-                if not self._can_manage_emojis(host):
-                    continue
-                if not self._has_emoji_capacity(host):
-                    continue
-                try:
-                    new_emoji = await host.create_custom_emoji(
-                        name=emoji_name,
-                        image=icon_bytes,
-                        reason="GW2 Tools composition class icon",
-                    )
-                except discord.Forbidden:
-                    LOGGER.warning("Missing permissions to create emojis in guild %s", host.id)
-                    self._emoji_creation_failures.add(host.id)
-                    continue
-                except discord.HTTPException as exc:
-                    LOGGER.warning("Failed to create emoji '%s' in guild %s: %s", emoji_name, host.id, exc)
-                    continue
-                else:
-                    entry.emoji_id = new_emoji.id
-                    available_by_name[emoji_name] = new_emoji
-                    updated = True
-                    created = True
-                    break
-
-            if not created and entry.emoji_id is None:
-                LOGGER.debug(
-                    "No available emoji slot for class '%s' in guild %s", entry.name, guild.id
-                )
+            LOGGER.debug(
+                "No emoji found for class '%s' in guild %s", entry.name, guild.id
+            )
 
         return updated
 
