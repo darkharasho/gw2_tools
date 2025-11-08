@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Sequence, TYPE_CHECKING
@@ -16,6 +17,7 @@ from bs4 import BeautifulSoup
 from cloudscraper.exceptions import CloudflareChallengeError
 from discord import app_commands
 from discord.ext import commands, tasks
+from markdownify import markdownify as html_to_markdown
 
 from ..bot import GW2ToolsBot
 from ..storage import UpdateNotesStatus
@@ -27,6 +29,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 DEV_TRACKER_URL = "https://en-forum.guildwars2.com/discover/6/"
+EMBED_THUMBNAIL_URL = (
+    "https://wiki.guildwars2.com/images/thumb/c/cd/"
+    "Visions_of_Eternity_logo.png/244px-Visions_of_Eternity_logo.png"
+)
 SCRAPER_BROWSER_SIGNATURE = {
     "browser": "chrome",
     "platform": "windows",
@@ -118,9 +124,12 @@ class UpdateNotesCog(commands.Cog):
 
             for entry in new_entries:
                 body = await self._fetch_entry_body(entry)
-                embed = self._build_embed(entry, body)
+                embeds = self._build_embeds(entry, body)
                 try:
-                    await channel.send(embed=embed)
+                    if len(embeds) == 1:
+                        await channel.send(embed=embeds[0])
+                    else:
+                        await channel.send(embeds=embeds)
                 except (discord.Forbidden, discord.HTTPException):
                     LOGGER.warning(
                         "Failed to post game update notes in channel %s for guild %s",
@@ -252,25 +261,37 @@ class UpdateNotesCog(commands.Cog):
         if not content:
             return None
 
-        text = content.get_text("\n", strip=True)
-        return self._normalise_text(text)
+        return self._render_comment_content(content)
 
-    def _build_embed(
+    def _build_embeds(
         self, entry: PatchNotesEntry, body: Optional[str]
-    ) -> discord.Embed:
-        description = body or entry.summary or "New Guild Wars 2 game update notes are available."
-        description = self._truncate(description, 4000)
-        embed = discord.Embed(
-            title=entry.title,
-            url=entry.url,
-            description=description,
-            color=self.EMBED_COLOR,
+    ) -> List[discord.Embed]:
+        description = (
+            body
+            or entry.summary
+            or "New Guild Wars 2 game update notes are available."
         )
+        segments = self._chunk_text(description, 4000)
+        if not segments:
+            segments = ["New Guild Wars 2 game update notes are available."]
+
+        embeds: List[discord.Embed] = []
         parsed_timestamp = self._parse_timestamp(entry.published_at)
-        if parsed_timestamp:
-            embed.timestamp = parsed_timestamp
-        embed.set_footer(text="Guild Wars 2 Forums – Dev Tracker")
-        return embed
+        for index, segment in enumerate(segments):
+            title = entry.title if index == 0 else f"{entry.title} (cont. {index})"
+            embed = discord.Embed(
+                title=title,
+                url=entry.url,
+                description=segment,
+                color=self.EMBED_COLOR,
+            )
+            if index == 0:
+                if parsed_timestamp:
+                    embed.timestamp = parsed_timestamp
+                embed.set_thumbnail(url=EMBED_THUMBNAIL_URL)
+            embed.set_footer(text="Guild Wars 2 Forums – Dev Tracker")
+            embeds.append(embed)
+        return embeds
 
     def _parse_timestamp(self, value: Optional[str]) -> Optional[datetime]:
         if not value:
@@ -305,6 +326,75 @@ class UpdateNotesCog(commands.Cog):
         if len(value) <= limit:
             return value
         return value[: limit - 1].rstrip() + "…"
+
+    def _render_comment_content(self, content) -> str:
+        for element in content.select("script, style"):
+            element.decompose()
+
+        markdown = html_to_markdown(
+            str(content), heading_style="ATX", bullets="-*+", strip=["img"]
+        )
+        return self._clean_markdown(markdown)
+
+    def _clean_markdown(self, text: str) -> str:
+        lines = [line.rstrip() for line in text.splitlines()]
+        cleaned: List[str] = []
+        blank = False
+        for line in lines:
+            if line.strip():
+                cleaned.append(line)
+                blank = False
+                continue
+            if not blank:
+                cleaned.append("")
+            blank = True
+        result = "\n".join(cleaned).strip()
+        if not result:
+            return result
+        return self._ensure_bullet_prefix(result)
+
+    def _ensure_bullet_prefix(self, text: str) -> str:
+        bullet_pattern = re.compile(r"^(\s*)[\*\+]\s+")
+        adjusted: List[str] = []
+        for line in text.split("\n"):
+            match = bullet_pattern.match(line)
+            if match:
+                indent = match.group(1)
+                remainder = line[match.end() :]
+                adjusted.append(f"{indent}- {remainder}")
+            else:
+                adjusted.append(line)
+        return "\n".join(adjusted)
+
+    def _chunk_text(self, text: str, limit: int, max_chunks: int = 10) -> List[str]:
+        remaining = text.strip()
+        if not remaining:
+            return []
+
+        chunks: List[str] = []
+        while remaining and len(chunks) < max_chunks:
+            if len(remaining) <= limit:
+                chunks.append(remaining)
+                break
+
+            cut = self._find_chunk_cut(remaining, limit)
+            chunk = remaining[:cut].rstrip()
+            if not chunk:
+                chunk = remaining[:limit].rstrip()
+            chunks.append(chunk)
+            remaining = remaining[cut:].lstrip("\n ")
+
+        if remaining and chunks:
+            chunks[-1] = self._truncate(chunks[-1], limit)
+
+        return chunks
+
+    def _find_chunk_cut(self, text: str, limit: int) -> int:
+        for separator in ("\n\n", "\n", " "):
+            index = text.rfind(separator, 0, limit)
+            if index > 0:
+                return index + len(separator)
+        return limit
 
     async def _fetch_html(self, url: str, retries: int = 3) -> Optional[str]:
         last_error: Optional[BaseException] = None
@@ -377,8 +467,11 @@ class UpdateNotesCog(commands.Cog):
 
             entry = entries[0]
             body = await self._fetch_entry_body(entry)
-            embed = self._build_embed(entry, body)
-            await channel.send(embed=embed)
+            embeds = self._build_embeds(entry, body)
+            if len(embeds) == 1:
+                await channel.send(embed=embeds[0])
+            else:
+                await channel.send(embeds=embeds)
             status = self.bot.storage.get_update_notes_status(interaction.guild.id) or UpdateNotesStatus()
             status.last_entry_id = entry.entry_id
             status.last_entry_published_at = entry.published_at
