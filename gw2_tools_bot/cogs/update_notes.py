@@ -7,10 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from typing import List, Optional, Sequence
-from urllib.parse import parse_qs, urlparse
-import xml.etree.ElementTree as ET
 
 import discord
 import requests
@@ -25,13 +22,13 @@ from ..storage import UpdateNotesStatus
 LOGGER = logging.getLogger(__name__)
 
 
-GAME_UPDATE_NOTES_FEED_URL = "https://en-forum.guildwars2.com/discover/6.xml"
+GAME_UPDATE_NOTES_PAGE_URL = "https://wiki.guildwars2.com/wiki/Game_updates"
 EMBED_THUMBNAIL_URL = (
     "https://wiki.guildwars2.com/images/thumb/c/cd/"
     "Visions_of_Eternity_logo.png/244px-Visions_of_Eternity_logo.png"
 )
 REQUEST_HEADERS = {
-    "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -47,14 +44,14 @@ class PatchNotesEntry:
     entry_id: str
     title: str
     url: str
-    comment_id: Optional[str]
     published_at: Optional[str]
     summary: str
+    content: str
     legacy_entry_ids: Sequence[str] = ()
 
 
 class UpdateNotesCog(commands.Cog):
-    """Poll the official forum feed for new game update notes."""
+    """Poll the official wiki page for new game update notes."""
 
     CHECK_INTERVAL_MINUTES = 15
     EMBED_COLOR = discord.Color.dark_gold()
@@ -108,7 +105,7 @@ class UpdateNotesCog(commands.Cog):
                 continue
 
             for entry in new_entries:
-                body = await self._fetch_entry_body(entry) or entry.summary
+                body = entry.content or entry.summary
                 embeds = self._build_embeds(entry, body)
                 try:
                     for embed in embeds:
@@ -129,101 +126,96 @@ class UpdateNotesCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _fetch_entries(self) -> List[PatchNotesEntry]:
-        feed = await self._fetch_url(GAME_UPDATE_NOTES_FEED_URL)
-        if feed is None:
-            LOGGER.warning("Failed to fetch Guild Wars 2 game update notes feed")
+        html = await self._fetch_url(GAME_UPDATE_NOTES_PAGE_URL)
+        if html is None:
+            LOGGER.warning("Failed to fetch Guild Wars 2 game update notes page")
             return []
 
-        try:
-            document = ET.fromstring(feed)
-        except ET.ParseError:
-            LOGGER.warning("Failed to parse Guild Wars 2 game update notes feed", exc_info=True)
+        soup = BeautifulSoup(html, "html.parser")
+        content = soup.select_one("#mw-content-text")
+        if content is None:
+            LOGGER.warning("Unable to locate game update notes content wrapper")
             return []
 
         entries: List[PatchNotesEntry] = []
-        for item in document.findall(".//item"):
-            entry = self._parse_feed_entry(item)
+        for heading in content.select("h2"):
+            entry = self._parse_page_entry(heading)
             if entry:
                 entries.append(entry)
         return entries
 
-    def _parse_feed_entry(self, item: ET.Element) -> Optional[PatchNotesEntry]:
-        title = self._get_child_text(item, "title")
+    def _parse_page_entry(self, heading) -> Optional[PatchNotesEntry]:
+        if heading.find_parent(class_="navbox"):
+            return None
+
+        headline = heading.find("span", class_="mw-headline")
+        if not headline:
+            return None
+
+        title = headline.get_text(strip=True)
         if not title:
             return None
-        if "game update notes" not in title.lower():
+        if not title.lower().startswith("update -"):
             return None
 
-        url = self._get_child_text(item, "link")
-        if not url:
+        anchor = headline.get("id")
+        if not anchor:
+            return None
+        if not anchor.startswith("Update_-_"):
             return None
 
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
-        comment_values = query.get("comment")
-        comment_id: Optional[str] = None
-        if comment_values:
-            comment_id = str(comment_values[0])
+        entry_id = anchor
+        url = f"{GAME_UPDATE_NOTES_PAGE_URL}#{anchor}"
+        published_at = self._parse_heading_timestamp(title)
 
-        guid = self._get_child_text(item, "guid") or url
-        description_html = self._get_child_text(item, "description")
-        summary = self._render_feed_description(description_html)
-        published_at = self._normalise_pub_date(self._get_child_text(item, "pubDate"))
+        section_elements = []
+        for sibling in heading.find_next_siblings():
+            if getattr(sibling, "name", None) == "h2":
+                break
+            section_elements.append(sibling)
 
-        entry_id = comment_id or guid
-        legacy_ids: List[str] = []
-        for candidate in (guid, url):
-            if candidate and candidate != entry_id:
-                legacy_ids.append(candidate)
-        if comment_id and comment_id != url and comment_id != guid:
-            # Ensure backwards compatibility with stored identifiers that may
-            # have included the numeric comment id as a string inside a URL.
-            legacy_ids.extend(
-                candidate
-                for candidate in (f"comment={comment_id}", f"/comment/{comment_id}")
+        if not section_elements:
+            summary = "New Guild Wars 2 game update notes are available."
+            content_markdown = summary
+        else:
+            fragment = BeautifulSoup(
+                "<div>" + "".join(str(el) for el in section_elements) + "</div>",
+                "html.parser",
             )
-        # De-duplicate while preserving order for deterministic behaviour.
-        seen: set[str] = set()
-        unique_legacy_ids: List[str] = []
-        for candidate in legacy_ids:
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            unique_legacy_ids.append(candidate)
+            for unwanted in fragment.select("span.mw-editsection"):
+                unwanted.decompose()
+            for link in fragment.select("a[href]"):
+                href = link.get("href", "")
+                if href.startswith("/wiki/"):
+                    link["href"] = f"https://wiki.guildwars2.com{href}"
+                elif href.startswith("//"):
+                    link["href"] = f"https:{href}"
+            rendered = self._render_comment_content(fragment)
+            content_markdown = rendered or "New Guild Wars 2 game update notes are available."
+            summary = content_markdown
 
         return PatchNotesEntry(
-            entry_id=str(entry_id),
-            title=title.strip(),
+            entry_id=entry_id,
+            title=title,
             url=url,
-            comment_id=comment_id,
             published_at=published_at,
             summary=summary,
-            legacy_entry_ids=tuple(unique_legacy_ids),
+            content=content_markdown,
+            legacy_entry_ids=(url,),
         )
 
-    def _get_child_text(self, element: ET.Element, tag: str) -> str:
-        child = element.find(tag)
-        if child is None or child.text is None:
-            return ""
-        return child.text.strip()
-
-    def _render_feed_description(self, description_html: str) -> str:
-        if not description_html:
-            return ""
-        fragment = BeautifulSoup(description_html, "html.parser")
-        return self._render_comment_content(fragment)
-
-    def _normalise_pub_date(self, value: str) -> Optional[str]:
-        if not value:
+    def _parse_heading_timestamp(self, title: str) -> Optional[str]:
+        match = re.search(r"([A-Za-z]+ \d{1,2}, \d{4})", title)
+        if not match:
             return None
+        date_text = match.group(1)
         try:
-            parsed = parsedate_to_datetime(value)
-        except (TypeError, ValueError):
-            LOGGER.debug("Unable to parse feed timestamp: %s", value)
+            parsed = datetime.strptime(date_text, "%B %d, %Y")
+        except ValueError:
+            LOGGER.debug("Unable to parse heading date: %s", title)
             return None
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc).isoformat()
+        parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.isoformat()
 
     def _resolve_new_entries(
         self,
@@ -275,25 +267,6 @@ class UpdateNotesCog(commands.Cog):
             return fetched
         return None
 
-    async def _fetch_entry_body(self, entry: PatchNotesEntry) -> Optional[str]:
-        if not entry.comment_id:
-            return None
-
-        html = await self._fetch_url(entry.url)
-        if html is None:
-            LOGGER.warning("Failed to fetch game update notes content from %s", entry.url)
-            return None
-
-        soup = BeautifulSoup(html, "html.parser")
-        wrapper = soup.select_one(f"#comment-{entry.comment_id}_wrap")
-        if not wrapper:
-            return None
-        content = wrapper.select_one('[data-role="commentContent"]')
-        if not content:
-            return None
-
-        return self._render_comment_content(content)
-
     def _build_embeds(
         self, entry: PatchNotesEntry, body: Optional[str]
     ) -> List[discord.Embed]:
@@ -318,9 +291,9 @@ class UpdateNotesCog(commands.Cog):
             embed.timestamp = parsed_timestamp
         embed.set_thumbnail(url=EMBED_THUMBNAIL_URL)
         if truncated_description != description:
-            embed.set_footer(text="Guild Wars 2 Forums – Game Update Notes (truncated)")
+            embed.set_footer(text="Guild Wars 2 Wiki – Game Updates (truncated)")
         else:
-            embed.set_footer(text="Guild Wars 2 Forums – Game Update Notes")
+            embed.set_footer(text="Guild Wars 2 Wiki – Game Updates")
         embeds.append(embed)
         return embeds
 
@@ -447,7 +420,7 @@ class UpdateNotesCog(commands.Cog):
                 return
 
             entry = entries[0]
-            body = await self._fetch_entry_body(entry) or entry.summary
+            body = entry.content or entry.summary
             embeds = self._build_embeds(entry, body)
             for embed in embeds:
                 await channel.send(embed=embed)
