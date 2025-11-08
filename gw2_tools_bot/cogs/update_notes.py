@@ -109,10 +109,8 @@ class UpdateNotesCog(commands.Cog):
                 body = entry.summary or await self._fetch_entry_body(entry)
                 embeds = self._build_embeds(entry, body)
                 try:
-                    if len(embeds) == 1:
-                        await channel.send(embed=embeds[0])
-                    else:
-                        await channel.send(embeds=embeds)
+                    for embed in embeds:
+                        await channel.send(embed=embed)
                 except (discord.Forbidden, discord.HTTPException):
                     LOGGER.warning(
                         "Failed to post game update notes in channel %s for guild %s",
@@ -436,10 +434,8 @@ class UpdateNotesCog(commands.Cog):
             entry = entries[0]
             body = entry.summary or await self._fetch_entry_body(entry)
             embeds = self._build_embeds(entry, body)
-            if len(embeds) == 1:
-                await channel.send(embed=embeds[0])
-            else:
-                await channel.send(embeds=embeds)
+            for embed in embeds:
+                await channel.send(embed=embed)
             status = self.bot.storage.get_update_notes_status(interaction.guild.id) or UpdateNotesStatus()
             status.last_entry_id = entry.entry_id
             status.last_entry_published_at = entry.published_at
