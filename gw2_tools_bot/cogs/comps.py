@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from datetime import datetime, time as time_cls, timezone, tzinfo, timedelta
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 import discord
 from discord import app_commands
@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import constants
 from ..bot import GW2ToolsBot
-from ..storage import CompClassConfig, CompConfig, GuildConfig, normalise_timezone
+from ..storage import CompClassConfig, CompConfig, GuildConfig, CompPreset, normalise_timezone
 
 LOGGER = logging.getLogger(__name__)
 
@@ -388,6 +388,7 @@ class CompChannelSelect(discord.ui.ChannelSelect):
         self.config_view = view
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        self.config_view.mark_modified()
         comp_config = self.config_view.config.comp
         if self.values:
             channel = self.values[0]
@@ -443,6 +444,7 @@ class ScheduleModal(discord.ui.Modal):
             return
 
         if not day_value and not time_value:
+            self.config_view.mark_modified()
             comp_config.post_days = []
             comp_config.post_time = None
             comp_config.timezone = tz_value
@@ -491,6 +493,7 @@ class ScheduleModal(discord.ui.Modal):
             await interaction.response.send_message("Time must be provided in HH:MM 24-hour format.", ephemeral=True)
             return
 
+        self.config_view.mark_modified()
         comp_config.post_days = parsed_days
         comp_config.post_time = parsed_time.strftime("%H:%M")
         comp_config.timezone = tz_value
@@ -519,6 +522,7 @@ class OverviewModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         comp_config = self.config_view.config.comp
+        self.config_view.mark_modified()
         comp_config.overview = str(self.overview_input.value).strip()
         self.config_view.persist()
         await self.config_view.cog.refresh_signup_message(self.config_view.guild.id)
@@ -584,6 +588,7 @@ class ClassesModal(discord.ui.Modal):
             classes.append(CompClassConfig(name=name, required=required_value))
 
         comp_config = self.config_view.config.comp
+        self.config_view.mark_modified()
         comp_config.classes = classes
         _sanitize_signups(comp_config)
         channel = None
@@ -631,12 +636,183 @@ class CloseButton(discord.ui.Button["CompConfigView"]):
             self.view.stop()
 
 
+class SavedCompSelect(discord.ui.Select):
+    def __init__(self, view: "CompConfigView") -> None:
+        options, enabled = view.build_preset_options()
+        super().__init__(
+            placeholder="Saved compositions",
+            min_values=0,
+            max_values=1,
+            options=options,
+        )
+        self.config_view = view
+        self.disabled = not enabled
+
+    async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        if not self.config_view.presets:
+            await interaction.response.defer()
+            return
+        if not self.values:
+            self.config_view.selected_preset_name = None
+            self.config_view.refresh_preset_options()
+            await interaction.response.defer()
+            return
+        selection = self.values[0]
+        if selection == "__none__":
+            self.config_view.selected_preset_name = None
+        else:
+            self.config_view.selected_preset_name = selection
+        self.config_view.refresh_preset_options()
+        await interaction.response.defer()
+
+
+class SavePresetModal(discord.ui.Modal):
+    def __init__(self, view: "CompConfigView") -> None:
+        super().__init__(title="Save composition preset")
+        self.config_view = view
+        self.name_input = discord.ui.TextInput(
+            label="Preset name",
+            placeholder="e.g. Static Squad",
+            max_length=80,
+        )
+        self.add_item(self.name_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        raw_name = str(self.name_input.value).strip()
+        if not raw_name:
+            await interaction.response.send_message("Preset name cannot be empty.", ephemeral=True)
+            return
+        if self.config_view.find_preset(raw_name):
+            await interaction.response.send_message(
+                "A preset with that name already exists. Choose a different name or update the existing preset.",
+                ephemeral=True,
+            )
+            return
+
+        preset = CompPreset(
+            name=raw_name,
+            config=self.config_view.config.comp.copy(include_runtime_fields=False),
+        )
+        self.config_view.add_or_replace_preset(preset)
+        self.config_view.selected_preset_name = preset.name
+        self.config_view.config.comp_active_preset = preset.name
+        self.config_view.persist_presets()
+        self.config_view.persist()
+        self.config_view.refresh_preset_options()
+        await self.config_view.refresh_summary(interaction)
+        await interaction.response.send_message(
+            f"Saved preset **{preset.name}**.",
+            ephemeral=True,
+        )
+
+
+class SavePresetButton(discord.ui.Button["CompConfigView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Save as preset", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        view = self.view
+        if not isinstance(view, CompConfigView):
+            return
+        await interaction.response.send_modal(SavePresetModal(view))
+
+
+class UpdatePresetButton(discord.ui.Button["CompConfigView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Update preset", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        view = self.view
+        if not isinstance(view, CompConfigView):
+            return
+        preset = view.get_selected_preset()
+        if not preset:
+            await interaction.response.send_message("Select a preset to update first.", ephemeral=True)
+            return
+        updated = CompPreset(
+            name=preset.name,
+            config=view.config.comp.copy(include_runtime_fields=False),
+        )
+        view.add_or_replace_preset(updated)
+        view.selected_preset_name = updated.name
+        view.config.comp_active_preset = updated.name
+        view.persist_presets()
+        view.persist()
+        view.refresh_preset_options()
+        await view.refresh_summary(interaction)
+        await interaction.response.send_message(
+            f"Preset **{updated.name}** updated.",
+            ephemeral=True,
+        )
+
+
+class LoadPresetButton(discord.ui.Button["CompConfigView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Load preset", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        view = self.view
+        if not isinstance(view, CompConfigView):
+            return
+        preset = view.get_selected_preset()
+        if not preset:
+            await interaction.response.send_message("Select a preset to load first.", ephemeral=True)
+            return
+        view.config.comp = preset.config.copy(include_runtime_fields=False)
+        view.config.comp_active_preset = preset.name
+        view.selected_preset_name = preset.name
+        view.persist()
+        view.refresh_preset_options()
+        await view.refresh_summary(interaction)
+        await interaction.response.send_message(
+            f"Loaded preset **{preset.name}**. Use 'Post now' to publish it immediately.",
+            ephemeral=True,
+        )
+
+
+class DeletePresetButton(discord.ui.Button["CompConfigView"]):
+    def __init__(self) -> None:
+        super().__init__(label="Delete preset", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        view = self.view
+        if not isinstance(view, CompConfigView):
+            return
+        preset = view.get_selected_preset()
+        if not preset:
+            await interaction.response.send_message("Select a preset to delete first.", ephemeral=True)
+            return
+        removed_active = False
+        if view.config.comp_active_preset and view.config.comp_active_preset.casefold() == preset.name.casefold():
+            removed_active = True
+        view.presets = [existing for existing in view.presets if existing.name.casefold() != preset.name.casefold()]
+        view.selected_preset_name = None
+        if removed_active:
+            view.config.comp_active_preset = None
+        view.persist_presets()
+        view.persist()
+        view.refresh_preset_options()
+        await view.refresh_summary(interaction)
+        await interaction.response.send_message(
+            f"Preset **{preset.name}** deleted.",
+            ephemeral=True,
+        )
+
+
 class CompConfigView(discord.ui.View):
     def __init__(self, cog: "CompCog", guild: discord.Guild, config: GuildConfig):
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.config = config
+        self.presets: List[CompPreset] = self.cog.bot.storage.get_comp_presets(guild.id)
+        self.selected_preset_name: Optional[str] = config.comp_active_preset
+        self.preset_select = SavedCompSelect(self)
+        self.add_item(self.preset_select)
+        self.add_item(SavePresetButton())
+        self.add_item(UpdatePresetButton())
+        self.add_item(LoadPresetButton())
+        self.add_item(DeletePresetButton())
         comp_config = config.comp
         default_channel = guild.get_channel(comp_config.channel_id) if comp_config.channel_id else None
         self.add_item(CompChannelSelect(self, default_channel))
@@ -653,6 +829,64 @@ class CompConfigView(discord.ui.View):
     def persist(self) -> None:
         self.cog.bot.save_config(self.guild.id, self.config)
 
+    def persist_presets(self) -> None:
+        self.cog.bot.storage.save_comp_presets(self.guild.id, self.presets)
+
+    def build_preset_options(self) -> Tuple[List[discord.SelectOption], bool]:
+        if not self.presets:
+            placeholder = discord.SelectOption(
+                label="No saved presets", value="__none__", description="Save a preset to enable this list."
+            )
+            return [placeholder], False
+        self.presets.sort(key=lambda preset: preset.name.casefold())
+        options = [
+            discord.SelectOption(
+                label=preset.name,
+                value=preset.name,
+                default=(preset.name == self.selected_preset_name),
+            )
+            for preset in self.presets
+        ]
+        return options, True
+
+    def refresh_preset_options(self) -> None:
+        options, enabled = self.build_preset_options()
+        self.preset_select.options = options
+        self.preset_select.disabled = not enabled
+
+    def add_or_replace_preset(self, preset: CompPreset) -> None:
+        replaced = False
+        for index, existing in enumerate(self.presets):
+            if existing.name.casefold() == preset.name.casefold():
+                self.presets[index] = preset
+                replaced = True
+                break
+        if not replaced:
+            self.presets.append(preset)
+        self.presets.sort(key=lambda item: item.name.casefold())
+
+    def get_selected_preset(self) -> Optional[CompPreset]:
+        if not self.selected_preset_name:
+            return None
+        name_lower = self.selected_preset_name.casefold()
+        for preset in self.presets:
+            if preset.name.casefold() == name_lower:
+                return preset
+        return None
+
+    def find_preset(self, name: str) -> Optional[CompPreset]:
+        name_lower = name.casefold()
+        for preset in self.presets:
+            if preset.name.casefold() == name_lower:
+                return preset
+        return None
+
+    def mark_modified(self) -> None:
+        if self.config.comp_active_preset or self.selected_preset_name:
+            self.config.comp_active_preset = None
+            self.selected_preset_name = None
+            self.refresh_preset_options()
+
     async def refresh_summary(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         if not self.message:
             if interaction.message:
@@ -662,7 +896,9 @@ class CompConfigView(discord.ui.View):
                     self.message = await interaction.original_response()
                 except discord.HTTPException:
                     return
-        embed = self.cog.build_summary_embed(self.guild, self.config.comp)
+        embed = self.cog.build_summary_embed(
+            self.guild, self.config.comp, active_preset=self.config.comp_active_preset
+        )
         try:
             await self.message.edit(embed=embed, view=self)
         except discord.HTTPException:
@@ -731,7 +967,9 @@ class CompCog(commands.GroupCog, name="comp"):
         assert interaction.guild is not None
         config = self.bot.get_config(interaction.guild.id)
         view = CompConfigView(self, interaction.guild, config)
-        embed = self.build_summary_embed(interaction.guild, config.comp)
+        embed = self.build_summary_embed(
+            interaction.guild, config.comp, active_preset=config.comp_active_preset
+        )
         await interaction.response.send_message(
             "Use the controls below to configure the weekly composition post.",
             embed=embed,
@@ -1148,7 +1386,9 @@ class CompCog(commands.GroupCog, name="comp"):
 
         return OVERVIEW_TOKEN_RE.sub(replace, overview)
 
-    def build_summary_embed(self, guild: discord.Guild, config: CompConfig) -> discord.Embed:
+    def build_summary_embed(
+        self, guild: discord.Guild, config: CompConfig, *, active_preset: Optional[str] = None
+    ) -> discord.Embed:
         embed = discord.Embed(title="Guild Composition Settings", color=discord.Color.blurple())
         schedule_text = "Posting schedule not configured."
         if config.post_days and config.post_time:
@@ -1168,6 +1408,12 @@ class CompCog(commands.GroupCog, name="comp"):
             channel_value = "Not set"
         embed.add_field(name="Post Channel", value=channel_value, inline=False)
         embed.add_field(name="Schedule", value=schedule_text, inline=False)
+
+        if active_preset:
+            preset_text = f"Linked to **{active_preset}**."
+        else:
+            preset_text = "Not linked to a saved preset."
+        embed.add_field(name="Active Preset", value=preset_text, inline=False)
 
         if config.overview:
             overview_text = self._format_overview_text(
