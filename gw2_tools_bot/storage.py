@@ -178,6 +178,7 @@ class GuildConfig:
     moderator_role_ids: List[int]
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
+    update_notes_channel_id: Optional[int] = None
     comp: CompConfig = field(default_factory=CompConfig)
     comp_active_preset: Optional[str] = None
 
@@ -251,6 +252,14 @@ class ArcDpsStatus:
 
     last_checked_at: Optional[str] = None
     last_updated_at: Optional[str] = None
+
+
+@dataclass
+class UpdateNotesStatus:
+    """Persisted information about the latest posted game update notes."""
+
+    last_entry_id: Optional[str] = None
+    last_entry_published_at: Optional[str] = None
 
 
 class StorageManager:
@@ -344,6 +353,20 @@ class StorageManager:
 
     def save_arcdps_status(self, guild_id: int, status: ArcDpsStatus) -> None:
         path = self._guild_path(guild_id) / "arcdps.json"
+        self._write_json(path, asdict(status))
+
+    # ------------------------------------------------------------------
+    # Game update notes
+    # ------------------------------------------------------------------
+    def get_update_notes_status(self, guild_id: int) -> Optional[UpdateNotesStatus]:
+        path = self._guild_path(guild_id) / "update_notes.json"
+        payload = self._read_json(path, None)
+        if not payload:
+            return None
+        return UpdateNotesStatus(**payload)
+
+    def save_update_notes_status(self, guild_id: int, status: UpdateNotesStatus) -> None:
+        path = self._guild_path(guild_id) / "update_notes.json"
         self._write_json(path, asdict(status))
 
     # ------------------------------------------------------------------

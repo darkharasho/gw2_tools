@@ -15,6 +15,7 @@ from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..storage import ArcDpsStatus
+from ..http_utils import read_response_text
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +39,10 @@ class ArcDpsUpdatesCog(commands.Cog):
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self._session or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(
+                headers={"Accept-Encoding": "gzip, deflate, br"},
+                auto_decompress=False,
+            )
         return self._session
 
     def _store_status(
@@ -150,7 +154,7 @@ class ArcDpsUpdatesCog(commands.Cog):
         try:
             async with session.get(self.RELEASE_URL) as response:
                 response.raise_for_status()
-                html = await response.text()
+                html = await read_response_text(response)
         except aiohttp.ClientError:
             LOGGER.warning("Failed to fetch ArcDPS release page", exc_info=True)
             return None
@@ -179,7 +183,7 @@ class ArcDpsUpdatesCog(commands.Cog):
         try:
             async with session.get(self.CHANGELOG_URL) as response:
                 response.raise_for_status()
-                html = await response.text()
+                html = await read_response_text(response)
         except aiohttp.ClientError:
             LOGGER.warning("Failed to fetch ArcDPS changelog page", exc_info=True)
             return None, []
