@@ -41,6 +41,8 @@ SCRAPER_BROWSER_SIGNATURE = {
     "mobile": False,
 }
 
+SCRAPER_DELAY_SECONDS = 10
+
 SCRAPER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
@@ -113,6 +115,7 @@ class UpdateNotesCog(commands.Cog):
             if self._scraper is None:
                 self._scraper = await asyncio.to_thread(
                     cloudscraper.create_scraper,
+                    delay=SCRAPER_DELAY_SECONDS,
                     browser=SCRAPER_BROWSER_SIGNATURE,
                 )
                 self._scraper.headers.update(SCRAPER_HEADERS)
