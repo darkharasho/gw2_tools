@@ -6,75 +6,33 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
-import aiohttp
+import cloudscraper
 import discord
+import requests
 from bs4 import BeautifulSoup
+from cloudscraper.exceptions import CloudflareChallengeError
 from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..storage import UpdateNotesStatus
-from ..http_utils import read_response_text
+
+if TYPE_CHECKING:  # pragma: no cover - typing helper
+    from cloudscraper import CloudScraper
 
 LOGGER = logging.getLogger(__name__)
 
 
-# The forum deploys aggressive bot protection and will return HTTP 403 responses
-# for atypical clients.  Using a mainstream browser signature ensures the
-# scraper receives the regular HTML response instead of an access denied page.
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/126.0.0.0 Safari/537.36"
-)
-DEFAULT_HEADERS = {
-    "User-Agent": USER_AGENT,
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;q=0.9,"\
-        "image/avif,image/webp,image/apng,*/*;q=0.8,"\
-        "application/signed-exchange;v=b3;q=0.7"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Referer": "https://en-forum.guildwars2.com/",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Sec-GPC": "1",
-    "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
-}
-
-HEADER_VARIANTS = [
-    DEFAULT_HEADERS,
-    {
-        **DEFAULT_HEADERS,
-        "Accept-Encoding": "gzip, deflate, br",
-        "Sec-Fetch-Site": "none",
-    },
-    {
-        "User-Agent": USER_AGENT,
-        "Accept": (
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-        ),
-        "Accept-Language": "en-US,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://en-forum.guildwars2.com/",
-        "Connection": "keep-alive",
-    },
-]
 DEV_TRACKER_URL = "https://en-forum.guildwars2.com/discover/6/"
-FORUM_BASE_URL = "https://en-forum.guildwars2.com/"
-FETCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
+SCRAPER_BROWSER_SIGNATURE = {
+    "browser": "chrome",
+    "platform": "windows",
+    "desktop": True,
+    "mobile": False,
+}
 
 
 @dataclass
@@ -98,44 +56,30 @@ class UpdateNotesCog(commands.Cog):
 
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._session_bootstrapped = False
-        self._header_variant_index = 0
+        self._scraper: Optional["CloudScraper"] = None
+        self._scraper_lock = asyncio.Lock()
         self._poll_updates.start()
 
     def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         self._poll_updates.cancel()
-        if self._session and not self._session.closed:
-            self.bot.loop.create_task(self._session.close())
-        self._session = None
+        if self._scraper is not None:
+            self.bot.loop.create_task(self._close_scraper())
+        self._scraper = None
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if not self._session or self._session.closed:
-            headers = HEADER_VARIANTS[self._header_variant_index].copy()
-            self._session = aiohttp.ClientSession(
-                timeout=FETCH_TIMEOUT,
-                headers=headers,
-                cookie_jar=aiohttp.CookieJar(unsafe=True),
-                auto_decompress=False,
-            )
-            self._session_bootstrapped = False
-        return self._session
+    async def _close_scraper(self) -> None:
+        async with self._scraper_lock:
+            if self._scraper is not None:
+                await asyncio.to_thread(self._scraper.close)
+                self._scraper = None
 
-    async def _bootstrap_session(self) -> None:
-        session = await self._get_session()
-        if self._session_bootstrapped:
-            return
-
-        try:
-            async with session.get(FORUM_BASE_URL) as response:
-                # Some forum mitigations only lift after an initial navigation
-                # to the base domain which sets cookies and challenges the
-                # client.  Do not raise for status here so we can retry later
-                # if the warm-up request failed with a transient error.
-                if response.status < 400:
-                    self._session_bootstrapped = True
-        except aiohttp.ClientError:
-            LOGGER.debug("Forum session bootstrap failed", exc_info=True)
+    async def _get_scraper(self) -> "CloudScraper":
+        async with self._scraper_lock:
+            if self._scraper is None:
+                self._scraper = await asyncio.to_thread(
+                    cloudscraper.create_scraper,
+                    browser=SCRAPER_BROWSER_SIGNATURE,
+                )
+            return self._scraper
 
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poll_updates(self) -> None:
@@ -362,39 +306,34 @@ class UpdateNotesCog(commands.Cog):
             return value
         return value[: limit - 1].rstrip() + "…"
 
-    async def _fetch_html(self, url: str, retries: Optional[int] = None) -> Optional[str]:
-        await self._bootstrap_session()
-        session = await self._get_session()
-
-        if retries is None:
-            retries = len(HEADER_VARIANTS)
-
-        try:
-            async with session.get(url) as response:
-                try:
-                    response.raise_for_status()
-                except aiohttp.ClientResponseError as error:
-                    if error.status == 403 and retries:
-                        LOGGER.info("Dev tracker request forbidden, refreshing session")
-                        await self._reset_session(advance_variant=True)
-                        await asyncio.sleep(1)
-                        return await self._fetch_html(url, retries=retries - 1)
-                    raise
-
-                return await read_response_text(response)
-        except aiohttp.ClientResponseError:
-            LOGGER.warning("Forbidden response received for %s", url, exc_info=True)
-        except aiohttp.ClientError:
-            LOGGER.warning("Failed to fetch %s", url, exc_info=True)
+    async def _fetch_html(self, url: str, retries: int = 3) -> Optional[str]:
+        last_error: Optional[BaseException] = None
+        for attempt in range(retries):
+            scraper = await self._get_scraper()
+            try:
+                return await asyncio.to_thread(self._request_text, scraper, url)
+            except (CloudflareChallengeError, requests.RequestException) as error:
+                last_error = error
+                LOGGER.warning("Failed to fetch %s (attempt %s/%s)", url, attempt + 1, retries, exc_info=True)
+                await self._refresh_scraper()
+                if attempt + 1 < retries:
+                    await asyncio.sleep(min(5, 2 ** attempt))
+        if last_error is not None:
+            LOGGER.warning("Giving up on %s after repeated failures", url, exc_info=last_error)
         return None
 
-    async def _reset_session(self, *, advance_variant: bool = False) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
-        self._session_bootstrapped = False
-        if advance_variant:
-            self._header_variant_index = (self._header_variant_index + 1) % len(HEADER_VARIANTS)
+    async def _refresh_scraper(self) -> None:
+        async with self._scraper_lock:
+            if self._scraper is not None:
+                await asyncio.to_thread(self._scraper.close)
+                self._scraper = None
+
+    @staticmethod
+    def _request_text(scraper: "CloudScraper", url: str) -> str:
+        response = scraper.get(url, timeout=30)
+        response.raise_for_status()
+        response.encoding = response.encoding or "utf-8"
+        return response.text
 
     if not PRODUCTION:
 
