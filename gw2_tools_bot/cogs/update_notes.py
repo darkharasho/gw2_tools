@@ -20,7 +20,20 @@ from ..storage import UpdateNotesStatus
 LOGGER = logging.getLogger(__name__)
 
 
-USER_AGENT = "GW2ToolsBot (+https://github.com/maael/gw2_tools)"
+# The forum deploys aggressive bot protection and will return HTTP 403 responses
+# for atypical clients.  Using a mainstream browser signature ensures the
+# scraper receives the regular HTML response instead of an access denied page.
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0.0.0 Safari/537.36"
+)
+DEFAULT_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://en-forum.guildwars2.com/",
+}
 DEV_TRACKER_URL = "https://en-forum.guildwars2.com/discover/6/"
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
@@ -120,7 +133,7 @@ class UpdateNotesCog(commands.Cog):
         try:
             async with session.get(
                 DEV_TRACKER_URL,
-                headers={"User-Agent": USER_AGENT},
+                headers=DEFAULT_HEADERS,
             ) as response:
                 response.raise_for_status()
                 html = await response.text()
@@ -229,7 +242,7 @@ class UpdateNotesCog(commands.Cog):
         try:
             async with session.get(
                 entry.url,
-                headers={"User-Agent": USER_AGENT},
+                headers=DEFAULT_HEADERS,
             ) as response:
                 response.raise_for_status()
                 html = await response.text()
