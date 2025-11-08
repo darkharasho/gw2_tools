@@ -7,7 +7,7 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
 - **Per-guild configuration** – `/config` lets server administrators choose which roles can interact with the bot and which channel or forum should receive build posts. Settings can be delivered in a DM or as an ephemeral popup and persist independently for every guild.
 - **Build management workflows** – `/builds` supports adding, editing, and deleting Guild Wars 2 builds. Each record stores the profession or elite specialisation, URLs, chat codes, optional descriptions, and audit metadata about who made the latest changes.
 - **RSS announcements** – `/rss set` subscribes the guild to an RSS or Atom feed and posts new entries into the channel you specify. `/rss list` shows paginated embeds of the configured feeds, and `/rss delete` opens a dropdown so you can pick which subscription to remove without touching other guilds.
-- **Scheduled compositions** – `/comp manage` lets moderators schedule recurring composition posts, choose the destination channel, and maintain dropdown signups that keep headcounts per profession in sync with reactions.
+- **Scheduled compositions** – `/comp manage` lets moderators schedule recurring composition posts, choose the destination channel, maintain dropdown signups that keep headcounts per profession in sync with reactions, and swap between saved presets for different activities.
 - **Rich embeds and forum integration** – Build posts automatically use the profession's colour palette and icon from `media/gw2classicons`, include the chat code in a code block, and update or create forum threads when the configured channel is a forum.
 - **Isolated storage** – Configuration and build data are written to `gw2_tools_bot/data/guild_<guild_id>/` so that each Discord server's information is kept separate.
 
@@ -74,7 +74,11 @@ Guild moderators can organise strike, raid, or WvW squad signups through the `/c
 2. Click **Edit composition** to open the class editor modal. Add each profession or elite specialisation you want in the squad, optionally specifying the number of slots available. Class icons are sourced from `media/gw2wikiicons`, and the tool builds a grid of icons for the embed automatically.
 3. Use **Post preview** to review the generated embed before saving. When you confirm the settings the bot stores them in the guild configuration and schedules the next post.
 4. When the scheduled time arrives the bot publishes an embed containing each configured class as an inline field. A dropdown menu appears under the message so members can select the class they want to play; the bot tracks selections, prevents users from taking multiple slots, and updates the counts instantly.
-5. If you need to adjust the roster or schedule, rerun `/comp manage` to edit the configuration. Existing posts will update when members change their dropdown choice, and the next scheduled announcement will use your latest settings.
+5. Save lineups you want to reuse with **Save as preset**. Presets capture the configured classes, schedule, and overview without the live signup state, letting you prepare different rosters for strikes, raids, or WvW.
+6. Switch between stored presets from the dropdown at the top of the management view. Loading a preset immediately updates the guild configuration and marks it as the active preset so the next scheduled post uses the selected lineup.
+7. If you need to adjust the roster or schedule, rerun `/comp manage` to edit the configuration. Existing posts will update when members change their dropdown choice, and the next scheduled announcement will use your latest settings. Updating the configuration clears the active preset so you can resave it when you're happy with the changes.
+
+Presets can be renamed, overwritten, or deleted through the same management view, and each guild's presets are stored separately under `gw2_tools_bot/data/guild_<guild_id>/comp_presets.json` so servers only see their own rosters.
 
 ## Running the bot with PM2
 
