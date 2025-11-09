@@ -252,7 +252,12 @@ class CompSignupSelect(discord.ui.Select):
         for entry in config.classes:
             description = "Sign up for this class"
             if entry.required is not None:
-                description = f"{entry.required} needed"
+                current_signups = config.signups.get(entry.name, [])
+                remaining = max(entry.required - len(current_signups), 0)
+                if remaining > 0:
+                    description = f"{remaining} needed"
+                else:
+                    description = "Class is full"
             emoji = None
             if guild:
                 emoji = view.cog._get_class_emoji(
@@ -384,6 +389,31 @@ class CompChannelSelect(discord.ui.ChannelSelect):
         else:
             comp_config.channel_id = None
             message = "Composition posting channel cleared."
+        self.config_view.persist()
+        await self.config_view.refresh_summary(interaction)
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class CompRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, view: "CompConfigView", default_role: Optional[discord.Role]):
+        super().__init__(
+            placeholder="Select a role to ping with composition posts",
+            min_values=0,
+            max_values=1,
+            default_values=[default_role] if default_role else None,
+        )
+        self.config_view = view
+
+    async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        self.config_view.mark_modified()
+        comp_config = self.config_view.config.comp
+        if self.values:
+            role = self.values[0]
+            comp_config.ping_role_id = role.id
+            message = f"Composition posts will mention {role.mention}."
+        else:
+            comp_config.ping_role_id = None
+            message = "Composition ping role cleared."
         self.config_view.persist()
         await self.config_view.refresh_summary(interaction)
         await interaction.response.send_message(message, ephemeral=True)
@@ -803,6 +833,8 @@ class CompConfigView(discord.ui.View):
         comp_config = config.comp
         default_channel = guild.get_channel(comp_config.channel_id) if comp_config.channel_id else None
         self.add_item(CompChannelSelect(self, default_channel))
+        default_role = guild.get_role(comp_config.ping_role_id) if comp_config.ping_role_id else None
+        self.add_item(CompRoleSelect(self, default_role))
         self.add_item(discord.ui.Button(label="Edit schedule", style=discord.ButtonStyle.primary, custom_id="comp_schedule"))
         self.children[-1].callback = self._schedule_callback  # type: ignore[assignment]
         self.add_item(discord.ui.Button(label="Edit overview", style=discord.ButtonStyle.primary, custom_id="comp_overview"))
@@ -1162,6 +1194,25 @@ class CompCog(commands.GroupCog, name="comp"):
 
         send_new_message = force_new_message or message is None
 
+        ping_role = None
+        mention_text: Optional[str] = None
+        allowed_mentions: Optional[discord.AllowedMentions] = None
+        if comp_config.ping_role_id:
+            ping_role = guild.get_role(comp_config.ping_role_id)
+            if ping_role is None:
+                try:
+                    ping_role = await guild.fetch_role(comp_config.ping_role_id)
+                except (discord.Forbidden, discord.HTTPException):
+                    ping_role = None
+            if ping_role is not None:
+                mention_text = ping_role.mention
+                allowed_mentions = discord.AllowedMentions(
+                    roles=[ping_role],
+                    users=False,
+                    everyone=False,
+                    replied_user=False,
+                )
+
         if force_new_message and message is not None:
             try:
                 await message.edit(view=None)
@@ -1193,7 +1244,12 @@ class CompCog(commands.GroupCog, name="comp"):
 
         if message is None:
             try:
-                new_message = await channel.send(embed=embed, view=view)
+                kwargs = {"embed": embed, "view": view}
+                if mention_text:
+                    kwargs["content"] = mention_text
+                    if allowed_mentions is not None:
+                        kwargs["allowed_mentions"] = allowed_mentions
+                new_message = await channel.send(**kwargs)
             except (discord.Forbidden, discord.HTTPException):
                 LOGGER.warning("Failed to send composition message in guild %s", guild_id)
                 return
@@ -1334,6 +1390,15 @@ class CompCog(commands.GroupCog, name="comp"):
             channel = None
             channel_value = "Not set"
         embed.add_field(name="Post Channel", value=channel_value, inline=False)
+        if config.ping_role_id:
+            role = guild.get_role(config.ping_role_id)
+            if role:
+                role_value = role.mention
+            else:
+                role_value = f"<@&{config.ping_role_id}>"
+        else:
+            role_value = "Not set"
+        embed.add_field(name="Ping Role", value=role_value, inline=False)
         embed.add_field(name="Schedule", value=schedule_text, inline=False)
 
         if active_preset:
