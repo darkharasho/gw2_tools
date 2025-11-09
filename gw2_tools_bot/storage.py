@@ -76,6 +76,7 @@ class CompConfig:
     """Composition scheduling and signup configuration."""
 
     channel_id: Optional[int] = None
+    ping_role_id: Optional[int] = None
     post_days: List[int] = field(default_factory=list)
     post_time: Optional[str] = None
     timezone: str = "UTC"
@@ -143,8 +144,20 @@ class CompConfig:
 
         timezone_value = payload.get("timezone", "UTC")
         timezone_value = normalise_timezone(timezone_value)
+        ping_role_raw = payload.get("ping_role_id")
+        ping_role_id: Optional[int]
+        if isinstance(ping_role_raw, int):
+            ping_role_id = ping_role_raw
+        elif isinstance(ping_role_raw, str):
+            try:
+                ping_role_id = int(ping_role_raw)
+            except ValueError:
+                ping_role_id = None
+        else:
+            ping_role_id = None
         return cls(
             channel_id=payload.get("channel_id"),
+            ping_role_id=ping_role_id,
             post_days=post_days,
             post_time=payload.get("post_time"),
             timezone=timezone_value,
