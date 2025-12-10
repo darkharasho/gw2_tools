@@ -305,7 +305,7 @@ class MemberQueryCog(commands.Cog):
                 if not any(needle in name.casefold() for name in account_names):
                     return False, matched_guilds, matched_roles
             elif filter_type == "character":
-                if not any(needle in character.casefold() for character in characters):
+                if not any(needle == character.casefold() for character in characters):
                     return False, matched_guilds, matched_roles
             elif filter_type == "discord":
                 display = f"{member.display_name} ({member.name})".casefold()
@@ -577,7 +577,7 @@ class MemberQueryCog(commands.Cog):
                 if character_provided and character:
                     needle = character.casefold()
                     for name, account_name in bundle.get("character_entries", []):
-                        if needle in name.casefold():
+                        if needle == name.casefold():
                             matched_character_entries.append((name, account_name))
                 else:
                     matched_character_entries = list(bundle.get("character_entries", []))
@@ -727,8 +727,8 @@ class MemberQueryCog(commands.Cog):
                 ]
                 if show_characters:
                     character_lines = [
-                        f"• {name} — {account or 'Unknown account'}"
-                        for name, account in character_entries
+                        f"• {name} — {account_name or 'Unknown account'}"
+                        for name, account_name in character_entries
                     ]
                     detail_lines.append(
                         "  • Characters:\n"
