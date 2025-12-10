@@ -489,6 +489,7 @@ class MemberQueryCog(commands.Cog):
                     "member": member,
                     "account_names": [],
                     "characters": [],
+                    "character_entries": [],
                     "guild_ids": set(),
                 },
             )
@@ -497,6 +498,9 @@ class MemberQueryCog(commands.Cog):
             for character in record.characters:
                 if character not in bundle["characters"]:
                     bundle["characters"].append(character)
+                entry = (character, record.account_name)
+                if entry not in bundle["character_entries"]:
+                    bundle["character_entries"].append(entry)
             for gid in record.guild_ids:
                 if gid:
                     bundle["guild_ids"].add(gid)
@@ -520,6 +524,7 @@ class MemberQueryCog(commands.Cog):
                 discord.Member,
                 List[str],
                 List[str],
+                List[Tuple[str, Optional[str]]],
                 List[str],
                 List[str],
                 List[str],
@@ -552,11 +557,21 @@ class MemberQueryCog(commands.Cog):
                 guild_labels,
             )
             if ok:
+                matched_character_entries: List[Tuple[str, Optional[str]]] = []
+                if character_provided and character:
+                    needle = character.casefold()
+                    for name, account_name in bundle.get("character_entries", []):
+                        if needle in name.casefold():
+                            matched_character_entries.append((name, account_name))
+                else:
+                    matched_character_entries = list(bundle.get("character_entries", []))
+
                 matched.append(
                     (
                         member,
                         bundle["account_names"],
                         bundle["characters"],
+                        matched_character_entries,
                         matched_guilds or list(guild_labels.values()),
                         matched_roles,
                         mapped_role_mentions,
@@ -580,6 +595,7 @@ class MemberQueryCog(commands.Cog):
                     discord.Member,
                     List[str],
                     List[str],
+                    List[Tuple[str, Optional[str]]],
                     List[str],
                     List[str],
                     List[str],
@@ -591,6 +607,7 @@ class MemberQueryCog(commands.Cog):
             member,
             account_names,
             characters,
+            character_entries,
             matched_guilds,
             matched_roles,
             mapped_role_mentions,
@@ -619,6 +636,7 @@ class MemberQueryCog(commands.Cog):
                         member,
                         account_names,
                         characters,
+                        character_entries,
                         matched_guilds,
                         matched_roles,
                         mapped_role_mentions,
@@ -677,6 +695,7 @@ class MemberQueryCog(commands.Cog):
                 member,
                 account_names,
                 characters,
+                character_entries,
                 matched_guilds,
                 matched_roles,
                 mapped_role_mentions,
@@ -691,8 +710,15 @@ class MemberQueryCog(commands.Cog):
                     f"  • Roles: {', '.join(roles_label)}",
                 ]
                 if show_characters:
+                    character_lines = [
+                        f"• {name} — {account or 'Unknown account'}"
+                        for name, account in character_entries
+                    ]
                     detail_lines.append(
-                        "  • Characters:\n" + self._format_characters_block(characters)
+                        "  • Characters:\n"
+                        + self._trim_field(
+                            "\n".join(character_lines) or "• None",
+                        )
                     )
                 preview_lines.append("\n".join(detail_lines))
 
@@ -718,28 +744,34 @@ class MemberQueryCog(commands.Cog):
                     "Characters",
                 ]
             )
-            for (
-                member,
-                account_names,
-                characters,
-                matched_guilds,
-                _,
-                _,
-                guild_ids,
-            ) in matched:
-                guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
-                roles = [role.name for role in member.roles if not role.is_default()]
-                writer.writerow(
-                    [
-                        member.id,
-                        f"{member.display_name} ({member.name})",
-                        "; ".join(account_names),
-                        "; ".join(guild_ids),
-                        "; ".join(guild_labels or ["No guilds"]),
-                        "; ".join(roles),
-                        "; ".join(characters),
-                    ]
-                )
+        for (
+            member,
+            account_names,
+            characters,
+            character_entries,
+            matched_guilds,
+            _,
+            _,
+            guild_ids,
+        ) in matched:
+            guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
+            roles = [role.name for role in member.roles if not role.is_default()]
+            characters_for_csv = (
+                [name for name, _ in character_entries]
+                if character_provided
+                else characters
+            )
+            writer.writerow(
+                [
+                    member.id,
+                    f"{member.display_name} ({member.name})",
+                    "; ".join(account_names),
+                    "; ".join(guild_ids),
+                    "; ".join(guild_labels or ["No guilds"]),
+                    "; ".join(roles),
+                    "; ".join(characters_for_csv),
+                ]
+            )
 
             buffer.seek(0)
             files = [
