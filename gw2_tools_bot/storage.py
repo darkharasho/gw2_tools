@@ -314,7 +314,7 @@ class ApiKeyRecord:
         if isinstance(guilds_payload, list):
             for guild_id in guilds_payload:
                 if isinstance(guild_id, str):
-                    cleaned = guild_id.strip()
+                    cleaned = guild_id.strip().lower()
                     if cleaned:
                         guild_ids.append(cleaned)
 
@@ -377,11 +377,14 @@ class StorageManager:
                     continue
                 if isinstance(role_id, bool):
                     continue
+                key_clean = guild_key.strip().lower()
+                if not key_clean:
+                    continue
                 if isinstance(role_id, int):
-                    cleaned_roles[guild_key] = role_id
+                    cleaned_roles[key_clean] = role_id
                 elif isinstance(role_id, str):
                     try:
-                        cleaned_roles[guild_key] = int(role_id)
+                        cleaned_roles[key_clean] = int(role_id)
                     except ValueError:
                         continue
             payload["guild_role_ids"] = cleaned_roles
@@ -410,7 +413,7 @@ class StorageManager:
             for guild_key, role_id in config.guild_role_ids.items():
                 if not isinstance(guild_key, str):
                     continue
-                guild_key = guild_key.strip()
+                guild_key = guild_key.strip().lower()
                 if not guild_key:
                     continue
                 if isinstance(role_id, bool):
