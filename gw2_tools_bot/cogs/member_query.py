@@ -133,6 +133,16 @@ class MemberQueryCog(commands.Cog):
         else:
             await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
 
+    async def _safe_followup(
+        self, interaction: discord.Interaction, *, embed: discord.Embed, files=None
+    ) -> None:
+        """Send a followup only if the interaction is still active."""
+
+        try:
+            await interaction.followup.send(embed=embed, files=files, ephemeral=True)
+        except discord.NotFound:
+            LOGGER.warning("Interaction expired before results could be sent")
+
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
@@ -783,9 +793,9 @@ class MemberQueryCog(commands.Cog):
             ]
 
         if files:
-            await interaction.followup.send(embed=embed, files=files, ephemeral=True)
+            await self._safe_followup(interaction, embed=embed, files=files)
         else:
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await self._safe_followup(interaction, embed=embed)
 
     @memberquery.command(
         name="help",
