@@ -399,7 +399,8 @@ class MemberQueryCog(commands.Cog):
             character=character,
             discord_member=discord_member,
         )
-        show_characters = bool(account or character or discord_member)
+        # Only surface character lists when explicitly filtering by character.
+        show_characters = bool(character)
         if group_by:
             group_by = group_by.lower()
         allowed_groups = {"guild", "role", "account", "discord"}
