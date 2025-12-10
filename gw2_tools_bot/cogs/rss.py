@@ -17,6 +17,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
+from ..branding import BRAND_COLOUR
 from ..storage import RssFeedConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
     """Manage RSS feed subscriptions and push updates to Discord channels."""
 
     CHECK_INTERVAL_MINUTES = 10
-    EMBED_COLOR = discord.Color.blurple()
+    EMBED_COLOR = BRAND_COLOUR
     PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: GW2ToolsBot) -> None:

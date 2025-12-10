@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 from markdownify import markdownify as html_to_markdown
 
 from ..bot import GW2ToolsBot
+from ..branding import BRAND_COLOUR
 from ..storage import UpdateNotesStatus
 
 LOGGER = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class UpdateNotesCog(commands.Cog):
     """Poll the official wiki page for new game update notes."""
 
     CHECK_INTERVAL_MINUTES = 15
-    EMBED_COLOR = discord.Color.dark_gold()
+    EMBED_COLOR = BRAND_COLOUR
     PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: GW2ToolsBot) -> None:

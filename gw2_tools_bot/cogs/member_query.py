@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..bot import GW2ToolsBot
+from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
 from ..storage import normalise_guild_id
 
@@ -49,7 +50,7 @@ class MemberQueryCog(commands.Cog):
         *,
         title: str,
         description: Optional[str] = None,
-        colour: discord.Colour = discord.Colour.blurple(),
+        colour: discord.Colour = BRAND_COLOUR,
     ) -> discord.Embed:
         embed = discord.Embed(title=title, description=description or "", colour=colour)
         embed.set_footer(text="Guild Wars 2 Tools")
@@ -130,7 +131,7 @@ class MemberQueryCog(commands.Cog):
         *,
         title: str,
         description: str,
-        colour: discord.Colour = discord.Colour.blurple(),
+        colour: discord.Colour = BRAND_COLOUR,
         ephemeral: bool = True,
         use_followup: bool = False,
     ) -> None:
@@ -480,7 +481,7 @@ class MemberQueryCog(commands.Cog):
                 interaction,
                 title="Member query",
                 description="This command can only be used in a server.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -500,7 +501,7 @@ class MemberQueryCog(commands.Cog):
                     "Guild filters must use IDs configured via /guildroles set. "
                     "Choose a mapped guild from the autocomplete list."
                 ),
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -534,7 +535,7 @@ class MemberQueryCog(commands.Cog):
                 interaction,
                 title="Member query",
                 description="Unsupported group. Choose guild, role, account, or discord.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -617,7 +618,7 @@ class MemberQueryCog(commands.Cog):
                         "No stored characters matched that name. Try selecting a name "
                         "from the autocomplete list or refresh your API keys with `/apikey update`."
                     ),
-                    colour=discord.Colour.red(),
+                    colour=BRAND_COLOUR,
                     use_followup=True,
                 )
                 return

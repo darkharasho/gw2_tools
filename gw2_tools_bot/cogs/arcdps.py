@@ -14,6 +14,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
+from ..branding import BRAND_COLOUR
 from ..storage import ArcDpsStatus
 from ..http_utils import read_response_text
 
@@ -248,7 +249,7 @@ class ArcDpsUpdatesCog(commands.Cog):
         timestamp = int(release_time.timestamp())
         embed = discord.Embed(
             title="ArcDPS Update",
-            colour=discord.Colour.from_rgb(255, 219, 90),
+            colour=BRAND_COLOUR,
             url=self.RELEASE_URL,
         )
 
