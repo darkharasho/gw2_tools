@@ -705,13 +705,13 @@ class ApiKeyStore:
     ) -> List[Tuple[int, int, ApiKeyRecord]]:
         """Return API keys matching the provided filters for reporting."""
 
-        clauses: List[str] = []
-        params: List[Any] = []
+        if guild_id is None:
+            raise ValueError("A Discord guild_id is required to query API keys safely")
+
+        clauses: List[str] = ["ak.guild_id = ?"]
+        params: List[Any] = [guild_id]
         joins: List[str] = []
 
-        if guild_id is not None:
-            clauses.append("ak.guild_id = ?")
-            params.append(guild_id)
         if user_id is not None:
             clauses.append("ak.user_id = ?")
             params.append(user_id)
@@ -720,7 +720,7 @@ class ApiKeyStore:
             clauses.append("g.guild_id = ?")
             params.append(normalise_guild_id(gw2_guild_id))
 
-        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        where_clause = f"WHERE {' AND '.join(clauses)}"
         join_clause = " ".join(joins)
         query = (
             "SELECT ak.* FROM api_keys ak "
