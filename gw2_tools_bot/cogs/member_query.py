@@ -229,18 +229,21 @@ class MemberQueryCog(commands.Cog):
         if not interaction.guild:
             return []
 
-        results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
-        guild_ids = {
-            guild_id for _, _, record in results for guild_id in record.guild_ids if guild_id
-        }
+        config = self.bot.get_config(interaction.guild.id)
+        guild_ids = list(config.guild_role_ids.keys())
+        if not guild_ids:
+            return []
+
         details = await self._fetch_guild_details(guild_ids)
         choices: List[app_commands.Choice[str]] = []
-        for guild_id, label in details.items():
+        current_lower = current.lower()
+        for guild_id in guild_ids:
+            label = details.get(guild_id, guild_id)
             display = f"{label} ({guild_id})"
-            if current.lower() in display.lower():
+            if current_lower in display.lower():
                 choices.append(app_commands.Choice(name=display[:100], value=guild_id))
-                if len(choices) >= 25:
-                    break
+            if len(choices) >= 25:
+                break
         return choices
 
     async def _account_autocomplete(
@@ -326,6 +329,20 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
+        config = self.bot.get_config(interaction.guild.id)
+        allowed_guild_ids = set(config.guild_role_ids.keys())
+        if guild and guild not in allowed_guild_ids:
+            await self._send_embed(
+                interaction,
+                title="Member query",
+                description=(
+                    "Guild filters must use IDs configured via /guildroles set. "
+                    "Choose a mapped guild from the autocomplete list."
+                ),
+                colour=discord.Colour.red(),
+            )
+            return
+
         filters = self._build_filters(
             guild=guild,
             role=role,
@@ -357,26 +374,45 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
-        guild_ids = {
+        guild_ids_for_lookup = allowed_guild_ids or {
             guild_id for _, _, record in results for guild_id in record.guild_ids if guild_id
         }
-        guild_details = await self._fetch_guild_details(guild_ids)
+        guild_details = await self._fetch_guild_details(guild_ids_for_lookup)
 
-        matched: List[Tuple[discord.Member, ApiKeyRecord, List[str], List[str]]] = []
+        matched: List[
+            Tuple[discord.Member, ApiKeyRecord, List[str], List[str], List[str]]
+        ] = []
         for _, user_id, record in results:
             member = interaction.guild.get_member(user_id)
             if not member:
                 continue
+            configured_guilds = [gid for gid in record.guild_ids if gid in allowed_guild_ids]
             guild_labels = {
                 gid: guild_details.get(gid, gid)
-                for gid in record.guild_ids
+                for gid in (configured_guilds or record.guild_ids)
                 if gid
             }
+            mapped_role_mentions: List[str] = []
+            for gid in record.guild_ids:
+                role_id = config.guild_role_ids.get(gid)
+                if role_id:
+                    role_obj = interaction.guild.get_role(role_id)
+                    if role_obj:
+                        mapped_role_mentions.append(role_obj.mention)
+            mapped_role_mentions = sorted(set(mapped_role_mentions))
             ok, matched_guilds, matched_roles = self._match_member_filters(
                 filters, member, record, guild_labels
             )
             if ok:
-                matched.append((member, record, matched_guilds or list(guild_labels.values()), matched_roles))
+                matched.append(
+                    (
+                        member,
+                        record,
+                        matched_guilds or list(guild_labels.values()),
+                        matched_roles,
+                        mapped_role_mentions,
+                    )
+                )
 
         if not matched:
             await self._send_embed(
@@ -387,14 +423,16 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
-        grouped: Dict[str, List[Tuple[discord.Member, ApiKeyRecord, List[str], List[str]]]] = {}
-        for member, record, matched_guilds, matched_roles in matched:
+        grouped: Dict[
+            str, List[Tuple[discord.Member, ApiKeyRecord, List[str], List[str], List[str]]]
+        ] = {}
+        for member, record, matched_guilds, matched_roles, mapped_role_mentions in matched:
             if group_by == "guild":
                 keys = matched_guilds or ["No guilds"]
             elif group_by == "role":
-                keys = matched_roles or [role.mention for role in member.roles if not role.is_default()]
+                keys = mapped_role_mentions or matched_roles
                 if not keys:
-                    keys = ["No roles"]
+                    keys = ["No mapped roles"]
             elif group_by == "account":
                 keys = [record.account_name or "Unknown account"]
             elif group_by == "discord":
@@ -403,30 +441,59 @@ class MemberQueryCog(commands.Cog):
                 keys = ["Matches"]
 
             for key in keys:
-                grouped.setdefault(key, []).append((member, record, matched_guilds, matched_roles))
+                grouped.setdefault(key, []).append(
+                    (member, record, matched_guilds, matched_roles, mapped_role_mentions)
+                )
 
-        filters_label = ", ".join(f"{k}:{v}" for k, v in filters) if filters else "None (all)"
-        group_label = group_by or "None"
+        filters_label = []
+        if guild:
+            guild_label = guild_details.get(guild, guild)
+            filters_label.append(
+                "\n".join([f"• Guild: {guild_label}", f"  ```{guild}```"])
+            )
+        else:
+            filters_label.append("• Guild: All mapped")
+        if role:
+            filters_label.append(f"• Role: {role.mention}")
+        if account:
+            filters_label.append(f"• Account: `{account}`")
+        if character:
+            filters_label.append(f"• Character: `{character}`")
+        if discord_member:
+            filters_label.append(f"• Discord: {discord_member.mention}")
+        if not any([guild, role, account, character, discord_member]):
+            filters_label = ["• None (all)"]
 
         embed = self._embed(
             title="Member query results",
-            description=self._format_list(
-                [f"Filters: {filters_label}", f"Group by: {group_label}"],
-                placeholder="Filters applied",
-            ),
+            description="\n".join(filters_label),
+        )
+        embed.add_field(
+            name="Group by",
+            value=group_by.capitalize() if group_by else "None",
+            inline=False,
         )
 
-        for group, entries in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())):
+        for group, entries in sorted(
+            grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
+        ):
             preview_lines: List[str] = []
-            for member, record, matched_guilds, matched_roles in entries[:10]:
+            for (
+                member,
+                record,
+                matched_guilds,
+                matched_roles,
+                mapped_role_mentions,
+            ) in entries[:10]:
                 guilds_label = matched_guilds or ["No guilds"]
+                roles_label = matched_roles or mapped_role_mentions or ["None mapped"]
                 preview_lines.append(
-                    " • ".join(
+                    "\n".join(
                         [
-                            member.mention,
-                            f"Account: {record.account_name or 'Unknown'}",
-                            f"Guilds: {', '.join(guilds_label)}",
-                            f"Roles: {', '.join(matched_roles) if matched_roles else 'None recorded'}",
+                            f"• {member.mention}",
+                            f"  • Account: `{record.account_name or 'Unknown'}`",
+                            f"  • Guilds: {', '.join(guilds_label)}",
+                            f"  • Roles: {', '.join(roles_label)}",
                         ]
                     )
                 )
@@ -453,7 +520,7 @@ class MemberQueryCog(commands.Cog):
                     "Characters",
                 ]
             )
-            for member, record, _, _ in matched:
+            for member, record, _, _, _ in matched:
                 guild_labels = [guild_details.get(gid, gid) for gid in record.guild_ids]
                 roles = [role.name for role in member.roles if not role.is_default()]
                 writer.writerow(
