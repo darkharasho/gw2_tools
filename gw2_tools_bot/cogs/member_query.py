@@ -89,6 +89,18 @@ class MemberQueryCog(commands.Cog):
         return "```\n" + "\n".join(lines) + "\n```"
 
     @staticmethod
+    def _trim_field(value: str, limit: int = 1024) -> str:
+        if len(value) <= limit:
+            return value
+
+        suffix = "\n… truncated …"
+        if len(suffix) >= limit:
+            return value[:limit]
+
+        allowed = limit - len(suffix)
+        return value[:allowed].rstrip() + suffix
+
+    @staticmethod
     def _option_names(interaction: discord.Interaction) -> set[str]:
         """Return provided option names for the current subcommand."""
 
@@ -637,7 +649,11 @@ class MemberQueryCog(commands.Cog):
             title="Member query results",
             description="",
         )
-        embed.add_field(name="Filters", value="\n".join(filters_label), inline=False)
+        embed.add_field(
+            name="Filters",
+            value=self._trim_field("\n".join(filters_label)),
+            inline=False,
+        )
         embed.add_field(
             name="Group by",
             value=group_by.capitalize() if group_by else "None",
@@ -680,9 +696,10 @@ class MemberQueryCog(commands.Cog):
                     )
                 preview_lines.append("\n".join(detail_lines))
 
+            field_value = "\n".join(preview_lines) if preview_lines else "• No entries"
             embed.add_field(
                 name=f"{display_group} ({len(entries)})",
-                value="\n".join(preview_lines) if preview_lines else "• No entries",
+                value=self._trim_field(field_value),
                 inline=False,
             )
 
