@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional
 
 
@@ -26,6 +27,9 @@ ZERO_WIDTH_CHARS = {
     "\ufeff",  # zero width no-break space / BOM
 }
 ZERO_WIDTH_TRANSLATION = {ord(char): None for char in ZERO_WIDTH_CHARS}
+
+
+_GUILD_ID_ALLOWED = re.compile(r"[a-f0-9-]+")
 
 
 def normalise_timezone(value: str) -> str:
@@ -60,6 +64,15 @@ def utcnow() -> str:
     """Return the current UTC timestamp formatted for storage."""
 
     return datetime.utcnow().strftime(ISOFORMAT)
+
+
+def normalise_guild_id(guild_id: str) -> str:
+    """Return a canonical Guild Wars 2 guild ID for matching and persistence."""
+
+    cleaned = guild_id.strip().lower()
+    # Strip any invisible or non-hex characters to avoid mismatches from pasted values
+    cleaned = "".join(_GUILD_ID_ALLOWED.findall(cleaned))
+    return cleaned
 
 
 @dataclass
@@ -314,7 +327,7 @@ class ApiKeyRecord:
         if isinstance(guilds_payload, list):
             for guild_id in guilds_payload:
                 if isinstance(guild_id, str):
-                    cleaned = guild_id.strip().lower()
+                    cleaned = normalise_guild_id(guild_id)
                     if cleaned:
                         guild_ids.append(cleaned)
 
@@ -377,7 +390,7 @@ class StorageManager:
                     continue
                 if isinstance(role_id, bool):
                     continue
-                key_clean = guild_key.strip().lower()
+                key_clean = normalise_guild_id(guild_key)
                 if not key_clean:
                     continue
                 if isinstance(role_id, int):
@@ -413,7 +426,7 @@ class StorageManager:
             for guild_key, role_id in config.guild_role_ids.items():
                 if not isinstance(guild_key, str):
                     continue
-                guild_key = guild_key.strip().lower()
+                guild_key = normalise_guild_id(guild_key)
                 if not guild_key:
                     continue
                 if isinstance(role_id, bool):
