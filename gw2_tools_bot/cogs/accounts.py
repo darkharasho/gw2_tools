@@ -144,8 +144,8 @@ class AccountsCog(commands.Cog):
         return details
 
     async def _validate_api_key(
-        self, api_key: str
-    ) -> Tuple[List[str], List[str], Dict[str, str], str]:
+        self, api_key: str, *, allow_missing_permissions: bool = False
+    ) -> Tuple[List[str], List[str], Dict[str, str], str, List[str]]:
         tokeninfo = await self._fetch_json(
             "https://api.guildwars2.com/v2/tokeninfo", api_key=api_key
         )
@@ -156,11 +156,10 @@ class AccountsCog(commands.Cog):
             if isinstance(perm, str) and perm.strip()
         }
         permissions = sorted(permissions_set)
-        missing = self.REQUIRED_PERMISSIONS.difference(permissions_set)
-        if missing:
+        missing = sorted(self.REQUIRED_PERMISSIONS.difference(permissions_set))
+        if missing and not allow_missing_permissions:
             raise ValueError(
-                "API key is missing required permissions: "
-                + ", ".join(sorted(missing))
+                "API key is missing required permissions: " + ", ".join(missing)
             )
 
         account = await self._fetch_json(
@@ -176,7 +175,7 @@ class AccountsCog(commands.Cog):
             }
         )
         guild_details = await self._fetch_guild_details(guild_ids, api_key=api_key)
-        return permissions, guild_ids, guild_details, account_name
+        return permissions, guild_ids, guild_details, account_name, missing
 
     def _generate_default_name(
         self, account_name: str, existing_records: Sequence[ApiKeyRecord]
@@ -570,18 +569,68 @@ class AccountsCog(commands.Cog):
 
         existing_keys = self.bot.storage.get_user_api_keys(interaction.guild.id, interaction.user.id)
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        steps: List[Dict[str, str]] = [
+            {"label": "Key validation", "status": "⏳ Pending"},
+            {"label": "Permission: account", "status": "⏳ Pending"},
+            {"label": "Permission: characters", "status": "⏳ Pending"},
+            {"label": "Permission: guilds", "status": "⏳ Pending"},
+            {"label": "Permission: wvw", "status": "⏳ Pending"},
+            {"label": "Account lookup", "status": "⏳ Pending"},
+            {"label": "Guild lookup", "status": "⏳ Pending"},
+            {"label": "Save key", "status": "⏳ Pending"},
+            {"label": "Role sync", "status": "⏳ Pending"},
+        ]
+
+        def _set_status(label: str, status: str) -> None:
+            for step in steps:
+                if step["label"] == label:
+                    step["status"] = status
+                    return
+
+        def _steps_value() -> str:
+            return "\n".join(f"{step['status']} — {step['label']}" for step in steps)
+
+        def _progress_embed(description: str, *, colour: discord.Colour = discord.Colour.blurple()) -> discord.Embed:
+            embed = self._embed(
+                title="API key verification",
+                description=description,
+                colour=colour,
+            )
+            embed.add_field(name="Verification steps", value=_steps_value(), inline=False)
+            return embed
+
+        await interaction.response.send_message(
+            embed=_progress_embed("Starting verification and permission checks…"),
+            ephemeral=True,
+        )
+
         try:
-            permissions, guild_ids, guild_details, account_name = await self._validate_api_key(key_clean)
+            permissions, guild_ids, guild_details, account_name, missing = await self._validate_api_key(
+                key_clean, allow_missing_permissions=True
+            )
         except ValueError as exc:
-            await self._send_embed(
-                interaction,
-                title="API key validation failed",
-                description=str(exc),
-                colour=discord.Colour.red(),
-                use_followup=True,
+            _set_status("Key validation", "❌ Failed")
+            await interaction.edit_original_response(
+                embed=_progress_embed(str(exc), colour=discord.Colour.red())
             )
             return
+
+        _set_status("Key validation", "✅ Success")
+        for permission in sorted(self.REQUIRED_PERMISSIONS):
+            label = f"Permission: {permission}"
+            _set_status(label, "✅ Present" if permission in permissions else "❌ Missing")
+
+        if missing:
+            await interaction.edit_original_response(
+                embed=_progress_embed(
+                    "API key is missing required permissions. Please generate a key with `account`, `characters`, `guilds`, and `wvw`.",
+                    colour=discord.Colour.red(),
+                )
+            )
+            return
+
+        _set_status("Account lookup", "✅ Success")
+        _set_status("Guild lookup", "✅ Success")
 
         default_name = self._generate_default_name(account_name, existing_keys)
 
@@ -595,13 +644,16 @@ class AccountsCog(commands.Cog):
             updated_at=utcnow(),
         )
         self.bot.storage.upsert_api_key(interaction.guild.id, interaction.user.id, record)
+        _set_status("Save key", "✅ Stored")
 
         added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
+        _set_status("Role sync", "✅ Completed" if not error else "⚠️ Issues")
 
         embed = self._embed(
             title="API key saved",
-            description="Your key was validated and stored. Role assignments are shown below.",
+            description="Verification completed. Your key was stored and roles were synced.",
         )
+        embed.add_field(name="Verification steps", value=_steps_value(), inline=False)
         embed.add_field(
             name="Account",
             value=self._format_list([f"Key name: `{default_name}`", f"Account name: {account_name}"]),
@@ -640,7 +692,7 @@ class AccountsCog(commands.Cog):
 
         embed.add_field(name="API key", value=f"```{key_clean}```", inline=False)
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.edit_original_response(embed=embed)
 
     @api_keys.command(name="update", description="Update or rename a stored API key.")
     @app_commands.describe(name="Existing key name")
@@ -884,7 +936,13 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             return
 
         try:
-            permissions, guild_ids, guild_details, account_name = await self.cog._validate_api_key(key_clean)
+            (
+                permissions,
+                guild_ids,
+                guild_details,
+                account_name,
+                _,
+            ) = await self.cog._validate_api_key(key_clean)
         except ValueError as exc:
             embed = self.cog._embed(
                 title="API key validation failed",
