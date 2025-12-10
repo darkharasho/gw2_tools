@@ -1342,6 +1342,71 @@ class AccountsCog(commands.Cog):
 
         await interaction.followup.send(embed=embed, files=files, ephemeral=True)
 
+    @app_commands.command(
+        name="memberquery_help",
+        description="Explain the /memberquery DSL for admin searches.",
+    )
+    async def member_query_help(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        embed = self._embed(
+            title="Member query help",
+            description=(
+                "Build filters with `type:value` pairs separated by spaces. "
+                "Use quotes if values contain spaces."
+            ),
+        )
+
+        embed.add_field(
+            name="Common examples",
+            value="\n".join(
+                [
+                    "`guild:EWW role:@Raid group:guild` — members in EWW with the Raid role, grouped by guild.",
+                    "`character:\"my thief\"` — members with a character matching that name.",
+                    "`discord:@User role:1234567890` — members matching a mention/ID and role ID.",
+                ]
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="Filters",
+            value=self._format_list(
+                [
+                    "`guild:<name|tag|id>` — matches GW2 guild name/tag/ID on saved keys.",
+                    "`role:<@mention|id|name>` — matches any non-@everyone Discord role held.",
+                    "`account:<text>` — matches GW2 account name from the API key.",
+                    "`character:<text>` — matches any stored character name.",
+                    "`discord:<name|id>` — matches Discord display name/username or ID.",
+                ]
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="Grouping",
+            value=self._format_list(
+                [
+                    "Add `group:guild`, `group:role`, `group:account`, or `group:discord` to cluster results.",
+                    "Omit grouping to show everything under a single section.",
+                ]
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="CSV export",
+            value=self._format_list(
+                [
+                    "Set `as_csv:true` to attach a CSV of all matches (Discord IDs, roles, guilds, characters).",
+                ]
+            ),
+            inline=False,
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
     """Modal that captures a new API key and optional name."""
