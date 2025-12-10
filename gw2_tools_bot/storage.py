@@ -303,6 +303,7 @@ class ApiKeyRecord:
     account_name: str = ""
     permissions: List[str] = field(default_factory=list)
     guild_ids: List[str] = field(default_factory=list)
+    characters: List[str] = field(default_factory=list)
     created_at: str = field(default_factory=utcnow)
     updated_at: str = field(default_factory=utcnow)
 
@@ -336,6 +337,15 @@ class ApiKeyRecord:
                     if cleaned:
                         guild_ids.append(cleaned)
 
+        characters_payload = payload.get("characters") or []
+        characters: List[str] = []
+        if isinstance(characters_payload, list):
+            for character in characters_payload:
+                if isinstance(character, str):
+                    cleaned = character.strip()
+                    if cleaned:
+                        characters.append(cleaned)
+
         account_name_raw = payload.get("account_name")
         account_name = account_name_raw.strip() if isinstance(account_name_raw, str) else ""
 
@@ -348,6 +358,7 @@ class ApiKeyRecord:
             account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
+            characters=characters,
             created_at=created_at,
             updated_at=updated_at,
         )
@@ -382,6 +393,7 @@ class ApiKeyStore:
                     account_name TEXT NOT NULL,
                     permissions TEXT NOT NULL,
                     guild_ids TEXT NOT NULL,
+                    characters TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(guild_id, user_id, name_normalized)
@@ -397,6 +409,15 @@ class ApiKeyStore:
                 CREATE INDEX IF NOT EXISTS idx_api_key_guilds_api ON api_key_guilds(api_key_id);
                 """
             )
+
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(api_keys)").fetchall()
+            }
+            if "characters" not in columns:
+                connection.execute(
+                    "ALTER TABLE api_keys ADD COLUMN characters TEXT NOT NULL DEFAULT '[]'"
+                )
 
     def _migrate_json_stores(self) -> None:
         """Import legacy JSON API key stores into SQLite once per guild."""
@@ -482,15 +503,38 @@ class ApiKeyStore:
         return cleaned
 
     @staticmethod
+    def _normalise_characters(characters: Iterable[str]) -> List[str]:
+        seen: set[str] = set()
+        cleaned: List[str] = []
+        for character in characters or []:
+            if not isinstance(character, str):
+                continue
+            name_clean = character.strip()
+            if not name_clean:
+                continue
+            key = name_clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name_clean)
+        return cleaned
+
+    @staticmethod
     def _row_to_record(row: sqlite3.Row) -> ApiKeyRecord:
         permissions = json.loads(row["permissions"]) if row["permissions"] else []
         guild_ids = json.loads(row["guild_ids"]) if row["guild_ids"] else []
+        characters = (
+            json.loads(row["characters"])
+            if "characters" in row.keys() and row["characters"]
+            else []
+        )
         return ApiKeyRecord(
             name=row["name"],
             key=row["key"],
             account_name=row["account_name"],
             permissions=permissions,
             guild_ids=guild_ids,
+            characters=characters,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -524,6 +568,7 @@ class ApiKeyStore:
                 account_name=record.account_name.strip(),
                 permissions=self._normalise_permissions(record.permissions),
                 guild_ids=self._normalise_guild_ids(record.guild_ids),
+                characters=self._normalise_characters(record.characters),
                 created_at=record.created_at,
                 updated_at=utcnow(),
             )
@@ -540,8 +585,8 @@ class ApiKeyStore:
                     """
                     INSERT INTO api_keys (
                         guild_id, user_id, name, name_normalized, key, account_name,
-                        permissions, guild_ids, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        permissions, guild_ids, characters, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         guild_id,
@@ -552,6 +597,7 @@ class ApiKeyStore:
                         record.account_name,
                         json.dumps(self._normalise_permissions(record.permissions)),
                         json.dumps(self._normalise_guild_ids(record.guild_ids)),
+                        json.dumps(self._normalise_characters(record.characters)),
                         record.created_at,
                         record.updated_at,
                     ),
@@ -578,6 +624,7 @@ class ApiKeyStore:
         name_normalized = record.name.strip().lower()
         account_name = record.account_name.strip()
         key_value = record.key.strip()
+        characters = self._normalise_characters(record.characters)
         if not name_normalized or not key_value:
             return
 
@@ -597,7 +644,7 @@ class ApiKeyStore:
                     """
                     UPDATE api_keys
                     SET name = ?, key = ?, account_name = ?, permissions = ?, guild_ids = ?,
-                        updated_at = ?, created_at = ?
+                        characters = ?, updated_at = ?, created_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -606,6 +653,7 @@ class ApiKeyStore:
                         account_name,
                         json.dumps(permissions),
                         json.dumps(guild_ids),
+                        json.dumps(characters),
                         utcnow(),
                         created_at,
                         existing["id"],
@@ -620,8 +668,8 @@ class ApiKeyStore:
                     """
                     INSERT INTO api_keys (
                         guild_id, user_id, name, name_normalized, key, account_name,
-                        permissions, guild_ids, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        permissions, guild_ids, characters, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         guild_id,
@@ -632,6 +680,7 @@ class ApiKeyStore:
                         account_name,
                         json.dumps(permissions),
                         json.dumps(guild_ids),
+                        json.dumps(characters),
                         record.created_at,
                         utcnow(),
                     ),
