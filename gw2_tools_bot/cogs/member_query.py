@@ -4,7 +4,6 @@ import csv
 import io
 import json
 import logging
-import shlex
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import aiohttp
@@ -20,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MemberQueryCog(commands.Cog):
-    """Admin member lookup using a simple DSL."""
+    """Admin member lookup with selectable filters and grouping."""
 
     memberquery = app_commands.Group(
         name="memberquery",
@@ -143,45 +142,29 @@ class MemberQueryCog(commands.Cog):
         return details
 
     # ------------------------------------------------------------------
-    # DSL handling
+    # Filtering helpers
     # ------------------------------------------------------------------
-    def _parse_member_query(self, query: str) -> Tuple[List[Tuple[str, str]], Optional[str]]:
-        tokens = shlex.split(query)
+    def _build_filters(
+        self,
+        *,
+        guild: Optional[str],
+        role: Optional[discord.Role],
+        account: Optional[str],
+        character: Optional[str],
+        discord_member: Optional[discord.Member],
+    ) -> List[Tuple[str, str]]:
         filters: List[Tuple[str, str]] = []
-        group_by: Optional[str] = None
-        allowed_filters = {"guild", "role", "account", "character", "discord"}
-        allowed_groups = {"guild", "role", "account", "discord"}
-
-        for token in tokens:
-            if ":" not in token:
-                raise ValueError(
-                    "Each filter must use the form `type:value` (e.g. guild:EWW or role:@Raid)."
-                )
-            key, value = token.split(":", 1)
-            key_clean = key.strip().lower()
-            value_clean = value.strip()
-            if not key_clean or not value_clean:
-                raise ValueError("Filters must include both a type and a value.")
-
-            if key_clean == "group":
-                if value_clean.lower() not in allowed_groups:
-                    raise ValueError(
-                        "Unsupported group. Choose from guild, role, account, or discord."
-                    )
-                group_by = value_clean.lower()
-                continue
-
-            if key_clean not in allowed_filters:
-                raise ValueError(
-                    "Unsupported filter. Use guild, role, account, character, or discord."
-                )
-
-            filters.append((key_clean, value_clean))
-
-        if not filters:
-            raise ValueError("Provide at least one filter such as guild:EWW or role:@Role.")
-
-        return filters, group_by
+        if guild:
+            filters.append(("guild", guild))
+        if role:
+            filters.append(("role", str(role.id)))
+        if account:
+            filters.append(("account", account))
+        if character:
+            filters.append(("character", character))
+        if discord_member:
+            filters.append(("discord", str(discord_member.id)))
+        return filters
 
     def _match_member_filters(
         self,
@@ -240,6 +223,58 @@ class MemberQueryCog(commands.Cog):
     # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
+    async def _guild_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        if not interaction.guild:
+            return []
+
+        results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
+        guild_ids = {
+            guild_id for _, _, record in results for guild_id in record.guild_ids if guild_id
+        }
+        details = await self._fetch_guild_details(guild_ids)
+        choices: List[app_commands.Choice[str]] = []
+        for guild_id, label in details.items():
+            display = f"{label} ({guild_id})"
+            if current.lower() in display.lower():
+                choices.append(app_commands.Choice(name=display[:100], value=guild_id))
+                if len(choices) >= 25:
+                    break
+        return choices
+
+    async def _account_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        if not interaction.guild:
+            return []
+
+        results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
+        seen = []
+        for _, _, record in results:
+            if record.account_name and record.account_name not in seen:
+                if current.lower() in record.account_name.lower():
+                    seen.append(record.account_name)
+        return [
+            app_commands.Choice(name=value[:100], value=value) for value in seen[:25]
+        ]
+
+    async def _character_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        if not interaction.guild:
+            return []
+
+        results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
+        characters: List[str] = []
+        for _, _, record in results:
+            for name in record.characters:
+                if name not in characters and current.lower() in name.lower():
+                    characters.append(name)
+        return [
+            app_commands.Choice(name=value[:100], value=value) for value in characters[:25]
+        ]
+
     @memberquery.command(
         name="query",
         description=(
@@ -247,11 +282,37 @@ class MemberQueryCog(commands.Cog):
         ),
     )
     @app_commands.describe(
-        query="Filters like guild:EWW role:@Raid group:guild",
+        guild="Match a GW2 guild name/tag/ID (autocomplete)",
+        role="Match members with this Discord role",
+        account="Match a stored GW2 account name",
+        character="Match a stored GW2 character name",
+        discord_member="Match a specific Discord member",
+        group_by="Group results by this field",
         as_csv="Export the results to a CSV attachment",
     )
+    @app_commands.autocomplete(
+        guild=_guild_autocomplete,
+        account=_account_autocomplete,
+        character=_character_autocomplete,
+    )
+    @app_commands.choices(
+        group_by=[
+            app_commands.Choice(name="Guild", value="guild"),
+            app_commands.Choice(name="Role", value="role"),
+            app_commands.Choice(name="Account", value="account"),
+            app_commands.Choice(name="Discord", value="discord"),
+        ]
+    )
     async def member_query(
-        self, interaction: discord.Interaction, query: str, as_csv: bool = False
+        self,
+        interaction: discord.Interaction,
+        guild: Optional[str] = None,
+        role: Optional[discord.Role] = None,
+        account: Optional[str] = None,
+        character: Optional[str] = None,
+        discord_member: Optional[discord.Member] = None,
+        group_by: Optional[str] = None,
+        as_csv: bool = False,
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
@@ -265,13 +326,21 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
-        try:
-            filters, group_by = self._parse_member_query(query)
-        except ValueError as exc:
+        filters = self._build_filters(
+            guild=guild,
+            role=role,
+            account=account,
+            character=character,
+            discord_member=discord_member,
+        )
+        if group_by:
+            group_by = group_by.lower()
+        allowed_groups = {"guild", "role", "account", "discord"}
+        if group_by and group_by not in allowed_groups:
             await self._send_embed(
                 interaction,
                 title="Member query",
-                description=str(exc),
+                description="Unsupported group. Choose guild, role, account, or discord.",
                 colour=discord.Colour.red(),
             )
             return
@@ -336,13 +405,13 @@ class MemberQueryCog(commands.Cog):
             for key in keys:
                 grouped.setdefault(key, []).append((member, record, matched_guilds, matched_roles))
 
+        filters_label = ", ".join(f"{k}:{v}" for k, v in filters) if filters else "None (all)"
+        group_label = group_by or "None"
+
         embed = self._embed(
             title="Member query results",
             description=self._format_list(
-                [
-                    f"Filters: {', '.join(f'{k}:{v}' for k, v in filters)}",
-                    f"Group by: {group_by or 'none'}",
-                ],
+                [f"Filters: {filters_label}", f"Group by: {group_label}"],
                 placeholder="Filters applied",
             ),
         )
@@ -368,7 +437,7 @@ class MemberQueryCog(commands.Cog):
                 inline=False,
             )
 
-        files = None
+        files: List[discord.File] = []
         if as_csv:
             buffer = io.StringIO()
             writer = csv.writer(buffer)
@@ -408,11 +477,14 @@ class MemberQueryCog(commands.Cog):
                 )
             ]
 
-        await interaction.followup.send(embed=embed, files=files, ephemeral=True)
+        if files:
+            await interaction.followup.send(embed=embed, files=files, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
     @memberquery.command(
         name="help",
-        description="Explain the /memberquery DSL for admin searches.",
+        description="Explain the member query filters and grouping options.",
     )
     async def member_query_help(self, interaction: discord.Interaction) -> None:
         if not await self.bot.ensure_authorised(interaction):
@@ -420,19 +492,16 @@ class MemberQueryCog(commands.Cog):
 
         embed = self._embed(
             title="Member query help",
-            description=(
-                "Build filters with `type:value` pairs separated by spaces. "
-                "Use quotes if values contain spaces."
-            ),
+            description="Use the options to select filters and grouping. All filters are optional.",
         )
 
         embed.add_field(
             name="Common examples",
             value="\n".join(
                 [
-                    "`guild:EWW role:@Raid group:guild` — members in EWW with the Raid role, grouped by guild.",
-                    "`character:\"my thief\"` — members with a character matching that name.",
-                    "`discord:@User role:1234567890` — members matching a mention/ID and role ID.",
+                    "Set **Guild** to `EWW` and **Group by** to `Guild` to see members in that guild.",
+                    "Choose a **Role** to find everyone holding that Discord role.",
+                    "Combine **Account** and **Character** filters to narrow to specific players.",
                 ]
             ),
             inline=False,
@@ -442,11 +511,11 @@ class MemberQueryCog(commands.Cog):
             name="Filters",
             value=self._format_list(
                 [
-                    "`guild:<name|tag|id>` — matches GW2 guild name/tag/ID on saved keys.",
-                    "`role:<@mention|id|name>` — matches any non-@everyone Discord role held.",
-                    "`account:<text>` — matches GW2 account name from the API key.",
-                    "`character:<text>` — matches any stored character name.",
-                    "`discord:<name|id>` — matches Discord display name/username or ID.",
+                    "**Guild** — autocomplete by GW2 guild name/tag/ID from stored API keys.",
+                    "**Role** — pick any non-@everyone Discord role to match holders.",
+                    "**Account** — autocomplete stored GW2 account names.",
+                    "**Character** — autocomplete stored character names.",
+                    "**Discord member** — select a specific member by name/mention.",
                 ]
             ),
             inline=False,
@@ -456,8 +525,8 @@ class MemberQueryCog(commands.Cog):
             name="Grouping",
             value=self._format_list(
                 [
-                    "Add `group:guild`, `group:role`, `group:account`, or `group:discord` to cluster results.",
-                    "Omit grouping to show everything under a single section.",
+                    "Choose Guild, Role, Account, or Discord to group matches.",
+                    "Leave blank to show everything under a single section.",
                 ]
             ),
             inline=False,
@@ -467,7 +536,7 @@ class MemberQueryCog(commands.Cog):
             name="CSV export",
             value=self._format_list(
                 [
-                    "Set `as_csv:true` to attach a CSV of all matches (Discord IDs, roles, guilds, characters).",
+                    "Enable **As CSV** to attach a CSV of all matches (Discord IDs, roles, guilds, characters).",
                 ]
             ),
             inline=False,
