@@ -33,6 +33,10 @@ class AccountsCog(commands.Cog):
     guild_lookup = app_commands.Group(
         name="gw2guild", description="Look up Guild Wars 2 guild information."
     )
+    memberquery = app_commands.Group(
+        name="memberquery",
+        description="Admin search to group members by GW2 guild, Discord role, account, character, or Discord name.",
+    )
 
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
@@ -1177,8 +1181,8 @@ class AccountsCog(commands.Cog):
             await interaction.followup.send(embeds=remaining[:10], ephemeral=True)
             remaining = remaining[10:]
 
-    @app_commands.command(
-        name="memberquery",
+    @memberquery.command(
+        name="query",
         description=(
             "Admin search to group members by GW2 guild, Discord role, account, character, or Discord name."
         ),
@@ -1342,8 +1346,8 @@ class AccountsCog(commands.Cog):
 
         await interaction.followup.send(embed=embed, files=files, ephemeral=True)
 
-    @app_commands.command(
-        name="memberquery_help",
+    @memberquery.command(
+        name="help",
         description="Explain the /memberquery DSL for admin searches.",
     )
     async def member_query_help(self, interaction: discord.Interaction) -> None:
