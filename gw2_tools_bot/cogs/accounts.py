@@ -44,10 +44,20 @@ class AccountsCog(commands.Cog):
 
     async def cog_load(self) -> None:  # pragma: no cover - discord.py lifecycle
         """Register application command groups when the cog loads."""
+        added: List[str] = []
         registered = {command.name for command in self.bot.tree.get_commands()}
         for group in (self.guild_roles, self.api_keys, self.guild_lookup, self.memberquery):
             if group.name not in registered:
                 self.bot.tree.add_command(group)
+                added.append(group.name)
+
+        if added:
+            try:
+                await self.bot.tree.sync()
+                for guild in self.bot.guilds:
+                    await self.bot.tree.sync(guild=guild)
+            except Exception:
+                LOGGER.exception("Failed to sync commands after adding: %s", ", ".join(added))
 
     # ------------------------------------------------------------------
     # Presentation helpers
@@ -626,7 +636,17 @@ class AccountsCog(commands.Cog):
     ) -> List[app_commands.Choice[str]]:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return []
-        records = self.bot.storage.get_user_api_keys(interaction.guild.id, interaction.user.id)
+        try:
+            records = self.bot.storage.get_user_api_keys(
+                interaction.guild.id, interaction.user.id
+            )
+        except Exception:
+            LOGGER.exception(
+                "Failed to load API key names for autocomplete in guild %s user %s",
+                getattr(interaction.guild, "id", "unknown"),
+                getattr(interaction.user, "id", "unknown"),
+            )
+            return []
         current_lower = current.lower()
         matches: List[app_commands.Choice[str]] = []
         for record in records:
