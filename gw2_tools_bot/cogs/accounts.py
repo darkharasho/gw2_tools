@@ -245,6 +245,34 @@ class AccountsCog(commands.Cog):
             role_id for guild_id, role_id in normalized_role_map.items() if guild_id in guild_memberships
         }
 
+        me = guild.me
+        if not me:
+            return [], [], "I could not determine my permissions to manage roles in this server."
+
+        permissions = me.guild_permissions
+        if not permissions.manage_roles:
+            return (
+                [],
+                [],
+                "I need the **Manage Roles** permission to assign or remove Guild Wars 2 guild roles. "
+                "Ask a server administrator to update my permissions.",
+            )
+
+        unmanageable_roles = [
+            role
+            for role_id in desired_role_ids.union(config.guild_role_ids.values())
+            if (role := guild.get_role(role_id)) is not None
+            if role >= me.top_role
+        ]
+        if unmanageable_roles:
+            role_mentions = ", ".join(role.mention for role in unmanageable_roles[:5])
+            return (
+                [],
+                [],
+                "I cannot manage the configured roles because my highest role is below: "
+                f"{role_mentions}. Move my role above these to enable automatic assignment.",
+            )
+
         desired_roles = [
             role for role_id in desired_role_ids if (role := guild.get_role(role_id)) is not None
         ]
@@ -789,28 +817,75 @@ class AccountsCog(commands.Cog):
             )
             return
 
+        account_name, guild_labels, resolve_error = await self._resolve_record_details(record)
         deleted = self.bot.storage.delete_api_key(
             interaction.guild.id, interaction.user.id, name_clean
         )
         added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
 
-        summary = [
-            f"Deleted `{record.name}` ({self._mask_key(record.key)}).",
-        ]
-        if removed:
-            summary.append("Roles removed: " + ", ".join(role.mention for role in removed))
-        if added:
-            summary.append("Roles added: " + ", ".join(role.mention for role in added))
-        if error:
-            summary.append(error)
-        if not deleted:
-            summary.append("No changes were made because the key could not be removed.")
-
-        await self._send_embed(
-            interaction,
+        embed = self._embed(
             title="API key removed" if deleted else "API key",
-            description="\n".join(summary),
+            description=(
+                "Your key was removed and your roles were resynced."
+                if deleted
+                else "No changes were made because the key could not be removed."
+            ),
         )
+
+        action_lines: List[str] = []
+        action_lines.append("✅ Deleted stored key." if deleted else "❌ Failed to delete the stored key.")
+        if removed:
+            action_lines.append("✅ Roles removed: " + ", ".join(role.mention for role in removed))
+        if added:
+            action_lines.append("✅ Roles added: " + ", ".join(role.mention for role in added))
+        if error:
+            action_lines.append(f"⚠️ {error}")
+        embed.add_field(name="Actions", value=self._format_list(action_lines), inline=False)
+
+        embed.add_field(
+            name="Account",
+            value=self._format_list(
+                [f"Key name: `{record.name}`", f"Account name: {account_name}"],
+                placeholder="No account details",
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Permissions",
+            value=self._format_list(record.permissions, placeholder="None recorded"),
+            inline=True,
+        )
+
+        guild_field_value: str
+        if guild_labels:
+            guild_field_value = self._format_list(guild_labels)
+        elif record.guild_ids:
+            guild_field_value = self._format_list(record.guild_ids)
+        else:
+            guild_field_value = "None"
+
+        embed.add_field(name="Guild memberships", value=guild_field_value, inline=False)
+
+        if resolve_error or error:
+            embed.add_field(
+                name="Warnings",
+                value=self._format_list(
+                    [value for value in (resolve_error, error) if value],
+                    placeholder="None",
+                ),
+                inline=False,
+            )
+
+        embed.add_field(
+            name="API key",
+            value=f"```{self._mask_key(record.key)}```",
+            inline=False,
+        )
+
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @remove_api_key.autocomplete("name")
     async def remove_api_key_autocomplete(
