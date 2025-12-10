@@ -102,6 +102,12 @@ class MemberQueryCog(commands.Cog):
         return value[:allowed].rstrip() + suffix
 
     @staticmethod
+    def _character_key(name: str) -> str:
+        """Case-insensitive key for character names."""
+
+        return name.strip().casefold()
+
+    @staticmethod
     def _option_names(interaction: discord.Interaction) -> set[str]:
         """Return provided option names for the current subcommand."""
 
@@ -264,6 +270,7 @@ class MemberQueryCog(commands.Cog):
         member: discord.Member,
         account_names: Sequence[str],
         characters: Sequence[str],
+        character_keys: Sequence[str],
         guild_labels: Dict[str, str],
     ) -> Tuple[bool, List[str], List[str]]:
         matched_guilds: List[str] = []
@@ -312,7 +319,7 @@ class MemberQueryCog(commands.Cog):
                 if not any(needle in name.casefold() for name in account_names):
                     return False, matched_guilds, matched_roles
             elif filter_type == "character":
-                if not any(needle == character.casefold() for character in characters):
+                if not any(needle == key for key in character_keys):
                     return False, matched_guilds, matched_roles
             elif filter_type == "discord":
                 display = f"{member.display_name} ({member.name})".casefold()
@@ -378,14 +385,51 @@ class MemberQueryCog(commands.Cog):
             return []
 
         results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
-        characters: List[str] = []
-        for _, _, record in results:
+        current_lower = current.casefold()
+        character_map: dict[str, str] = {}
+
+        async def add_characters_from_record(record: "ApiKeyRecord") -> None:
             for name in record.characters:
-                if name not in characters and current.lower() in name.lower():
-                    characters.append(name)
-        return [
-            app_commands.Choice(name=value[:100], value=value) for value in characters[:25]
+                key = self._character_key(name)
+                if not key or key in character_map:
+                    continue
+                if current_lower and current_lower not in key:
+                    continue
+                character_map[key] = name
+
+        # Prefer stored character lists, but if none are present we will
+        # opportunistically backfill a few records to populate the autocomplete.
+        for _, _, record in results:
+            await add_characters_from_record(record)
+
+        if not character_map:
+            fetched = 0
+            for guild_id, user_id, record in results:
+                if fetched >= 3:
+                    break
+                if record.characters:
+                    continue
+                try:
+                    characters = await self._fetch_character_names(record.key)
+                except ValueError:
+                    continue
+                record.characters = characters
+                self.bot.storage.upsert_api_key(guild_id, user_id, record)
+                fetched += 1
+                await add_characters_from_record(record)
+
+        def sort_key(name: str) -> tuple[int, int, str]:
+            lower = name.casefold()
+            if current_lower and lower.startswith(current_lower):
+                return (0, len(lower), lower)
+            position = lower.find(current_lower) if current_lower else -1
+            return (1, position if position >= 0 else 9999, lower)
+
+        choices = [
+            app_commands.Choice(name=value[:100], value=value)
+            for value in sorted(character_map.values(), key=sort_key)[:25]
         ]
+        return choices
 
     @memberquery.command(
         name="query",
@@ -527,6 +571,7 @@ class MemberQueryCog(commands.Cog):
                     "account_names": [],
                     "characters": [],
                     "character_entries": [],
+                    "character_keys": set(),
                     "character_map": {},
                     "guild_ids": set(),
                 },
@@ -534,13 +579,17 @@ class MemberQueryCog(commands.Cog):
             if record.account_name and record.account_name not in bundle["account_names"]:
                 bundle["account_names"].append(record.account_name)
             for character in record.characters:
+                key = self._character_key(character)
+                if not key:
+                    continue
                 if character not in bundle["characters"]:
                     bundle["characters"].append(character)
+                if key not in bundle["character_keys"]:
+                    bundle["character_keys"].add(key)
                 entry = (character, record.account_name)
                 if entry not in bundle["character_entries"]:
                     bundle["character_entries"].append(entry)
-                lower = character.casefold()
-                character_bucket = bundle["character_map"].setdefault(lower, [])
+                character_bucket = bundle["character_map"].setdefault(key, [])
                 if entry not in character_bucket:
                     character_bucket.append(entry)
             for gid in record.guild_ids:
@@ -597,6 +646,7 @@ class MemberQueryCog(commands.Cog):
                 member,
                 bundle["account_names"],
                 bundle["characters"],
+                bundle["character_keys"],
                 guild_labels,
             )
             if ok:
