@@ -817,6 +817,8 @@ class AccountsCog(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
         account_name, guild_labels, resolve_error = await self._resolve_record_details(record)
         deleted = self.bot.storage.delete_api_key(
             interaction.guild.id, interaction.user.id, name_clean
@@ -882,10 +884,7 @@ class AccountsCog(commands.Cog):
             inline=False,
         )
 
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @remove_api_key.autocomplete("name")
     async def remove_api_key_autocomplete(
