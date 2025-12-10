@@ -134,12 +134,18 @@ class MemberQueryCog(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
 
     async def _safe_followup(
-        self, interaction: discord.Interaction, *, embed: discord.Embed, files=None
+        self,
+        interaction: discord.Interaction,
+        *,
+        embed: discord.Embed,
+        files: Optional[Sequence[discord.File]] = None,
     ) -> None:
         """Send a followup only if the interaction is still active."""
 
         try:
-            await interaction.followup.send(embed=embed, files=files, ephemeral=True)
+            await interaction.followup.send(
+                embed=embed, files=list(files) if files is not None else [], ephemeral=True
+            )
         except discord.NotFound:
             LOGGER.warning("Interaction expired before results could be sent")
 
