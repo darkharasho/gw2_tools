@@ -49,6 +49,16 @@ class AccountsCog(commands.Cog):
         embed.set_footer(text="Guild Wars 2 Tools")
         return embed
 
+    @staticmethod
+    def _format_list(items: Sequence[str], *, placeholder: str = "None") -> str:
+        if not items:
+            return placeholder
+        return "\n".join(f"• {value}" for value in items)
+
+    @staticmethod
+    def _normalise_guild_id(guild_id: str) -> str:
+        return guild_id.strip().lower()
+
     async def _send_embed(
         self,
         interaction: discord.Interaction,
@@ -160,7 +170,7 @@ class AccountsCog(commands.Cog):
         guild_ids_payload = account.get("guilds") or []
         guild_ids = sorted(
             {
-                guild_id.strip()
+                self._normalise_guild_id(guild_id)
                 for guild_id in guild_ids_payload
                 if isinstance(guild_id, str) and guild_id.strip()
             }
@@ -221,10 +231,15 @@ class AccountsCog(commands.Cog):
 
         guild_memberships: set[str] = set()
         for record in self.bot.storage.get_user_api_keys(guild.id, member.id):
-            guild_memberships.update(record.guild_ids)
+            guild_memberships.update(self._normalise_guild_id(gid) for gid in record.guild_ids)
+
+        normalized_role_map = {
+            self._normalise_guild_id(guild_id): role_id
+            for guild_id, role_id in config.guild_role_ids.items()
+        }
 
         desired_role_ids = {
-            role_id for guild_id, role_id in config.guild_role_ids.items() if guild_id in guild_memberships
+            role_id for guild_id, role_id in normalized_role_map.items() if guild_id in guild_memberships
         }
 
         desired_roles = [
@@ -366,7 +381,7 @@ class AccountsCog(commands.Cog):
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
-        cleaned_guild_id = guild_id.strip()
+        cleaned_guild_id = self._normalise_guild_id(guild_id)
         if not cleaned_guild_id:
             await self._send_embed(
                 interaction,
@@ -400,7 +415,10 @@ class AccountsCog(commands.Cog):
 
         config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
         existing_ids = list(config.guild_role_ids.keys())
-        removed = config.guild_role_ids.pop(guild_id, None)
+        normalized_id = self._normalise_guild_id(guild_id)
+        removed = config.guild_role_ids.pop(normalized_id, None)
+        if removed is None and normalized_id != guild_id:
+            removed = config.guild_role_ids.pop(guild_id, None)
         self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
 
         if not removed:
@@ -580,32 +598,49 @@ class AccountsCog(commands.Cog):
 
         added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
 
-        summary_lines = [
-            f"Saved API key `{default_name}` for {account_name} with permissions: {', '.join(sorted(permissions))}.",
-        ]
-        if guild_ids:
-            names = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
-            summary_lines.append("Guild memberships: " + ", ".join(names))
-        else:
-            summary_lines.append("No guild memberships were found on this account.")
+        embed = self._embed(
+            title="API key saved",
+            description="Your key was validated and stored. Role assignments are shown below.",
+        )
+        embed.add_field(
+            name="Account",
+            value=self._format_list([f"Key name: `{default_name}`", f"Account name: {account_name}"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Permissions",
+            value=self._format_list(sorted(permissions), placeholder="No permissions"),
+            inline=True,
+        )
 
+        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
+        embed.add_field(
+            name="Guild memberships",
+            value=self._format_list(guild_labels, placeholder="No guilds found"),
+            inline=False,
+        )
+
+        role_lines: List[str] = []
         if added:
-            summary_lines.append("Roles added: " + ", ".join(role.mention for role in added))
+            role_lines.append("Added: " + ", ".join(role.mention for role in added))
         if removed:
-            summary_lines.append("Roles removed: " + ", ".join(role.mention for role in removed))
+            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
         if not added and not removed:
-            summary_lines.append(
+            role_lines.append(
                 "No configured guild role mappings matched your guild memberships. Ask a moderator to set them with /guildroles set."
             )
         if error:
-            summary_lines.append(error)
+            role_lines.append(error)
 
-        await self._send_embed(
-            interaction,
-            title="API key saved",
-            description="\n".join(summary_lines),
-            use_followup=True,
+        embed.add_field(
+            name="Role sync",
+            value=self._format_list(role_lines, placeholder="No role changes"),
+            inline=False,
         )
+
+        embed.add_field(name="API key", value=f"```{key_clean}```", inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @api_keys.command(name="update", description="Update or rename a stored API key.")
     @app_commands.describe(name="Existing key name")
@@ -735,26 +770,38 @@ class AccountsCog(commands.Cog):
         embeds: List[discord.Embed] = []
         for record in records:
             account_name, guild_labels, error = await self._resolve_record_details(record)
-
-            description_lines = [
-                f"Account: {account_name}",
-                f"Permissions: {', '.join(record.permissions) if record.permissions else 'None'}",
-            ]
-
-            if guild_labels:
-                description_lines.append("Guilds: " + ", ".join(guild_labels))
-            elif record.guild_ids:
-                description_lines.append("Guilds: " + ", ".join(record.guild_ids))
-            else:
-                description_lines.append("Guilds: none")
-
-            if error:
-                description_lines.append(f"⚠️ {error}")
-
             embed = self._embed(
                 title=record.name,
-                description="\n".join(description_lines),
+                description="Saved Guild Wars 2 API key details.",
             )
+            embed.add_field(
+                name="Account",
+                value=self._format_list([f"Account name: {account_name}", f"Key name: `{record.name}`"]),
+                inline=True,
+            )
+            embed.add_field(
+                name="Permissions",
+                value=self._format_list(record.permissions, placeholder="None"),
+                inline=True,
+            )
+
+            guild_field_value: str
+            if guild_labels:
+                guild_field_value = self._format_list(guild_labels)
+            elif record.guild_ids:
+                guild_field_value = self._format_list(record.guild_ids)
+            else:
+                guild_field_value = "None"
+
+            embed.add_field(
+                name="Guilds",
+                value=guild_field_value,
+                inline=False,
+            )
+
+            if error:
+                embed.add_field(name="Warnings", value=error, inline=False)
+
             embed.add_field(name="API key", value=f"```{record.key}```", inline=False)
             embeds.append(embed)
 
@@ -860,20 +907,48 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
 
         added, removed, error = await self.cog._sync_roles(guild, user)
 
-        summary = [
-            f"Updated API key {self.cog._mask_key(self.record.key)} → {self.cog._mask_key(key_clean)} for {account_name}.",
-        ]
-        if guild_ids:
-            names = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
-            summary.append("Guild memberships: " + ", ".join(names))
-        if added:
-            summary.append("Roles added: " + ", ".join(role.mention for role in added))
-        if removed:
-            summary.append("Roles removed: " + ", ".join(role.mention for role in removed))
-        if error:
-            summary.append(error)
+        embed = self.cog._embed(
+            title="API key updated",
+            description="Your key details were refreshed and roles resynced.",
+        )
+        embed.add_field(
+            name="Account",
+            value=self.cog._format_list([f"Key name: `{name_clean}`", f"Account name: {account_name}"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Permissions",
+            value=self.cog._format_list(sorted(permissions), placeholder="No permissions"),
+            inline=True,
+        )
 
-        embed = self.cog._embed(title="API key updated", description="\n".join(summary))
+        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
+        embed.add_field(
+            name="Guild memberships",
+            value=self.cog._format_list(guild_labels, placeholder="No guilds found"),
+            inline=False,
+        )
+
+        role_lines: List[str] = []
+        if added:
+            role_lines.append("Added: " + ", ".join(role.mention for role in added))
+        if removed:
+            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
+        if error:
+            role_lines.append(error)
+
+        embed.add_field(
+            name="Role sync",
+            value=self.cog._format_list(role_lines, placeholder="No role changes"),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="API key",
+            value=f"```{self.cog._mask_key(self.record.key)} → {self.cog._mask_key(key_clean)}```",
+            inline=False,
+        )
+
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
