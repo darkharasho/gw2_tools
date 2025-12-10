@@ -19,14 +19,15 @@ from ..storage import ApiKeyRecord
 LOGGER = logging.getLogger(__name__)
 
 
-class MemberQueryCog(
-    commands.GroupCog,
-    group_name="memberquery",
-    group_description=(
-        "Admin search to group members by GW2 guild, Discord role, account, character, or Discord name."
-    ),
-):
+class MemberQueryCog(commands.Cog):
     """Admin member lookup using a simple DSL."""
+
+    memberquery = app_commands.Group(
+        name="memberquery",
+        description=(
+            "Admin search to group members by GW2 guild, Discord role, account, character, or Discord name."
+        ),
+    )
 
     def __init__(self, bot: GW2ToolsBot) -> None:
         super().__init__()
@@ -235,7 +236,7 @@ class MemberQueryCog(
     # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
-    @app_commands.command(
+    @memberquery.command(
         name="query",
         description=(
             "Admin search to group members by GW2 guild, Discord role, account, character, or Discord name."
@@ -405,7 +406,7 @@ class MemberQueryCog(
 
         await interaction.followup.send(embed=embed, files=files, ephemeral=True)
 
-    @app_commands.command(
+    @memberquery.command(
         name="help",
         description="Explain the /memberquery DSL for admin searches.",
     )
