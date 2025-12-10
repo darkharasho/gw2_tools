@@ -50,6 +50,10 @@ class AccountsCog(commands.Cog):
             if group.name not in registered:
                 self.bot.tree.add_command(group)
                 added.append(group.name)
+            else:
+                # Ensure stale registrations do not block reloads when extensions are
+                # reloaded before tree entries are cleared.
+                self.bot.tree.add_command(group, override=True)
 
         if added:
             try:
