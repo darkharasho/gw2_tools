@@ -189,6 +189,7 @@ class GuildConfig:
     """Server-specific configuration."""
 
     moderator_role_ids: List[int]
+    guild_role_ids: Dict[str, int] = field(default_factory=dict)
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
     update_notes_channel_id: Optional[int] = None
@@ -197,7 +198,7 @@ class GuildConfig:
 
     @classmethod
     def default(cls) -> "GuildConfig":
-        return cls(moderator_role_ids=[], comp=CompConfig())
+        return cls(moderator_role_ids=[], guild_role_ids={}, comp=CompConfig())
 
 
 @dataclass
@@ -275,6 +276,60 @@ class UpdateNotesStatus:
     last_entry_published_at: Optional[str] = None
 
 
+@dataclass
+class ApiKeyRecord:
+    """Persisted Guild Wars 2 API key details for a member."""
+
+    name: str
+    key: str
+    permissions: List[str] = field(default_factory=list)
+    guild_ids: List[str] = field(default_factory=list)
+    created_at: str = field(default_factory=utcnow)
+    updated_at: str = field(default_factory=utcnow)
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "ApiKeyRecord":
+        if not isinstance(payload, dict):
+            raise ValueError("API key payload must be a dictionary")
+
+        name_raw = payload.get("name")
+        if not isinstance(name_raw, str) or not name_raw.strip():
+            raise ValueError("API key name must be provided")
+        key_raw = payload.get("key")
+        if not isinstance(key_raw, str) or not key_raw.strip():
+            raise ValueError("API key value must be provided")
+
+        permissions_payload = payload.get("permissions") or []
+        permissions: List[str] = []
+        if isinstance(permissions_payload, list):
+            for value in permissions_payload:
+                if isinstance(value, str):
+                    cleaned = value.strip()
+                    if cleaned:
+                        permissions.append(cleaned)
+
+        guilds_payload = payload.get("guild_ids") or []
+        guild_ids: List[str] = []
+        if isinstance(guilds_payload, list):
+            for guild_id in guilds_payload:
+                if isinstance(guild_id, str):
+                    cleaned = guild_id.strip()
+                    if cleaned:
+                        guild_ids.append(cleaned)
+
+        created_at = payload.get("created_at") or utcnow()
+        updated_at = payload.get("updated_at") or created_at
+
+        return cls(
+            name=name_raw.strip(),
+            key=key_raw.strip(),
+            permissions=permissions,
+            guild_ids=guild_ids,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+
+
 class StorageManager:
     """Handle isolated storage per guild to respect data privacy."""
 
@@ -309,6 +364,24 @@ class StorageManager:
         if not payload:
             return GuildConfig.default()
         payload = dict(payload)
+        guild_role_ids = payload.get("guild_role_ids")
+        if isinstance(guild_role_ids, dict):
+            cleaned_roles: Dict[str, int] = {}
+            for guild_key, role_id in guild_role_ids.items():
+                if not isinstance(guild_key, str):
+                    continue
+                if isinstance(role_id, bool):
+                    continue
+                if isinstance(role_id, int):
+                    cleaned_roles[guild_key] = role_id
+                elif isinstance(role_id, str):
+                    try:
+                        cleaned_roles[guild_key] = int(role_id)
+                    except ValueError:
+                        continue
+            payload["guild_role_ids"] = cleaned_roles
+        else:
+            payload["guild_role_ids"] = {}
         comp_payload = payload.get("comp")
         if isinstance(comp_payload, dict):
             payload["comp"] = CompConfig.from_dict(comp_payload)
@@ -327,6 +400,24 @@ class StorageManager:
         if config.comp_active_preset:
             cleaned = str(config.comp_active_preset).strip()
             config.comp_active_preset = cleaned or None
+        if config.guild_role_ids:
+            cleaned_roles: Dict[str, int] = {}
+            for guild_key, role_id in config.guild_role_ids.items():
+                if not isinstance(guild_key, str):
+                    continue
+                guild_key = guild_key.strip()
+                if not guild_key:
+                    continue
+                if isinstance(role_id, bool):
+                    continue
+                if isinstance(role_id, int):
+                    cleaned_roles[guild_key] = role_id
+                elif isinstance(role_id, str):
+                    try:
+                        cleaned_roles[guild_key] = int(role_id)
+                    except ValueError:
+                        continue
+            config.guild_role_ids = cleaned_roles
         path = self._guild_path(guild_id) / "config.json"
         self._write_json(path, asdict(config))
 
@@ -381,6 +472,64 @@ class StorageManager:
     def save_update_notes_status(self, guild_id: int, status: UpdateNotesStatus) -> None:
         path = self._guild_path(guild_id) / "update_notes.json"
         self._write_json(path, asdict(status))
+
+    # ------------------------------------------------------------------
+    # API keys
+    # ------------------------------------------------------------------
+    def _api_keys_path(self, guild_id: int) -> Path:
+        return self._guild_path(guild_id) / "api_keys.json"
+
+    def get_user_api_keys(self, guild_id: int, user_id: int) -> List[ApiKeyRecord]:
+        path = self._api_keys_path(guild_id)
+        payload = self._read_json(path, {})
+        user_payload = payload.get(str(user_id), []) if isinstance(payload, dict) else []
+        records: List[ApiKeyRecord] = []
+        if isinstance(user_payload, list):
+            for item in user_payload:
+                try:
+                    records.append(ApiKeyRecord.from_dict(item))
+                except ValueError:
+                    continue
+        return records
+
+    def save_user_api_keys(
+        self, guild_id: int, user_id: int, records: List[ApiKeyRecord]
+    ) -> None:
+        path = self._api_keys_path(guild_id)
+        payload = self._read_json(path, {})
+        if not isinstance(payload, dict):
+            payload = {}
+        payload[str(user_id)] = [asdict(record) for record in records]
+        self._write_json(path, payload)
+
+    def find_api_key(self, guild_id: int, user_id: int, name: str) -> Optional[ApiKeyRecord]:
+        name_lower = name.lower()
+        for record in self.get_user_api_keys(guild_id, user_id):
+            if record.name.lower() == name_lower:
+                return record
+        return None
+
+    def upsert_api_key(self, guild_id: int, user_id: int, record: ApiKeyRecord) -> None:
+        keys = self.get_user_api_keys(guild_id, user_id)
+        updated: List[ApiKeyRecord] = []
+        replaced = False
+        for existing in keys:
+            if existing.name.lower() == record.name.lower():
+                updated.append(record)
+                replaced = True
+            else:
+                updated.append(existing)
+        if not replaced:
+            updated.append(record)
+        self.save_user_api_keys(guild_id, user_id, updated)
+
+    def delete_api_key(self, guild_id: int, user_id: int, name: str) -> bool:
+        keys = self.get_user_api_keys(guild_id, user_id)
+        remaining = [record for record in keys if record.name.lower() != name.lower()]
+        if len(remaining) == len(keys):
+            return False
+        self.save_user_api_keys(guild_id, user_id, remaining)
+        return True
 
     # ------------------------------------------------------------------
     # RSS feed subscriptions
