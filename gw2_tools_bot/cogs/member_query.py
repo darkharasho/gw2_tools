@@ -512,12 +512,14 @@ class MemberQueryCog(commands.Cog):
 
         # Only consider the character filter when a value was actually supplied.
         character_provided = bool(character)
+        character_key = self._character_key(character) if character_provided else None
+        character_label = character
 
         filters = self._build_filters(
             guild=guild,
             role=role,
             account=account,
-            character=character,
+            character=character_key,
             discord_member=discord_member,
         )
         # Only surface character lists when the character filter was provided.
@@ -597,6 +599,29 @@ class MemberQueryCog(commands.Cog):
                 if normalized_gid:
                     bundle["guild_ids"].add(normalized_gid)
 
+        if character_provided and character_key:
+            canonical_character = None
+            for bundle in bundles.values():
+                entries = bundle.get("character_map", {}).get(character_key, [])
+                if entries:
+                    canonical_character = entries[0][0]
+                    break
+
+            if not canonical_character:
+                await self._send_embed(
+                    interaction,
+                    title="Member query",
+                    description=(
+                        "No stored characters matched that name. Try selecting a name "
+                        "from the autocomplete list or refresh your API keys with `/apikey update`."
+                    ),
+                    colour=discord.Colour.red(),
+                    use_followup=True,
+                )
+                return
+
+            character_label = canonical_character
+
         if not bundles:
             await self._send_embed(
                 interaction,
@@ -651,8 +676,8 @@ class MemberQueryCog(commands.Cog):
             )
             if ok:
                 matched_character_entries: List[Tuple[str, Optional[str]]] = []
-                if character_provided and character:
-                    needle = character.casefold()
+                if character_provided and character_key:
+                    needle = character_key
                     matched_character_entries = list(
                         bundle.get("character_map", {}).get(needle, [])
                     )
@@ -750,12 +775,12 @@ class MemberQueryCog(commands.Cog):
         if account:
             filters_label.append(f"Account\n```{account}```")
         if character_provided:
-            filters_label.append(f"Character\n```{character}```")
+            filters_label.append(f"Character\n```{character_label}```")
         if discord_member:
             filters_label.append(
                 f"Discord\n```{discord_member.display_name} ({discord_member.id})```"
             )
-        if not any([guild, role, account, character, discord_member]):
+        if not any([guild, role, account, character_provided, discord_member]):
             filters_label = ["None (all)\n```All members```"]
 
         embed = self._embed(
