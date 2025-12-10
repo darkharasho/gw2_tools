@@ -144,14 +144,16 @@ class MemberQueryCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         *,
-        embed: discord.Embed,
+        embeds: Sequence[discord.Embed],
         files: Optional[Sequence[discord.File]] = None,
     ) -> None:
         """Send a followup only if the interaction is still active."""
 
         try:
             await interaction.followup.send(
-                embed=embed, files=list(files) if files is not None else [], ephemeral=True
+                embeds=list(embeds),
+                files=list(files) if files is not None else [],
+                ephemeral=True,
             )
         except discord.NotFound:
             LOGGER.warning("Interaction expired before results could be sent")
@@ -783,21 +785,22 @@ class MemberQueryCog(commands.Cog):
         if not any([guild, role, account, character_provided, discord_member]):
             filters_label = ["None (all)\n```All members```"]
 
-        embed = self._embed(
+        base_embed = self._embed(
             title="Member query results",
             description="",
         )
-        embed.add_field(
+        base_embed.add_field(
             name="Filters",
             value=self._trim_field("\n".join(filters_label)),
             inline=False,
         )
-        embed.add_field(
+        base_embed.add_field(
             name="Group by",
             value=group_by.capitalize() if group_by else "None",
             inline=False,
         )
 
+        match_fields: List[Tuple[str, str]] = []
         for group, entries in sorted(
             grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
         ):
@@ -842,12 +845,27 @@ class MemberQueryCog(commands.Cog):
                     )
                 preview_lines.append("\n".join(detail_lines))
 
-            field_value = "\n".join(preview_lines) if preview_lines else "• No entries"
-            embed.add_field(
-                name=f"{display_group} ({len(entries)})",
-                value=self._trim_field(field_value),
-                inline=False,
+            field_value = "\n\n".join(preview_lines) if preview_lines else "• No entries"
+            match_fields.append(
+                (
+                    f"{display_group} ({len(entries)})",
+                    self._trim_field(field_value),
+                )
             )
+
+        embeds: List[discord.Embed] = []
+        current_embed = base_embed
+        max_fields = 25
+        for name, value in match_fields:
+            if len(current_embed.fields) >= max_fields:
+                embeds.append(current_embed)
+                current_embed = self._embed(
+                    title="Member query results (cont.)",
+                    description="",
+                )
+            current_embed.add_field(name=name, value=value, inline=False)
+
+        embeds.append(current_embed)
 
         files: List[discord.File] = []
         if as_csv:
@@ -903,9 +921,9 @@ class MemberQueryCog(commands.Cog):
             ]
 
         if files:
-            await self._safe_followup(interaction, embed=embed, files=files)
+            await self._safe_followup(interaction, embeds=embeds, files=files)
         else:
-            await self._safe_followup(interaction, embed=embed)
+            await self._safe_followup(interaction, embeds=embeds)
 
     @memberquery.command(
         name="help",
