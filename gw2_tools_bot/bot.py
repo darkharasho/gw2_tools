@@ -38,6 +38,7 @@ class GW2ToolsBot(commands.Bot):
         """Load cogs on startup."""
 
         await self.load_extension("gw2_tools_bot.cogs.config")
+        await self.load_extension("gw2_tools_bot.cogs.accounts")
         await self.load_extension("gw2_tools_bot.cogs.builds")
         await self.load_extension("gw2_tools_bot.cogs.arcdps")
         await self.load_extension("gw2_tools_bot.cogs.update_notes")
