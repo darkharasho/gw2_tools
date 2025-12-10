@@ -11,7 +11,7 @@ from discord.ext import commands
 
 from ..bot import GW2ToolsBot
 from ..http_utils import read_response_text
-from ..storage import ApiKeyRecord, utcnow
+from ..storage import ApiKeyRecord, normalise_guild_id, utcnow
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class AccountsCog(commands.Cog):
 
     @staticmethod
     def _normalise_guild_id(guild_id: str) -> str:
-        return guild_id.strip().lower()
+        return normalise_guild_id(guild_id)
 
     async def _send_embed(
         self,
