@@ -300,7 +300,11 @@ class MemberQueryCog(commands.Cog):
         if not guild_ids:
             return []
 
-        details = await self._fetch_guild_details(guild_ids)
+        try:
+            details = await self._fetch_guild_details(guild_ids)
+        except ValueError:
+            LOGGER.warning("Guild lookup failed during autocomplete", exc_info=True)
+            details = {}
         choices: List[app_commands.Choice[str]] = []
         current_lower = current.lower()
         for guild_id in guild_ids:
@@ -610,29 +614,30 @@ class MemberQueryCog(commands.Cog):
                     )
                 )
 
-        filters_label = []
+        filters_label: List[str] = []
         if guild:
             guild_label = guild_details.get(guild, guild)
-            filters_label.append(
-                "\n".join([f"• Guild: {guild_label}", f"  ```{guild}```"])
-            )
+            filters_label.append(f"Guild: {guild_label}\n```{guild}```")
         else:
-            filters_label.append("• Guild: All mapped")
+            filters_label.append("Guild: All mapped\n```All mapped```")
         if role:
-            filters_label.append(f"• Role: {role.mention}")
+            filters_label.append(f"Role: {role.name}\n```{role.id}```")
         if account:
-            filters_label.append(f"• Account: `{account}`")
+            filters_label.append(f"Account\n```{account}```")
         if character_provided:
-            filters_label.append(f"• Character: `{character}`")
+            filters_label.append(f"Character\n```{character}```")
         if discord_member:
-            filters_label.append(f"• Discord: {discord_member.mention}")
+            filters_label.append(
+                f"Discord\n```{discord_member.display_name} ({discord_member.id})```"
+            )
         if not any([guild, role, account, character, discord_member]):
-            filters_label = ["• None (all)"]
+            filters_label = ["None (all)\n```All members```"]
 
         embed = self._embed(
             title="Member query results",
-            description="\n".join(filters_label),
+            description="",
         )
+        embed.add_field(name="Filters", value="\n".join(filters_label), inline=False)
         embed.add_field(
             name="Group by",
             value=group_by.capitalize() if group_by else "None",
