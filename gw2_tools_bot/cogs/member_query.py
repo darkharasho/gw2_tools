@@ -478,4 +478,8 @@ async def setup(bot: GW2ToolsBot) -> None:
         LOGGER.info("Replacing existing memberquery command during cog load")
         bot.tree.remove_command("memberquery", type=discord.AppCommandType.chat_input)
 
-    await bot.add_cog(MemberQueryCog(bot), override=True)
+    cog = MemberQueryCog(bot)
+    await bot.add_cog(cog, override=True)
+    # Explicitly (re)attach the group to the command tree so it registers even if
+    # stale state lingered from prior runs.
+    bot.tree.add_command(cog.memberquery, override=True)
