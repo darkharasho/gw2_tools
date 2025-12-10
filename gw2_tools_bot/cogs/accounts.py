@@ -167,6 +167,10 @@ class AccountsCog(commands.Cog):
         )
         account_name = account.get("name", "Unknown account")
         guild_ids_payload = account.get("guilds") or []
+        if not isinstance(guild_ids_payload, list):
+            raise ValueError(
+                "Unexpected response from /v2/account. The `guilds` field should be an array of guild ID strings."
+            )
         guild_ids = sorted(
             {
                 self._normalise_guild_id(guild_id)
