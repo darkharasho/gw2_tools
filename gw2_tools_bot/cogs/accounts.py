@@ -1619,5 +1619,5 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
 
 
 async def setup(bot: GW2ToolsBot) -> None:
-    await bot.add_cog(AccountsCog(bot))
+    await bot.add_cog(AccountsCog(bot), override=True)
 
