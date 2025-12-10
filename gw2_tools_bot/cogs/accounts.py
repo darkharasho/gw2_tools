@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..bot import GW2ToolsBot
+from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
 from ..storage import ApiKeyRecord, normalise_guild_id, utcnow
 
@@ -43,7 +44,7 @@ class AccountsCog(commands.Cog):
         *,
         title: str,
         description: Optional[str] = None,
-        colour: discord.Colour = discord.Colour.blurple(),
+        colour: discord.Colour = BRAND_COLOUR,
     ) -> discord.Embed:
         embed = discord.Embed(title=title, description=description or "", colour=colour)
         embed.set_footer(text="Guild Wars 2 Tools")
@@ -65,7 +66,7 @@ class AccountsCog(commands.Cog):
         *,
         title: str,
         description: str,
-        colour: discord.Colour = discord.Colour.blurple(),
+        colour: discord.Colour = BRAND_COLOUR,
         ephemeral: bool = True,
         use_followup: bool = False,
     ) -> None:
@@ -417,7 +418,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="Search failed",
                 description=str(exc),
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
                 use_followup=True,
             )
             return
@@ -457,7 +458,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="Guild role mapping",
                 description="Please provide a valid guild ID.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -634,7 +635,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="This command can only be used in a server.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -644,7 +645,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="Please provide an API key.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -673,7 +674,7 @@ class AccountsCog(commands.Cog):
             return "\n".join(f"{step['status']} — {step['label']}" for step in steps)
 
         def _progress_embed(
-            description: str, *, colour: discord.Colour = discord.Colour.blurple()
+            description: str, *, colour: discord.Colour = BRAND_COLOUR
         ) -> discord.Embed:
             embed = self._embed(
                 title="API key verification",
@@ -683,7 +684,7 @@ class AccountsCog(commands.Cog):
             embed.add_field(name="Verification steps", value=_steps_value(), inline=False)
             return embed
 
-        async def _refresh_progress(description: str, *, colour: discord.Colour = discord.Colour.blurple()) -> None:
+        async def _refresh_progress(description: str, *, colour: discord.Colour = BRAND_COLOUR) -> None:
             await interaction.edit_original_response(
                 embed=_progress_embed(description, colour=colour)
             )
@@ -698,7 +699,7 @@ class AccountsCog(commands.Cog):
             _set_status("Key validation", "❌ Duplicate")
             await _refresh_progress(
                 "You have already saved this API key. Use `/apikey update` if you need to refresh it.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -713,7 +714,7 @@ class AccountsCog(commands.Cog):
             ) = await self._validate_api_key(key_clean, allow_missing_permissions=True)
         except ValueError as exc:
             _set_status("Key validation", "❌ Failed")
-            await _refresh_progress(str(exc), colour=discord.Colour.red())
+            await _refresh_progress(str(exc), colour=BRAND_COLOUR)
             return
 
         _set_status("Key validation", "✅ Success")
@@ -726,7 +727,7 @@ class AccountsCog(commands.Cog):
         if missing:
             await _refresh_progress(
                 "API key is missing required permissions. Please generate a key with `account`, `characters`, `guilds`, and `wvw`.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -814,7 +815,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="This command can only be used in a server.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -824,7 +825,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="Please provide a key name to update.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -835,7 +836,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="No stored key found with that name. Use /apikey list to see saved keys.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -856,7 +857,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="This command can only be used in a server.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -866,7 +867,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="Please provide the name of the key to delete.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -876,7 +877,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="No stored key found with that name. Use /apikey list to see saved keys.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -1029,7 +1030,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="API key",
                 description="This command can only be used in a server.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             return
 
@@ -1134,7 +1135,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             embed = self.cog._embed(
                 title="API key",
                 description="This command can only be used in a server.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
@@ -1145,7 +1146,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             embed = self.cog._embed(
                 title="API key",
                 description="Please provide a valid name.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
@@ -1156,7 +1157,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             embed = self.cog._embed(
                 title="API key",
                 description="You already have a key with that new name. Choose another.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
@@ -1173,7 +1174,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             embed = self.cog._embed(
                 title="API key",
                 description="You already have another saved API key with this value.",
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
@@ -1191,7 +1192,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             embed = self.cog._embed(
                 title="API key validation failed",
                 description=str(exc),
-                colour=discord.Colour.red(),
+                colour=BRAND_COLOUR,
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return

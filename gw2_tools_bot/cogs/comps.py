@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import constants
 from ..bot import GW2ToolsBot
+from ..branding import BRAND_COLOUR
 from ..storage import CompClassConfig, CompConfig, GuildConfig, CompPreset, normalise_timezone
 
 LOGGER = logging.getLogger(__name__)
@@ -1372,7 +1373,7 @@ class CompCog(commands.GroupCog, name="comp"):
     def build_summary_embed(
         self, guild: discord.Guild, config: CompConfig, *, active_preset: Optional[str] = None
     ) -> discord.Embed:
-        embed = discord.Embed(title="Guild Composition Settings", color=discord.Color.blurple())
+        embed = discord.Embed(title="Guild Composition Settings", color=BRAND_COLOUR)
         schedule_text = "Posting schedule not configured."
         if config.post_days and config.post_time:
             day_names = _format_day_names(config.post_days)
@@ -1441,7 +1442,7 @@ class CompCog(commands.GroupCog, name="comp"):
         if channel is None and comp_config.channel_id:
             resolved_channel = guild.get_channel(comp_config.channel_id)
             channel = resolved_channel
-        embed = discord.Embed(title="Guild Composition Signup", color=discord.Color.dark_teal())
+        embed = discord.Embed(title="Guild Composition Signup", color=BRAND_COLOUR)
         if comp_config.post_days and comp_config.post_time:
             day_names = _format_day_names(comp_config.post_days)
             if day_names:
