@@ -13,7 +13,6 @@ from discord.ext import commands
 
 from ..bot import GW2ToolsBot
 from ..http_utils import read_response_text
-from ..storage import ApiKeyRecord
 
 LOGGER = logging.getLogger(__name__)
 
@@ -170,7 +169,8 @@ class MemberQueryCog(commands.Cog):
         self,
         filters: Sequence[Tuple[str, str]],
         member: discord.Member,
-        record: ApiKeyRecord,
+        account_names: Sequence[str],
+        characters: Sequence[str],
         guild_labels: Dict[str, str],
     ) -> Tuple[bool, List[str], List[str]]:
         matched_guilds: List[str] = []
@@ -187,7 +187,9 @@ class MemberQueryCog(commands.Cog):
                 id_matches = [gid for gid in guild_labels if needle in gid.lower()]
                 if not label_matches and not id_matches:
                     return False, matched_guilds, matched_roles
-                matched_guilds.extend(label_matches or [guild_labels.get(id_matches[0], id_matches[0])])
+                matched_guilds.extend(
+                    label_matches or [guild_labels.get(id_matches[0], id_matches[0])]
+                )
             elif filter_type == "role":
                 role_id = None
                 if raw_value.isdigit():
@@ -208,10 +210,10 @@ class MemberQueryCog(commands.Cog):
                     return False, matched_guilds, matched_roles
                 matched_roles.extend(role.mention for role in role_matches)
             elif filter_type == "account":
-                if needle not in record.account_name.casefold():
+                if not any(needle in name.casefold() for name in account_names):
                     return False, matched_guilds, matched_roles
             elif filter_type == "character":
-                if not any(needle in character.casefold() for character in record.characters):
+                if not any(needle in character.casefold() for character in characters):
                     return False, matched_guilds, matched_roles
             elif filter_type == "discord":
                 display = f"{member.display_name} ({member.name})".casefold()
@@ -374,26 +376,79 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
-        guild_ids_for_lookup = allowed_guild_ids or {
-            guild_id for _, _, record in results for guild_id in record.guild_ids if guild_id
-        }
-        guild_details = await self._fetch_guild_details(guild_ids_for_lookup)
+        # Opportunistically backfill missing character lists so autocompletes
+        # and grouping have richer data to work with.
+        for guild_id, user_id, record in results:
+            if record.characters:
+                continue
+            try:
+                characters = await self._fetch_character_names(record.key)
+            except ValueError:
+                continue
+            record.characters = characters
+            self.bot.storage.upsert_api_key(guild_id, user_id, record)
 
-        matched: List[
-            Tuple[discord.Member, ApiKeyRecord, List[str], List[str], List[str]]
-        ] = []
+        bundles: Dict[int, Dict[str, object]] = {}
         for _, user_id, record in results:
             member = interaction.guild.get_member(user_id)
             if not member:
                 continue
-            configured_guilds = [gid for gid in record.guild_ids if gid in allowed_guild_ids]
+
+            bundle = bundles.setdefault(
+                user_id,
+                {
+                    "member": member,
+                    "account_names": [],
+                    "characters": [],
+                    "guild_ids": set(),
+                },
+            )
+            if record.account_name and record.account_name not in bundle["account_names"]:
+                bundle["account_names"].append(record.account_name)
+            for character in record.characters:
+                if character not in bundle["characters"]:
+                    bundle["characters"].append(character)
+            for gid in record.guild_ids:
+                if gid:
+                    bundle["guild_ids"].add(gid)
+
+        if not bundles:
+            await self._send_embed(
+                interaction,
+                title="Member query",
+                description="No stored API keys were found for this server.",
+                use_followup=True,
+            )
+            return
+
+        guild_ids_for_lookup = allowed_guild_ids or {
+            guild_id for bundle in bundles.values() for guild_id in bundle["guild_ids"]
+        }
+        guild_details = await self._fetch_guild_details(guild_ids_for_lookup)
+
+        matched: List[
+            Tuple[
+                discord.Member,
+                List[str],
+                List[str],
+                List[str],
+                List[str],
+                List[str],
+                List[str],
+            ]
+        ] = []
+        for bundle in bundles.values():
+            member = bundle["member"]
+            configured_guilds = [
+                gid for gid in bundle["guild_ids"] if gid in allowed_guild_ids
+            ]
             guild_labels = {
                 gid: guild_details.get(gid, gid)
-                for gid in (configured_guilds or record.guild_ids)
+                for gid in (configured_guilds or bundle["guild_ids"])
                 if gid
             }
             mapped_role_mentions: List[str] = []
-            for gid in record.guild_ids:
+            for gid in bundle["guild_ids"]:
                 role_id = config.guild_role_ids.get(gid)
                 if role_id:
                     role_obj = interaction.guild.get_role(role_id)
@@ -401,16 +456,22 @@ class MemberQueryCog(commands.Cog):
                         mapped_role_mentions.append(role_obj.mention)
             mapped_role_mentions = sorted(set(mapped_role_mentions))
             ok, matched_guilds, matched_roles = self._match_member_filters(
-                filters, member, record, guild_labels
+                filters,
+                member,
+                bundle["account_names"],
+                bundle["characters"],
+                guild_labels,
             )
             if ok:
                 matched.append(
                     (
                         member,
-                        record,
+                        bundle["account_names"],
+                        bundle["characters"],
                         matched_guilds or list(guild_labels.values()),
                         matched_roles,
                         mapped_role_mentions,
+                        sorted(bundle["guild_ids"]),
                     )
                 )
 
@@ -424,9 +485,28 @@ class MemberQueryCog(commands.Cog):
             return
 
         grouped: Dict[
-            str, List[Tuple[discord.Member, ApiKeyRecord, List[str], List[str], List[str]]]
+            str,
+            List[
+                Tuple[
+                    discord.Member,
+                    List[str],
+                    List[str],
+                    List[str],
+                    List[str],
+                    List[str],
+                    List[str],
+                ]
+            ],
         ] = {}
-        for member, record, matched_guilds, matched_roles, mapped_role_mentions in matched:
+        for (
+            member,
+            account_names,
+            characters,
+            matched_guilds,
+            matched_roles,
+            mapped_role_mentions,
+            guild_ids,
+        ) in matched:
             if group_by == "guild":
                 keys = matched_guilds or ["No guilds"]
             elif group_by == "role":
@@ -434,7 +514,11 @@ class MemberQueryCog(commands.Cog):
                 if not keys:
                     keys = ["No mapped roles"]
             elif group_by == "account":
-                keys = [record.account_name or "Unknown account"]
+                keys = [
+                    ", ".join(account_names)
+                    if account_names
+                    else "Unknown account"
+                ]
             elif group_by == "discord":
                 keys = [member.display_name]
             else:
@@ -442,7 +526,15 @@ class MemberQueryCog(commands.Cog):
 
             for key in keys:
                 grouped.setdefault(key, []).append(
-                    (member, record, matched_guilds, matched_roles, mapped_role_mentions)
+                    (
+                        member,
+                        account_names,
+                        characters,
+                        matched_guilds,
+                        matched_roles,
+                        mapped_role_mentions,
+                        guild_ids,
+                    )
                 )
 
         filters_label = []
@@ -477,30 +569,42 @@ class MemberQueryCog(commands.Cog):
         for group, entries in sorted(
             grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
         ):
+            display_group = group
+            if group_by == "role" and group.startswith("<@&") and group.endswith(">"):
+                try:
+                    role_id = int(group.strip("<@&>"))
+                except ValueError:
+                    role_id = None
+                role_obj = interaction.guild.get_role(role_id) if role_id else None
+                display_group = role_obj.name if role_obj else group
+
             preview_lines: List[str] = []
             for (
                 member,
-                record,
+                account_names,
+                characters,
                 matched_guilds,
                 matched_roles,
                 mapped_role_mentions,
+                guild_ids,
             ) in entries[:10]:
                 guilds_label = matched_guilds or ["No guilds"]
-                roles_label = matched_roles or mapped_role_mentions or ["None mapped"]
+                roles_label = mapped_role_mentions or matched_roles or ["None mapped"]
                 preview_lines.append(
                     "\n".join(
                         [
                             f"• {member.mention}",
-                            f"  • Account: `{record.account_name or 'Unknown'}`",
+                            f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
                             f"  • Guilds: {', '.join(guilds_label)}",
                             f"  • Roles: {', '.join(roles_label)}",
+                            f"  • Characters: {', '.join(characters) or 'None recorded'}",
                         ]
                     )
                 )
 
             embed.add_field(
-                name=f"{group} ({len(entries)})",
-                value=self._format_list(preview_lines, placeholder="No entries"),
+                name=f"{display_group} ({len(entries)})",
+                value="\n".join(preview_lines) if preview_lines else "• No entries",
                 inline=False,
             )
 
@@ -513,26 +617,32 @@ class MemberQueryCog(commands.Cog):
                     "Discord ID",
                     "Discord Name",
                     "Account Name",
-                    "API Key Name",
                     "Guild IDs",
                     "Guild Names",
                     "Roles",
                     "Characters",
                 ]
             )
-            for member, record, _, _, _ in matched:
-                guild_labels = [guild_details.get(gid, gid) for gid in record.guild_ids]
+            for (
+                member,
+                account_names,
+                characters,
+                matched_guilds,
+                _,
+                _,
+                guild_ids,
+            ) in matched:
+                guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
                 roles = [role.name for role in member.roles if not role.is_default()]
                 writer.writerow(
                     [
                         member.id,
                         f"{member.display_name} ({member.name})",
-                        record.account_name,
-                        record.name,
-                        "; ".join(record.guild_ids),
-                        "; ".join(guild_labels),
+                        "; ".join(account_names),
+                        "; ".join(guild_ids),
+                        "; ".join(guild_labels or ["No guilds"]),
                         "; ".join(roles),
-                        "; ".join(record.characters),
+                        "; ".join(characters),
                     ]
                 )
 
@@ -578,7 +688,7 @@ class MemberQueryCog(commands.Cog):
             name="Filters",
             value=self._format_list(
                 [
-                    "**Guild** — autocomplete by GW2 guild name/tag/ID from stored API keys.",
+                    "**Guild** — autocomplete mapped GW2 guilds configured via `/guildroles`.",
                     "**Role** — pick any non-@everyone Discord role to match holders.",
                     "**Account** — autocomplete stored GW2 account names.",
                     "**Character** — autocomplete stored character names.",
