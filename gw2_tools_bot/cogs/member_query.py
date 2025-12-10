@@ -506,6 +506,7 @@ class MemberQueryCog(commands.Cog):
                     "account_names": [],
                     "characters": [],
                     "character_entries": [],
+                    "character_map": {},
                     "guild_ids": set(),
                 },
             )
@@ -517,6 +518,10 @@ class MemberQueryCog(commands.Cog):
                 entry = (character, record.account_name)
                 if entry not in bundle["character_entries"]:
                     bundle["character_entries"].append(entry)
+                lower = character.casefold()
+                character_bucket = bundle["character_map"].setdefault(lower, [])
+                if entry not in character_bucket:
+                    character_bucket.append(entry)
             for gid in record.guild_ids:
                 if gid:
                     bundle["guild_ids"].add(gid)
@@ -576,9 +581,11 @@ class MemberQueryCog(commands.Cog):
                 matched_character_entries: List[Tuple[str, Optional[str]]] = []
                 if character_provided and character:
                     needle = character.casefold()
-                    for name, account_name in bundle.get("character_entries", []):
-                        if needle == name.casefold():
-                            matched_character_entries.append((name, account_name))
+                    matched_character_entries = list(
+                        bundle.get("character_map", {}).get(needle, [])
+                    )
+                    if not matched_character_entries:
+                        continue
                 else:
                     matched_character_entries = list(bundle.get("character_entries", []))
 
