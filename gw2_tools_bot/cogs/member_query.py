@@ -27,6 +27,10 @@ class MemberQueryCog(commands.Cog):
         description=(
             "Admin search to group members by GW2 guild, Discord role, account, character, or Discord name."
         ),
+        # Force an explicit default permission set so Discord refreshes any
+        # previously cached administrator-only defaults and surfaces the
+        # command to authorised moderator roles governed by runtime checks.
+        default_permissions=discord.Permissions(),
     )
 
     def __init__(self, bot: GW2ToolsBot) -> None:
