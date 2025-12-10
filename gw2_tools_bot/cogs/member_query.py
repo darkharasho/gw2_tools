@@ -31,20 +31,9 @@ class MemberQueryCog(commands.Cog):
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
 
-    async def cog_load(self) -> None:
-        """Register the memberquery command group when the cog is loaded."""
-        try:
-            self.bot.tree.add_command(self.memberquery)
-        except discord.app_commands.CommandAlreadyRegistered:
-            self.bot.tree.add_command(self.memberquery, override=True)
-
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         if self._session and not self._session.closed:
             await self._session.close()
-        try:
-            self.bot.tree.remove_command(self.memberquery.name, type=self.memberquery.type)
-        except Exception:  # pragma: no cover - defensive cleanup
-            LOGGER.exception("Failed to remove memberquery command during unload")
 
     # ------------------------------------------------------------------
     # Presentation helpers
@@ -481,4 +470,4 @@ class MemberQueryCog(commands.Cog):
 
 
 async def setup(bot: GW2ToolsBot) -> None:
-    await bot.add_cog(MemberQueryCog(bot))
+    await bot.add_cog(MemberQueryCog(bot), override=True)
