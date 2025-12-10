@@ -609,17 +609,17 @@ class MemberQueryCog(commands.Cog):
             ) in entries[:10]:
                 guilds_label = matched_guilds or ["No guilds"]
                 roles_label = mapped_role_mentions or matched_roles or ["None mapped"]
-                preview_lines.append(
-                    "\n".join(
-                        [
-                            f"• {member.mention}",
-                            f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
-                            f"  • Guilds: {', '.join(guilds_label)}",
-                            f"  • Roles: {', '.join(roles_label)}",
-                            f"  • Characters: {', '.join(characters) or 'None recorded'}",
-                        ]
+                detail_lines = [
+                    f"• {member.mention}",
+                    f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
+                    f"  • Guilds: {', '.join(guilds_label)}",
+                    f"  • Roles: {', '.join(roles_label)}",
+                ]
+                if character:
+                    detail_lines.append(
+                        f"  • Characters: {', '.join(characters) or 'None recorded'}"
                     )
-                )
+                preview_lines.append("\n".join(detail_lines))
 
             embed.add_field(
                 name=f"{display_group} ({len(entries)})",
