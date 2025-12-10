@@ -1619,5 +1619,14 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
 
 
 async def setup(bot: GW2ToolsBot) -> None:
-    await bot.add_cog(AccountsCog(bot), override=True)
+    # Ensure any stale application command groups are cleared before registering
+    # the cog. This avoids CommandAlreadyRegistered errors when the extension is
+    # reloaded or when previous runs left commands behind in the tree.
+    for group_name in ("guildroles", "apikey", "gw2guild", "memberquery"):
+        try:
+            bot.tree.remove_command(group_name, type=discord.AppCommandType.chat_input)
+        except Exception:
+            LOGGER.debug("Failed to remove existing command group %s before load", group_name, exc_info=True)
+
+    await bot.add_cog(AccountsCog(bot))
 
