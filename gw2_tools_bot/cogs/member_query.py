@@ -60,6 +60,34 @@ class MemberQueryCog(commands.Cog):
             return placeholder
         return "\n".join(f"• {value}" for value in items)
 
+    @staticmethod
+    def _format_characters_block(names: Sequence[str]) -> str:
+        if not names:
+            return "```None```"
+
+        # Distribute names across up to three columns for readability.
+        columns = min(3, max(1, len(names)))
+        rows = (len(names) + columns - 1) // columns
+        grid: List[List[str]] = [[] for _ in range(rows)]
+        for idx, name in enumerate(names):
+            grid[idx % rows].append(name)
+
+        col_widths = [0] * columns
+        for col in range(columns):
+            for row in grid:
+                if col < len(row):
+                    col_widths[col] = max(col_widths[col], len(row[col]))
+
+        lines: List[str] = []
+        for row in grid:
+            padded = [
+                value.ljust(col_widths[col_idx])
+                for col_idx, value in enumerate(row)
+            ]
+            lines.append("  ".join(padded).rstrip())
+
+        return "```\n" + "\n".join(lines) + "\n```"
+
     async def _send_embed(
         self,
         interaction: discord.Interaction,
@@ -371,6 +399,7 @@ class MemberQueryCog(commands.Cog):
             character=character,
             discord_member=discord_member,
         )
+        show_characters = bool(account or character or discord_member)
         if group_by:
             group_by = group_by.lower()
         allowed_groups = {"guild", "role", "account", "discord"}
@@ -615,9 +644,9 @@ class MemberQueryCog(commands.Cog):
                     f"  • Guilds: {', '.join(guilds_label)}",
                     f"  • Roles: {', '.join(roles_label)}",
                 ]
-                if character:
+                if show_characters:
                     detail_lines.append(
-                        f"  • Characters: {', '.join(characters) or 'None recorded'}"
+                        "  • Characters:\n" + self._format_characters_block(characters)
                     )
                 preview_lines.append("\n".join(detail_lines))
 
