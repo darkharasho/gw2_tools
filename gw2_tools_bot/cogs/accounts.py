@@ -42,6 +42,13 @@ class AccountsCog(commands.Cog):
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
 
+    async def cog_load(self) -> None:  # pragma: no cover - discord.py lifecycle
+        """Register application command groups when the cog loads."""
+        registered = {command.name for command in self.bot.tree.get_commands()}
+        for group in (self.guild_roles, self.api_keys, self.guild_lookup, self.memberquery):
+            if group.name not in registered:
+                self.bot.tree.add_command(group)
+
     # ------------------------------------------------------------------
     # Presentation helpers
     # ------------------------------------------------------------------
@@ -91,6 +98,12 @@ class AccountsCog(commands.Cog):
         return self._session
 
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
+        for group in (self.guild_roles, self.api_keys, self.guild_lookup, self.memberquery):
+            try:
+                self.bot.tree.remove_command(group.name, type=discord.AppCommandType.chat_input)
+            except Exception:
+                LOGGER.debug("Failed to remove command group %s during unload", group.name, exc_info=True)
+
         if self._session and not self._session.closed:
             await self._session.close()
 
