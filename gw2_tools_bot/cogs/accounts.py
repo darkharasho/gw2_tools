@@ -264,6 +264,49 @@ class AccountsCog(commands.Cog):
 
         return added, removed, error
 
+    async def _build_guild_role_embeds(
+        self,
+        guild: Optional[discord.Guild],
+        *,
+        title: str,
+        description: str,
+        guild_ids: Sequence[str],
+    ) -> List[discord.Embed]:
+        embeds: List[discord.Embed] = []
+
+        if not guild_ids:
+            embeds.append(self._embed(title=title, description=description))
+            return embeds
+
+        role_map = (
+            self.bot.get_config(guild.id).guild_role_ids  # type: ignore[union-attr]
+            if guild
+            else {}
+        )
+        guild_details = await self._fetch_guild_details(guild_ids)
+
+        embed = self._embed(title=title, description=description)
+        for index, guild_id in enumerate(guild_ids, start=1):
+            if len(embed.fields) >= 25:
+                embeds.append(embed)
+                embed = self._embed(title=title, description=description)
+
+            role_id = role_map.get(guild_id)
+            role = guild.get_role(role_id) if guild and role_id else None
+            role_label = role.mention if role else (f"role ID {role_id}" if role_id else "Not configured")
+            label = guild_details.get(guild_id, guild_id)
+            value_lines = [f"Guild ID: {guild_id}"]
+            value_lines.append(f"Discord role: {role_label}")
+
+            embed.add_field(
+                name=f"{index}. {label}",
+                value="```\n" + "\n".join(value_lines) + "\n```",
+                inline=False,
+            )
+
+        embeds.append(embed)
+        return embeds
+
     # ------------------------------------------------------------------
     # Guild lookup
     # ------------------------------------------------------------------
@@ -304,20 +347,14 @@ class AccountsCog(commands.Cog):
             return
 
         details = await self._fetch_guild_details([gid for gid in guild_ids if isinstance(gid, str)])
-        lines = []
+        embed = self._embed(title="Guild search results", description=f"Matches for `{query}`")
         for guild_id in guild_ids[:10]:
             if not isinstance(guild_id, str):
                 continue
             label = details.get(guild_id, guild_id)
-            lines.append(f"`{guild_id}` - {label}")
+            embed.add_field(name=label, value=f"```\n{guild_id}\n```", inline=False)
 
-        message = "\n".join(lines) or "No details available for the matched guilds."
-        await self._send_embed(
-            interaction,
-            title="Guild search results",
-            description=message,
-            use_followup=True,
-        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
     # Guild role configuration
@@ -351,27 +388,89 @@ class AccountsCog(commands.Cog):
         )
 
     @guild_roles.command(name="remove", description="Remove a guild to role mapping.")
-    @app_commands.describe(guild_id="Guild Wars 2 guild ID to remove")
-    async def remove_guild_role(self, interaction: discord.Interaction, guild_id: str) -> None:
+    @app_commands.describe(
+        guild_id="Guild Wars 2 guild ID to remove",
+        cleanup_roles="Remove the mapped role from existing members",
+    )
+    async def remove_guild_role(
+        self, interaction: discord.Interaction, guild_id: str, cleanup_roles: bool = False
+    ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
 
         config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
+        existing_ids = list(config.guild_role_ids.keys())
         removed = config.guild_role_ids.pop(guild_id, None)
         self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
-        if removed:
-            await self._send_embed(
-                interaction,
-                title="Guild role mapping removed",
-                description=f"Removed mapping for guild `{guild_id}`.",
+
+        if not removed:
+            embeds = await self._build_guild_role_embeds(
+                interaction.guild,  # type: ignore[arg-type]
+                title="No mapping found",
+                description=f"`{guild_id}` is not currently mapped. Choose from the options below.",
+                guild_ids=existing_ids,
             )
-        else:
-            await self._send_embed(
-                interaction,
-                title="Guild role mapping",
-                description=f"No mapping found for guild `{guild_id}`.",
-                colour=discord.Colour.red(),
-            )
+            if interaction.response.is_done():
+                await interaction.followup.send(embeds=embeds, ephemeral=True)
+            else:
+                await interaction.response.send_message(embeds=embeds, ephemeral=True)
+            return
+
+        cleanup_summary = None
+        role = interaction.guild.get_role(removed) if interaction.guild else None
+        if cleanup_roles and role:
+            removed_count = 0
+            failure: Optional[str] = None
+            for member in list(role.members):
+                try:
+                    await member.remove_roles(role, reason="GW2 guild role cleanup")
+                    removed_count += 1
+                except discord.Forbidden:
+                    failure = "I do not have permission to remove the mapped role from all members."
+                    break
+                except discord.HTTPException:
+                    failure = "Failed to remove the mapped role from some members due to a Discord error."
+                    break
+
+            if failure:
+                cleanup_summary = failure
+            else:
+                cleanup_summary = f"Removed {removed_count} instance(s) of {role.mention} from members."
+        elif cleanup_roles:
+            cleanup_summary = "Cannot clean up roles because the mapped role no longer exists."
+
+        description_lines = [f"Removed mapping for guild `{guild_id}`."]
+        if cleanup_summary:
+            description_lines.append(cleanup_summary)
+
+        await self._send_embed(
+            interaction,
+            title="Guild role mapping removed",
+            description="\n".join(description_lines),
+        )
+
+    @remove_guild_role.autocomplete("guild_id")
+    async def remove_guild_role_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        if not interaction.guild:
+            return []
+
+        config = self.bot.get_config(interaction.guild.id)
+        guild_ids = list(config.guild_role_ids.keys())
+        if not guild_ids:
+            return []
+
+        details = await self._fetch_guild_details(guild_ids)
+        current_lower = current.lower()
+        choices: List[app_commands.Choice[str]] = []
+        for guild_id in guild_ids:
+            label = details.get(guild_id, guild_id)
+            if current_lower in guild_id.lower() or current_lower in label.lower():
+                choices.append(app_commands.Choice(name=label, value=guild_id))
+            if len(choices) >= 25:
+                break
+        return choices
 
     @guild_roles.command(name="list", description="List all configured guild role mappings.")
     async def list_guild_roles(self, interaction: discord.Interaction) -> None:
@@ -387,17 +486,15 @@ class AccountsCog(commands.Cog):
             )
             return
 
-        lines = []
-        for guild_id, role_id in config.guild_role_ids.items():
-            role = interaction.guild.get_role(role_id) if interaction.guild else None
-            role_label = role.mention if role else f"role ID {role_id}"
-            lines.append(f"`{guild_id}` → {role_label}")
-
-        await self._send_embed(
-            interaction,
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        embeds = await self._build_guild_role_embeds(
+            interaction.guild,  # type: ignore[arg-type]
             title="Guild role mappings",
-            description="\n".join(lines),
+            description="Configured Guild Wars 2 guild to Discord role assignments.",
+            guild_ids=list(config.guild_role_ids.keys()),
         )
+
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
 
     # ------------------------------------------------------------------
     # API key management
