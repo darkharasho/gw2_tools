@@ -88,6 +88,23 @@ class MemberQueryCog(commands.Cog):
 
         return "```\n" + "\n".join(lines) + "\n```"
 
+    @staticmethod
+    def _option_names(interaction: discord.Interaction) -> set[str]:
+        """Return provided option names for the current subcommand."""
+
+        data = interaction.data or {}
+        options = data.get("options") or []
+        if options and isinstance(options[0], dict) and options[0].get("options"):
+            options = options[0]["options"]
+
+        names: set[str] = set()
+        for option in options:
+            if isinstance(option, dict):
+                name = option.get("name")
+                if isinstance(name, str):
+                    names.add(name)
+        return names
+
     async def _send_embed(
         self,
         interaction: discord.Interaction,
@@ -396,6 +413,9 @@ class MemberQueryCog(commands.Cog):
         account = (account.strip() or None) if isinstance(account, str) else account
         character = (character.strip() or None) if isinstance(character, str) else character
 
+        option_names = self._option_names(interaction)
+        character_provided = "character" in option_names and bool(character)
+
         filters = self._build_filters(
             guild=guild,
             role=role,
@@ -403,8 +423,8 @@ class MemberQueryCog(commands.Cog):
             character=character,
             discord_member=discord_member,
         )
-        # Only surface character lists when explicitly filtering by character.
-        show_characters = bool(character)
+        # Only surface character lists when the character filter was provided.
+        show_characters = character_provided
         if group_by:
             group_by = group_by.lower()
         allowed_groups = {"guild", "role", "account", "discord"}
@@ -602,7 +622,7 @@ class MemberQueryCog(commands.Cog):
             filters_label.append(f"• Role: {role.mention}")
         if account:
             filters_label.append(f"• Account: `{account}`")
-        if character:
+        if character_provided:
             filters_label.append(f"• Character: `{character}`")
         if discord_member:
             filters_label.append(f"• Discord: {discord_member.mention}")
