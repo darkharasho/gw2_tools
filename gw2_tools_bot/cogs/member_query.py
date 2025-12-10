@@ -445,8 +445,8 @@ class MemberQueryCog(commands.Cog):
         account = (account.strip() or None) if isinstance(account, str) else account
         character = (character.strip() or None) if isinstance(character, str) else character
 
-        option_names = self._option_names(interaction)
-        character_provided = "character" in option_names and bool(character)
+        # Only consider the character filter when a value was actually supplied.
+        character_provided = bool(character)
 
         filters = self._build_filters(
             guild=guild,
@@ -727,13 +727,13 @@ class MemberQueryCog(commands.Cog):
                 ]
                 if show_characters:
                     character_lines = [
-                        f"• {name} — {account_name or 'Unknown account'}"
+                        f"    • {name} — {account_name or 'Unknown account'}"
                         for name, account_name in character_entries
                     ]
                     detail_lines.append(
                         "  • Characters:\n"
                         + self._trim_field(
-                            "\n".join(character_lines) or "• None",
+                            "\n".join(character_lines) or "    • None",
                         )
                     )
                 preview_lines.append("\n".join(detail_lines))
