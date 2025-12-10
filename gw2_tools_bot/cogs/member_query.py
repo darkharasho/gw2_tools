@@ -470,4 +470,9 @@ class MemberQueryCog(commands.Cog):
 
 
 async def setup(bot: GW2ToolsBot) -> None:
+    existing = bot.tree.get_command("memberquery")
+    if existing:
+        LOGGER.info("Replacing existing memberquery command during cog load")
+        bot.tree.remove_command("memberquery", type=discord.AppCommandType.chat_input)
+
     await bot.add_cog(MemberQueryCog(bot), override=True)
