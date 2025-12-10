@@ -226,7 +226,11 @@ class AccountsCog(commands.Cog):
     # Role syncing
     # ------------------------------------------------------------------
     async def _sync_roles(
-        self, guild: discord.Guild, member: discord.Member
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        *,
+        allowed_role_ids_to_remove: Optional[set[int]] = None,
     ) -> Tuple[List[discord.Role], List[discord.Role], Optional[str]]:
         config = self.bot.get_config(guild.id)
         if not config.guild_role_ids:
@@ -284,7 +288,12 @@ class AccountsCog(commands.Cog):
         }
 
         roles_to_add = [role for role in desired_roles if role not in current_roles]
-        roles_to_remove = [role for role in mapped_roles if role.id not in desired_role_ids]
+        roles_to_remove = [
+            role
+            for role in mapped_roles
+            if role.id not in desired_role_ids
+            and (not allowed_role_ids_to_remove or role.id in allowed_role_ids_to_remove)
+        ]
 
         added: List[discord.Role] = []
         removed: List[discord.Role] = []
@@ -819,11 +828,44 @@ class AccountsCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
+        existing_keys = self.bot.storage.get_user_api_keys(
+            interaction.guild.id, interaction.user.id
+        )
+        other_keys = [
+            key
+            for key in existing_keys
+            if key.name.strip().lower() != record.name.strip().lower()
+        ]
+        other_guild_memberships = {
+            self._normalise_guild_id(guild_id)
+            for key in other_keys
+            for guild_id in key.guild_ids
+            if self._normalise_guild_id(guild_id)
+        }
+        lost_guilds = {
+            normalized
+            for guild_id in record.guild_ids
+            if (normalized := self._normalise_guild_id(guild_id))
+            and normalized not in other_guild_memberships
+        }
+        config = self.bot.get_config(interaction.guild.id)
+        normalized_role_map = {
+            self._normalise_guild_id(guild_id): role_id
+            for guild_id, role_id in config.guild_role_ids.items()
+        }
+        allowed_role_ids_to_remove = {
+            role_id for guild_id, role_id in normalized_role_map.items() if guild_id in lost_guilds
+        }
+
         account_name, guild_labels, resolve_error = await self._resolve_record_details(record)
         deleted = self.bot.storage.delete_api_key(
             interaction.guild.id, interaction.user.id, name_clean
         )
-        added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
+        added, removed, error = await self._sync_roles(
+            interaction.guild,
+            interaction.user,
+            allowed_role_ids_to_remove=allowed_role_ids_to_remove,
+        )
 
         embed = self._embed(
             title="API key removed" if deleted else "API key",
@@ -836,6 +878,22 @@ class AccountsCog(commands.Cog):
 
         action_lines: List[str] = []
         action_lines.append("✅ Deleted stored key." if deleted else "❌ Failed to delete the stored key.")
+        role_sync_lines: List[str] = []
+        guild_detail_map = await self._fetch_guild_details(lost_guilds) if lost_guilds else {}
+        removed_ids = {role.id for role in removed}
+        for guild_id in sorted(lost_guilds):
+            role_id = normalized_role_map.get(guild_id)
+            role = interaction.guild.get_role(role_id) if role_id else None
+            label = guild_detail_map.get(guild_id, guild_id)
+            if role and role_id in removed_ids:
+                role_sync_lines.append(f"✅ Removed {role.mention} for {label}")
+            elif role:
+                role_sync_lines.append(
+                    f"ℹ️ Kept {role.mention} for {label} because you still have another key with that guild."
+                )
+            else:
+                role_sync_lines.append(f"ℹ️ No mapped Discord role for {label}")
+
         if removed:
             action_lines.append("✅ Roles removed: " + ", ".join(role.mention for role in removed))
         if added:
@@ -843,6 +901,19 @@ class AccountsCog(commands.Cog):
         if error:
             action_lines.append(f"⚠️ {error}")
         embed.add_field(name="Actions", value=self._format_list(action_lines), inline=False)
+
+        embed.add_field(
+            name="Role sync",
+            value=self._format_list(
+                role_sync_lines,
+                placeholder=(
+                    "No roles changed. Your other stored API keys still cover your guild memberships."
+                    if not removed
+                    else "No guild roles are configured for your memberships."
+                ),
+            ),
+            inline=False,
+        )
 
         embed.add_field(
             name="Account",
