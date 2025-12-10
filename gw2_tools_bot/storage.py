@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+
+logger = logging.getLogger(__name__)
 
 
 ISOFORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -348,12 +353,349 @@ class ApiKeyRecord:
         )
 
 
+class ApiKeyStore:
+    """SQLite-backed persistence for API keys with query-friendly indexes."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.path = root / "api_keys.sqlite"
+        self._ensure_schema()
+        self._migrate_json_stores()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def _ensure_schema(self) -> None:
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    name_normalized TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    account_name TEXT NOT NULL,
+                    permissions TEXT NOT NULL,
+                    guild_ids TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(guild_id, user_id, name_normalized)
+                );
+                CREATE TABLE IF NOT EXISTS api_key_guilds (
+                    api_key_id INTEGER NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+                    guild_id TEXT NOT NULL,
+                    PRIMARY KEY(api_key_id, guild_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_api_keys_guild_user ON api_keys(guild_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_api_keys_guild ON api_keys(guild_id);
+                CREATE INDEX IF NOT EXISTS idx_api_key_guilds_lookup ON api_key_guilds(guild_id, api_key_id);
+                CREATE INDEX IF NOT EXISTS idx_api_key_guilds_api ON api_key_guilds(api_key_id);
+                """
+            )
+
+    def _migrate_json_stores(self) -> None:
+        """Import legacy JSON API key stores into SQLite once per guild."""
+
+        for guild_dir in self.root.glob("guild_*"):
+            if not guild_dir.is_dir():
+                continue
+            try:
+                guild_id = int(str(guild_dir.name).split("guild_", 1)[1])
+            except (IndexError, ValueError):
+                continue
+
+            with self._connect() as connection:
+                existing = connection.execute(
+                    "SELECT COUNT(1) FROM api_keys WHERE guild_id = ?", (guild_id,)
+                ).fetchone()[0]
+            if existing:
+                continue
+
+            path = guild_dir / "api_keys.json"
+            if not path.exists():
+                continue
+
+            try:
+                payload = self._read_json(path, {})
+            except Exception:
+                logger.exception("Failed to import legacy API keys for guild %s", guild_id)
+                continue
+
+            if not isinstance(payload, dict):
+                continue
+
+            for user_id_raw, records_payload in payload.items():
+                try:
+                    user_id = int(user_id_raw)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(records_payload, list):
+                    continue
+                for item in records_payload:
+                    try:
+                        record = ApiKeyRecord.from_dict(item)
+                    except ValueError:
+                        continue
+                    self.upsert_api_key(guild_id, user_id, record)
+
+    @staticmethod
+    def _read_json(path: Path, default: Any) -> Any:
+        if not path.exists():
+            return default
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+    @staticmethod
+    def _normalise_permissions(permissions: Iterable[str]) -> List[str]:
+        seen: set[str] = set()
+        cleaned: List[str] = []
+        for permission in permissions or []:
+            if not isinstance(permission, str):
+                continue
+            permission_clean = permission.strip()
+            if not permission_clean:
+                continue
+            key = permission_clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(permission_clean)
+        return cleaned
+
+    @staticmethod
+    def _normalise_guild_ids(guild_ids: Iterable[str]) -> List[str]:
+        seen: set[str] = set()
+        cleaned: List[str] = []
+        for guild_id in guild_ids or []:
+            if not isinstance(guild_id, str):
+                continue
+            normalised = normalise_guild_id(guild_id)
+            if not normalised or normalised in seen:
+                continue
+            seen.add(normalised)
+            cleaned.append(normalised)
+        return cleaned
+
+    @staticmethod
+    def _row_to_record(row: sqlite3.Row) -> ApiKeyRecord:
+        permissions = json.loads(row["permissions"]) if row["permissions"] else []
+        guild_ids = json.loads(row["guild_ids"]) if row["guild_ids"] else []
+        return ApiKeyRecord(
+            name=row["name"],
+            key=row["key"],
+            account_name=row["account_name"],
+            permissions=permissions,
+            guild_ids=guild_ids,
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _persist_guild_links(
+        self, connection: sqlite3.Connection, api_key_id: int, guild_ids: Sequence[str]
+    ) -> None:
+        connection.executemany(
+            "INSERT OR IGNORE INTO api_key_guilds (api_key_id, guild_id) VALUES (?, ?)",
+            [(api_key_id, guild_id) for guild_id in guild_ids],
+        )
+
+    def _fetch_records(self, query: str, params: Sequence[Any]) -> List[ApiKeyRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def get_user_api_keys(self, guild_id: int, user_id: int) -> List[ApiKeyRecord]:
+        return self._fetch_records(
+            "SELECT * FROM api_keys WHERE guild_id = ? AND user_id = ? ORDER BY name_normalized",
+            (guild_id, user_id),
+        )
+
+    def save_user_api_keys(
+        self, guild_id: int, user_id: int, records: List[ApiKeyRecord]
+    ) -> None:
+        normalised_records = [
+            ApiKeyRecord(
+                name=record.name.strip(),
+                key=record.key.strip(),
+                account_name=record.account_name.strip(),
+                permissions=self._normalise_permissions(record.permissions),
+                guild_ids=self._normalise_guild_ids(record.guild_ids),
+                created_at=record.created_at,
+                updated_at=utcnow(),
+            )
+            for record in records
+            if record.name.strip() and record.key.strip()
+        ]
+
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM api_keys WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+            )
+            for record in normalised_records:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO api_keys (
+                        guild_id, user_id, name, name_normalized, key, account_name,
+                        permissions, guild_ids, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        user_id,
+                        record.name,
+                        record.name.lower(),
+                        record.key,
+                        record.account_name,
+                        json.dumps(self._normalise_permissions(record.permissions)),
+                        json.dumps(self._normalise_guild_ids(record.guild_ids)),
+                        record.created_at,
+                        record.updated_at,
+                    ),
+                )
+                api_key_id = cursor.lastrowid
+                self._persist_guild_links(
+                    connection, api_key_id, self._normalise_guild_ids(record.guild_ids)
+                )
+
+    def find_api_key(self, guild_id: int, user_id: int, name: str) -> Optional[ApiKeyRecord]:
+        results = self._fetch_records(
+            """
+            SELECT * FROM api_keys
+            WHERE guild_id = ? AND user_id = ? AND name_normalized = ?
+            LIMIT 1
+            """,
+            (guild_id, user_id, name.lower()),
+        )
+        return results[0] if results else None
+
+    def upsert_api_key(self, guild_id: int, user_id: int, record: ApiKeyRecord) -> None:
+        permissions = self._normalise_permissions(record.permissions)
+        guild_ids = self._normalise_guild_ids(record.guild_ids)
+        name_normalized = record.name.strip().lower()
+        account_name = record.account_name.strip()
+        key_value = record.key.strip()
+        if not name_normalized or not key_value:
+            return
+
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, created_at FROM api_keys
+                WHERE guild_id = ? AND user_id = ? AND name_normalized = ?
+                LIMIT 1
+                """,
+                (guild_id, user_id, name_normalized),
+            ).fetchone()
+
+            if existing:
+                created_at = existing["created_at"] or record.created_at
+                connection.execute(
+                    """
+                    UPDATE api_keys
+                    SET name = ?, key = ?, account_name = ?, permissions = ?, guild_ids = ?,
+                        updated_at = ?, created_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        record.name.strip(),
+                        key_value,
+                        account_name,
+                        json.dumps(permissions),
+                        json.dumps(guild_ids),
+                        utcnow(),
+                        created_at,
+                        existing["id"],
+                    ),
+                )
+                connection.execute(
+                    "DELETE FROM api_key_guilds WHERE api_key_id = ?", (existing["id"],)
+                )
+                self._persist_guild_links(connection, existing["id"], guild_ids)
+            else:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO api_keys (
+                        guild_id, user_id, name, name_normalized, key, account_name,
+                        permissions, guild_ids, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        user_id,
+                        record.name.strip(),
+                        name_normalized,
+                        key_value,
+                        account_name,
+                        json.dumps(permissions),
+                        json.dumps(guild_ids),
+                        record.created_at,
+                        utcnow(),
+                    ),
+                )
+                api_key_id = cursor.lastrowid
+                self._persist_guild_links(connection, api_key_id, guild_ids)
+
+    def delete_api_key(self, guild_id: int, user_id: int, name: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM api_keys WHERE guild_id = ? AND user_id = ? AND name_normalized = ?",
+                (guild_id, user_id, name.lower()),
+            )
+            return cursor.rowcount > 0
+
+    def query_api_keys(
+        self,
+        *,
+        guild_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        gw2_guild_id: Optional[str] = None,
+    ) -> List[Tuple[int, int, ApiKeyRecord]]:
+        """Return API keys matching the provided filters for reporting."""
+
+        clauses: List[str] = []
+        params: List[Any] = []
+        joins: List[str] = []
+
+        if guild_id is not None:
+            clauses.append("ak.guild_id = ?")
+            params.append(guild_id)
+        if user_id is not None:
+            clauses.append("ak.user_id = ?")
+            params.append(user_id)
+        if gw2_guild_id:
+            joins.append("INNER JOIN api_key_guilds g ON g.api_key_id = ak.id")
+            clauses.append("g.guild_id = ?")
+            params.append(normalise_guild_id(gw2_guild_id))
+
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        join_clause = " ".join(joins)
+        query = (
+            "SELECT ak.* FROM api_keys ak "
+            f"{join_clause} "
+            f"{where_clause} "
+            "ORDER BY ak.guild_id, ak.user_id, ak.name_normalized"
+        )
+
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+
+        return [
+            (row["guild_id"], row["user_id"], self._row_to_record(row))
+            for row in rows
+        ]
+
+
 class StorageManager:
     """Handle isolated storage per guild to respect data privacy."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
+        self.api_key_store = ApiKeyStore(self.root)
 
     # ------------------------------------------------------------------
     # Generic helpers
@@ -497,60 +839,33 @@ class StorageManager:
     # ------------------------------------------------------------------
     # API keys
     # ------------------------------------------------------------------
-    def _api_keys_path(self, guild_id: int) -> Path:
-        return self._guild_path(guild_id) / "api_keys.json"
-
     def get_user_api_keys(self, guild_id: int, user_id: int) -> List[ApiKeyRecord]:
-        path = self._api_keys_path(guild_id)
-        payload = self._read_json(path, {})
-        user_payload = payload.get(str(user_id), []) if isinstance(payload, dict) else []
-        records: List[ApiKeyRecord] = []
-        if isinstance(user_payload, list):
-            for item in user_payload:
-                try:
-                    records.append(ApiKeyRecord.from_dict(item))
-                except ValueError:
-                    continue
-        return records
+        return self.api_key_store.get_user_api_keys(guild_id, user_id)
 
     def save_user_api_keys(
         self, guild_id: int, user_id: int, records: List[ApiKeyRecord]
     ) -> None:
-        path = self._api_keys_path(guild_id)
-        payload = self._read_json(path, {})
-        if not isinstance(payload, dict):
-            payload = {}
-        payload[str(user_id)] = [asdict(record) for record in records]
-        self._write_json(path, payload)
+        self.api_key_store.save_user_api_keys(guild_id, user_id, records)
 
     def find_api_key(self, guild_id: int, user_id: int, name: str) -> Optional[ApiKeyRecord]:
-        name_lower = name.lower()
-        for record in self.get_user_api_keys(guild_id, user_id):
-            if record.name.lower() == name_lower:
-                return record
-        return None
+        return self.api_key_store.find_api_key(guild_id, user_id, name)
 
     def upsert_api_key(self, guild_id: int, user_id: int, record: ApiKeyRecord) -> None:
-        keys = self.get_user_api_keys(guild_id, user_id)
-        updated: List[ApiKeyRecord] = []
-        replaced = False
-        for existing in keys:
-            if existing.name.lower() == record.name.lower():
-                updated.append(record)
-                replaced = True
-            else:
-                updated.append(existing)
-        if not replaced:
-            updated.append(record)
-        self.save_user_api_keys(guild_id, user_id, updated)
+        self.api_key_store.upsert_api_key(guild_id, user_id, record)
 
     def delete_api_key(self, guild_id: int, user_id: int, name: str) -> bool:
-        keys = self.get_user_api_keys(guild_id, user_id)
-        remaining = [record for record in keys if record.name.lower() != name.lower()]
-        if len(remaining) == len(keys):
-            return False
-        self.save_user_api_keys(guild_id, user_id, remaining)
-        return True
+        return self.api_key_store.delete_api_key(guild_id, user_id, name)
+
+    def query_api_keys(
+        self,
+        *,
+        guild_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        gw2_guild_id: Optional[str] = None,
+    ) -> List[Tuple[int, int, ApiKeyRecord]]:
+        return self.api_key_store.query_api_keys(
+            guild_id=guild_id, user_id=user_id, gw2_guild_id=gw2_guild_id
+        )
 
     # ------------------------------------------------------------------
     # RSS feed subscriptions
