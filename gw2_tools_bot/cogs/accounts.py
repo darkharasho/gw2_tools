@@ -590,7 +590,9 @@ class AccountsCog(commands.Cog):
         def _steps_value() -> str:
             return "\n".join(f"{step['status']} — {step['label']}" for step in steps)
 
-        def _progress_embed(description: str, *, colour: discord.Colour = discord.Colour.blurple()) -> discord.Embed:
+        def _progress_embed(
+            description: str, *, colour: discord.Colour = discord.Colour.blurple()
+        ) -> discord.Embed:
             embed = self._embed(
                 title="API key verification",
                 description=description,
@@ -599,10 +601,24 @@ class AccountsCog(commands.Cog):
             embed.add_field(name="Verification steps", value=_steps_value(), inline=False)
             return embed
 
+        async def _refresh_progress(description: str, *, colour: discord.Colour = discord.Colour.blurple()) -> None:
+            await interaction.edit_original_response(
+                embed=_progress_embed(description, colour=colour)
+            )
+
         await interaction.response.send_message(
             embed=_progress_embed("Starting verification and permission checks…"),
             ephemeral=True,
         )
+
+        duplicate_key = next((record for record in existing_keys if record.key == key_clean), None)
+        if duplicate_key:
+            _set_status("Key validation", "❌ Duplicate")
+            await _refresh_progress(
+                "You have already saved this API key. Use `/apikey update` if you need to refresh it.",
+                colour=discord.Colour.red(),
+            )
+            return
 
         try:
             permissions, guild_ids, guild_details, account_name, missing = await self._validate_api_key(
@@ -610,27 +626,26 @@ class AccountsCog(commands.Cog):
             )
         except ValueError as exc:
             _set_status("Key validation", "❌ Failed")
-            await interaction.edit_original_response(
-                embed=_progress_embed(str(exc), colour=discord.Colour.red())
-            )
+            await _refresh_progress(str(exc), colour=discord.Colour.red())
             return
 
         _set_status("Key validation", "✅ Success")
+        await _refresh_progress("Key validated. Checking permissions…")
         for permission in sorted(self.REQUIRED_PERMISSIONS):
             label = f"Permission: {permission}"
             _set_status(label, "✅ Present" if permission in permissions else "❌ Missing")
+            await _refresh_progress("Updated permission checks…")
 
         if missing:
-            await interaction.edit_original_response(
-                embed=_progress_embed(
-                    "API key is missing required permissions. Please generate a key with `account`, `characters`, `guilds`, and `wvw`.",
-                    colour=discord.Colour.red(),
-                )
+            await _refresh_progress(
+                "API key is missing required permissions. Please generate a key with `account`, `characters`, `guilds`, and `wvw`.",
+                colour=discord.Colour.red(),
             )
             return
 
         _set_status("Account lookup", "✅ Success")
         _set_status("Guild lookup", "✅ Success")
+        await _refresh_progress("Account and guild lookups completed. Saving key…")
 
         default_name = self._generate_default_name(account_name, existing_keys)
 
@@ -645,9 +660,11 @@ class AccountsCog(commands.Cog):
         )
         self.bot.storage.upsert_api_key(interaction.guild.id, interaction.user.id, record)
         _set_status("Save key", "✅ Stored")
+        await _refresh_progress("Key saved. Syncing roles…")
 
         added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
         _set_status("Role sync", "✅ Completed" if not error else "⚠️ Issues")
+        await _refresh_progress("Role synchronization complete.")
 
         embed = self._embed(
             title="API key saved",
@@ -930,6 +947,23 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             embed = self.cog._embed(
                 title="API key",
                 description="You already have a key with that new name. Choose another.",
+                colour=discord.Colour.red(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        duplicate_key = next(
+            (
+                existing
+                for existing in self.existing_records
+                if existing.key == key_clean and existing.name.lower() != self.record.name.lower()
+            ),
+            None,
+        )
+        if duplicate_key:
+            embed = self.cog._embed(
+                title="API key",
+                description="You already have another saved API key with this value.",
                 colour=discord.Colour.red(),
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
