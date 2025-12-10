@@ -744,34 +744,35 @@ class MemberQueryCog(commands.Cog):
                     "Characters",
                 ]
             )
-        for (
-            member,
-            account_names,
-            characters,
-            character_entries,
-            matched_guilds,
-            _,
-            _,
-            guild_ids,
-        ) in matched:
-            guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
-            roles = [role.name for role in member.roles if not role.is_default()]
-            characters_for_csv = (
-                [name for name, _ in character_entries]
-                if character_provided
-                else characters
-            )
-            writer.writerow(
-                [
-                    member.id,
-                    f"{member.display_name} ({member.name})",
-                    "; ".join(account_names),
-                    "; ".join(guild_ids),
-                    "; ".join(guild_labels or ["No guilds"]),
-                    "; ".join(roles),
-                    "; ".join(characters_for_csv),
-                ]
-            )
+
+            for (
+                member,
+                account_names,
+                characters,
+                character_entries,
+                matched_guilds,
+                _,
+                _,
+                guild_ids,
+            ) in matched:
+                guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
+                roles = [role.name for role in member.roles if not role.is_default()]
+                characters_for_csv = (
+                    [name for name, _ in character_entries]
+                    if character_provided
+                    else characters
+                )
+                writer.writerow(
+                    [
+                        member.id,
+                        f"{member.display_name} ({member.name})",
+                        "; ".join(account_names),
+                        "; ".join(guild_ids),
+                        "; ".join(guild_labels or ["No guilds"]),
+                        "; ".join(roles),
+                        "; ".join(characters_for_csv),
+                    ]
+                )
 
             buffer.seek(0)
             files = [
