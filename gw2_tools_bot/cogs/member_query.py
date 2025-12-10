@@ -140,6 +140,25 @@ class MemberQueryCog(commands.Cog):
                 details[guild_id] = name
         return details
 
+    async def _fetch_character_names(self, api_key: str) -> List[str]:
+        payload = await self._fetch_json(
+            "https://api.guildwars2.com/v2/characters", api_key=api_key
+        )
+        if not isinstance(payload, list):
+            raise ValueError(
+                "Unexpected response from /v2/characters. The endpoint should return a list of character names."
+            )
+
+        names: List[str] = []
+        for name in payload:
+            if isinstance(name, str):
+                cleaned = name.strip()
+                if cleaned:
+                    names.append(cleaned)
+        # Keep the original casing of the first occurrence while enforcing
+        # case-insensitive uniqueness.
+        return sorted({value.casefold(): value for value in names}.values())
+
     # ------------------------------------------------------------------
     # Filtering helpers
     # ------------------------------------------------------------------
