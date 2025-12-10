@@ -13,6 +13,7 @@ from discord.ext import commands
 
 from ..bot import GW2ToolsBot
 from ..http_utils import read_response_text
+from ..storage import normalise_guild_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ class MemberQueryCog(commands.Cog):
     ) -> List[Tuple[str, str]]:
         filters: List[Tuple[str, str]] = []
         if guild:
-            filters.append(("guild", guild))
+            filters.append(("guild", normalise_guild_id(guild)))
         if role:
             filters.append(("role", str(role.id)))
         if account:
@@ -271,12 +272,18 @@ class MemberQueryCog(commands.Cog):
         for filter_type, raw_value in filters:
             needle = raw_value.casefold()
             if filter_type == "guild":
+                normalized_needle = normalise_guild_id(raw_value)
                 label_matches = [
                     label
                     for label in guild_labels.values()
                     if needle in label.casefold() or needle in label.lower()
                 ]
-                id_matches = [gid for gid in guild_labels if needle in gid.lower()]
+                id_matches = [
+                    gid
+                    for gid in guild_labels
+                    if needle in gid.lower()
+                    or normalise_guild_id(gid) == normalized_needle
+                ]
                 if not label_matches and not id_matches:
                     return False, matched_guilds, matched_roles
                 matched_guilds.extend(
@@ -324,7 +331,11 @@ class MemberQueryCog(commands.Cog):
             return []
 
         config = self.bot.get_config(interaction.guild.id)
-        guild_ids = list(config.guild_role_ids.keys())
+        guild_ids = [
+            normalise_guild_id(gid)
+            for gid in config.guild_role_ids.keys()
+            if normalise_guild_id(gid)
+        ]
         if not guild_ids:
             return []
 
@@ -428,8 +439,14 @@ class MemberQueryCog(commands.Cog):
             return
 
         config = self.bot.get_config(interaction.guild.id)
-        allowed_guild_ids = set(config.guild_role_ids.keys())
-        if guild and guild not in allowed_guild_ids:
+        normalized_guild_map = {
+            normalise_guild_id(gid): role_id
+            for gid, role_id in config.guild_role_ids.items()
+            if normalise_guild_id(gid)
+        }
+        allowed_guild_ids = set(normalized_guild_map.keys())
+        normalized_filter_guild = normalise_guild_id(guild) if guild else None
+        if normalized_filter_guild and normalized_filter_guild not in allowed_guild_ids:
             await self._send_embed(
                 interaction,
                 title="Member query",
@@ -441,7 +458,11 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
-        guild = (guild.strip() or None) if isinstance(guild, str) else guild
+        guild = (
+            normalized_filter_guild
+            if isinstance(normalized_filter_guild, str)
+            else normalized_filter_guild
+        )
         account = (account.strip() or None) if isinstance(account, str) else account
         character = (character.strip() or None) if isinstance(character, str) else character
 
@@ -523,8 +544,9 @@ class MemberQueryCog(commands.Cog):
                 if entry not in character_bucket:
                     character_bucket.append(entry)
             for gid in record.guild_ids:
-                if gid:
-                    bundle["guild_ids"].add(gid)
+                normalized_gid = normalise_guild_id(gid) if gid else ""
+                if normalized_gid:
+                    bundle["guild_ids"].add(normalized_gid)
 
         if not bundles:
             await self._send_embed(
@@ -564,7 +586,7 @@ class MemberQueryCog(commands.Cog):
             }
             mapped_role_mentions: List[str] = []
             for gid in bundle["guild_ids"]:
-                role_id = config.guild_role_ids.get(gid)
+                role_id = normalized_guild_map.get(gid)
                 if role_id:
                     role_obj = interaction.guild.get_role(role_id)
                     if role_obj:
