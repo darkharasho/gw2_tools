@@ -84,14 +84,19 @@ class GW2ToolsBot(commands.Bot):
     # ------------------------------------------------------------------
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError) -> None:
         LOGGER.exception("App command error: %s", error)
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                "An unexpected error occurred while processing the command.", ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                "An unexpected error occurred while processing the command.", ephemeral=True
-            )
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "An unexpected error occurred while processing the command.", ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "An unexpected error occurred while processing the command.", ephemeral=True
+                )
+        except discord.NotFound:
+            LOGGER.warning("Interaction expired before an error message could be sent")
+        except Exception:  # pragma: no cover - defensive logging
+            LOGGER.exception("Failed to send error response for interaction")
 
     # ------------------------------------------------------------------
     def get_config(self, guild_id: int) -> GuildConfig:
