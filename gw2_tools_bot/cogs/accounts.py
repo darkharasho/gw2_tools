@@ -168,6 +168,47 @@ class AccountsCog(commands.Cog):
         guild_details = await self._fetch_guild_details(guild_ids, api_key=api_key)
         return permissions, guild_ids, guild_details, account_name
 
+    def _generate_default_name(
+        self, account_name: str, existing_records: Sequence[ApiKeyRecord]
+    ) -> str:
+        base = account_name or "Account"
+        existing = {record.name.lower() for record in existing_records}
+        if base.lower() not in existing:
+            return base
+        suffix = 2
+        while f"{base} ({suffix})".lower() in existing:
+            suffix += 1
+        return f"{base} ({suffix})"
+
+    async def _resolve_record_details(
+        self, record: ApiKeyRecord
+    ) -> Tuple[str, List[str], Optional[str]]:
+        account_name = record.account_name or ""
+        error: Optional[str] = None
+        try:
+            guild_details = await self._fetch_guild_details(record.guild_ids, api_key=record.key)
+        except ValueError as exc:
+            guild_details = {}
+            error = str(exc)
+
+        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in record.guild_ids]
+
+        if not account_name:
+            try:
+                account = await self._fetch_json(
+                    "https://api.guildwars2.com/v2/account", api_key=record.key
+                )
+                account_name_raw = account.get("name")
+                if isinstance(account_name_raw, str) and account_name_raw.strip():
+                    account_name = account_name_raw.strip()
+            except ValueError as exc:
+                error = error or str(exc)
+
+        if not account_name:
+            account_name = "Unknown account"
+
+        return account_name, guild_labels, error
+
     # ------------------------------------------------------------------
     # Role syncing
     # ------------------------------------------------------------------
@@ -391,8 +432,8 @@ class AccountsCog(commands.Cog):
         return matches
 
     @api_keys.command(name="add", description="Add a new Guild Wars 2 API key.")
-    @app_commands.describe(name="Friendly name for this key", key="Your Guild Wars 2 API key")
-    async def add_api_key(self, interaction: discord.Interaction, name: str, key: str) -> None:
+    @app_commands.describe(key="Your Guild Wars 2 API key")
+    async def add_api_key(self, interaction: discord.Interaction, key: str) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await self._send_embed(
                 interaction,
@@ -402,26 +443,17 @@ class AccountsCog(commands.Cog):
             )
             return
 
-        name_clean = name.strip()
         key_clean = key.strip()
-        if not name_clean or not key_clean:
+        if not key_clean:
             await self._send_embed(
                 interaction,
                 title="API key",
-                description="Please provide both a name and API key.",
+                description="Please provide an API key.",
                 colour=discord.Colour.red(),
             )
             return
 
         existing_keys = self.bot.storage.get_user_api_keys(interaction.guild.id, interaction.user.id)
-        if self._find_existing_name(existing_keys, name_clean):
-            await self._send_embed(
-                interaction,
-                title="API key",
-                description="You already have a key with that name. Use /apikey update to change it.",
-                colour=discord.Colour.red(),
-            )
-            return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -436,9 +468,12 @@ class AccountsCog(commands.Cog):
             )
             return
 
+        default_name = self._generate_default_name(account_name, existing_keys)
+
         record = ApiKeyRecord(
-            name=name_clean,
+            name=default_name,
             key=key_clean,
+            account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
             created_at=utcnow(),
@@ -449,7 +484,7 @@ class AccountsCog(commands.Cog):
         added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
 
         summary_lines = [
-            f"Saved API key for {account_name} with permissions: {', '.join(sorted(permissions))}.",
+            f"Saved API key `{default_name}` for {account_name} with permissions: {', '.join(sorted(permissions))}.",
         ]
         if guild_ids:
             names = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
@@ -598,17 +633,41 @@ class AccountsCog(commands.Cog):
             )
             return
 
-        lines = []
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        embeds: List[discord.Embed] = []
         for record in records:
-            roles = [guild_id for guild_id in record.guild_ids]
-            lines.append(
-                f"`{record.name}` ({self._mask_key(record.key)}) — guilds: {', '.join(roles) if roles else 'none'}"
+            account_name, guild_labels, error = await self._resolve_record_details(record)
+
+            description_lines = [
+                f"Account: {account_name}",
+                f"Permissions: {', '.join(record.permissions) if record.permissions else 'None'}",
+            ]
+
+            if guild_labels:
+                description_lines.append("Guilds: " + ", ".join(guild_labels))
+            elif record.guild_ids:
+                description_lines.append("Guilds: " + ", ".join(record.guild_ids))
+            else:
+                description_lines.append("Guilds: none")
+
+            if error:
+                description_lines.append(f"⚠️ {error}")
+
+            embed = self._embed(
+                title=record.name,
+                description="\n".join(description_lines),
             )
-        await self._send_embed(
-            interaction,
-            title="Your API keys",
-            description="\n".join(lines),
-        )
+            embed.add_field(name="API key", value=f"```{record.key}```", inline=False)
+            embeds.append(embed)
+
+        # Discord limits embeds per message; send additional followups if necessary.
+        first_batch = embeds[:10]
+        await interaction.followup.send(embeds=first_batch, ephemeral=True)
+        remaining = embeds[10:]
+        while remaining:
+            await interaction.followup.send(embeds=remaining[:10], ephemeral=True)
+            remaining = remaining[10:]
 
 
 class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
@@ -694,6 +753,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
         updated_record = ApiKeyRecord(
             name=name_clean,
             key=key_clean,
+            account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
             created_at=self.record.created_at,

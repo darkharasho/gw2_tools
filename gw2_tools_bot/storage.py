@@ -282,6 +282,7 @@ class ApiKeyRecord:
 
     name: str
     key: str
+    account_name: str = ""
     permissions: List[str] = field(default_factory=list)
     guild_ids: List[str] = field(default_factory=list)
     created_at: str = field(default_factory=utcnow)
@@ -317,12 +318,16 @@ class ApiKeyRecord:
                     if cleaned:
                         guild_ids.append(cleaned)
 
+        account_name_raw = payload.get("account_name")
+        account_name = account_name_raw.strip() if isinstance(account_name_raw, str) else ""
+
         created_at = payload.get("created_at") or utcnow()
         updated_at = payload.get("updated_at") or created_at
 
         return cls(
             name=name_raw.strip(),
             key=key_raw.strip(),
+            account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
             created_at=created_at,
