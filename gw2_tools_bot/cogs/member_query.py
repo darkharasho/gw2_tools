@@ -392,6 +392,10 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
+        guild = (guild.strip() or None) if isinstance(guild, str) else guild
+        account = (account.strip() or None) if isinstance(account, str) else account
+        character = (character.strip() or None) if isinstance(character, str) else character
+
         filters = self._build_filters(
             guild=guild,
             role=role,
