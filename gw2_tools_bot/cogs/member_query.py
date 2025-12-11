@@ -714,6 +714,13 @@ class MemberQueryCog(commands.Cog):
             )
             return
 
+        single_target = (
+            not count_only
+            and not group_by
+            and len(matched) == 1
+            and (account or character_provided or discord_member)
+        )
+
         grouped: Dict[
             str,
             List[
@@ -798,6 +805,66 @@ class MemberQueryCog(commands.Cog):
             value=self._trim_field("\n".join(filters_label)),
             inline=False,
         )
+
+        if single_target:
+            (
+                member,
+                account_names,
+                _characters,
+                character_entries,
+                _matched_guilds,
+                matched_roles,
+                mapped_role_mentions,
+                guild_ids,
+            ) = matched[0]
+
+            embed = self._embed(
+                title=member.display_name,
+                description=member.mention,
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.add_field(
+                name="Filters",
+                value=self._trim_field("\n".join(filters_label)),
+                inline=False,
+            )
+
+            accounts_block = "\n".join(account_names) or "Unknown"
+            embed.add_field(
+                name="Username",
+                value=f"```\n{accounts_block}\n```",
+                inline=False,
+            )
+
+            guild_lines = [
+                f"- {guild_details.get(gid, gid)}" for gid in guild_ids if gid
+            ]
+            guild_value = "```\n" + "\n".join(guild_lines or ["No guilds"]) + "\n```"
+            embed.add_field(name="Guilds", value=guild_value, inline=False)
+
+            roles_value = (
+                "\n".join(mapped_role_mentions or matched_roles or ["No mapped roles"])
+            )
+            embed.add_field(
+                name="Mapped roles",
+                value=self._trim_field(roles_value),
+                inline=False,
+            )
+
+            if show_characters and character_entries:
+                character_lines = [
+                    f"- {name}" + (f" — {acct}" if acct else "")
+                    for name, acct in character_entries
+                ]
+                embed.add_field(
+                    name="Characters",
+                    value="```\n" + "\n".join(character_lines) + "\n```",
+                    inline=False,
+                )
+
+            await self._safe_followup(interaction, embeds=[embed])
+            return
+
         base_embed.add_field(
             name="Group by",
             value=group_by.capitalize() if group_by else "None",
