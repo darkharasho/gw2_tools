@@ -448,6 +448,7 @@ class MemberQueryCog(commands.Cog):
         discord_member="Match a specific Discord member",
         group_by="Group results by this field",
         as_csv="Export the results to a CSV attachment",
+        count_only="Return only counts instead of detailed entries",
     )
     @app_commands.autocomplete(
         guild=_guild_autocomplete,
@@ -472,6 +473,7 @@ class MemberQueryCog(commands.Cog):
         discord_member: Optional[discord.Member] = None,
         group_by: Optional[str] = None,
         as_csv: bool = False,
+        count_only: bool = False,
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
@@ -526,7 +528,8 @@ class MemberQueryCog(commands.Cog):
             discord_member=discord_member,
         )
         # Only surface character lists when the character filter was provided.
-        show_characters = character_provided
+        # Suppress character details when only counts are requested.
+        show_characters = character_provided and not count_only
         if group_by:
             group_by = group_by.lower()
         allowed_groups = {"guild", "role", "account", "discord"}
@@ -801,6 +804,13 @@ class MemberQueryCog(commands.Cog):
             inline=False,
         )
 
+        if count_only:
+            base_embed.add_field(
+                name="Matches",
+                value=str(len(matched)),
+                inline=False,
+            )
+
         match_fields: List[Tuple[str, str]] = []
         for group, entries in sorted(
             grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
@@ -814,39 +824,42 @@ class MemberQueryCog(commands.Cog):
                 role_obj = interaction.guild.get_role(role_id) if role_id else None
                 display_group = role_obj.name if role_obj else group
 
-            preview_lines: List[str] = []
-            for (
-                member,
-                account_names,
-                characters,
-                character_entries,
-                matched_guilds,
-                matched_roles,
-                mapped_role_mentions,
-                guild_ids,
-            ) in entries[:10]:
-                guilds_label = matched_guilds or ["No guilds"]
-                roles_label = mapped_role_mentions or matched_roles or ["None mapped"]
-                detail_lines = [
-                    f"• {member.mention}",
-                    f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
-                    f"  • Guilds: {', '.join(guilds_label)}",
-                    f"  • Roles: {', '.join(roles_label)}",
-                ]
-                if show_characters:
-                    character_lines = [
-                        f"    • {name} — {account_name or 'Unknown account'}"
-                        for name, account_name in character_entries
+            if count_only:
+                field_value = f"• Count: {len(entries)}"
+            else:
+                preview_lines: List[str] = []
+                for (
+                    member,
+                    account_names,
+                    characters,
+                    character_entries,
+                    matched_guilds,
+                    matched_roles,
+                    mapped_role_mentions,
+                    guild_ids,
+                ) in entries[:10]:
+                    guilds_label = matched_guilds or ["No guilds"]
+                    roles_label = mapped_role_mentions or matched_roles or ["None mapped"]
+                    detail_lines = [
+                        f"• {member.mention}",
+                        f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
+                        f"  • Guilds: {', '.join(guilds_label)}",
+                        f"  • Roles: {', '.join(roles_label)}",
                     ]
-                    detail_lines.append(
-                        "  • Characters:\n"
-                        + self._trim_field(
-                            "\n".join(character_lines) or "    • None",
+                    if show_characters:
+                        character_lines = [
+                            f"    • {name} — {account_name or 'Unknown account'}"
+                            for name, account_name in character_entries
+                        ]
+                        detail_lines.append(
+                            "  • Characters:\n"
+                            + self._trim_field(
+                                "\n".join(character_lines) or "    • None",
+                            )
                         )
-                    )
-                preview_lines.append("\n".join(detail_lines))
+                    preview_lines.append("\n".join(detail_lines))
 
-            field_value = "\n\n".join(preview_lines) if preview_lines else "• No entries"
+                field_value = "\n\n".join(preview_lines) if preview_lines else "• No entries"
             match_fields.append(
                 (
                     f"{display_group} ({len(entries)})",
@@ -981,6 +994,7 @@ class MemberQueryCog(commands.Cog):
             value=self._format_list(
                 [
                     "Enable **As CSV** to attach a CSV of all matches (Discord IDs, roles, guilds, characters).",
+                    "Enable **Count only** to return totals without member details.",
                 ]
             ),
             inline=False,
