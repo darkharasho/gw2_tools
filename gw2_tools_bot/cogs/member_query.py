@@ -341,29 +341,60 @@ class MemberQueryCog(commands.Cog):
             return []
 
         config = self.bot.get_config(interaction.guild.id)
-        guild_ids = [
+        configured_ids = [
             normalise_guild_id(gid)
             for gid in config.guild_role_ids.keys()
             if normalise_guild_id(gid)
         ]
-        if not guild_ids:
-            return []
 
-        try:
-            details = await self._fetch_guild_details(guild_ids)
-        except ValueError:
-            LOGGER.warning("Guild lookup failed during autocomplete", exc_info=True)
-            details = {}
         choices: List[app_commands.Choice[str]] = []
+        seen: set[str] = set()
         current_lower = current.lower()
-        for guild_id in guild_ids:
-            label = details.get(guild_id, guild_id)
-            display = f"{label} ({guild_id})"
-            if current_lower in display.lower():
-                choices.append(app_commands.Choice(name=display[:100], value=guild_id))
-            if len(choices) >= 25:
-                break
-        return choices
+
+        async def add_choices(guild_ids: Iterable[str]) -> None:
+            nonlocal choices
+            try:
+                details = await self._fetch_guild_details(list(guild_ids))
+            except ValueError:
+                LOGGER.warning("Guild lookup failed during autocomplete", exc_info=True)
+                details = {}
+
+            for guild_id in guild_ids:
+                if guild_id in seen or not guild_id:
+                    continue
+                label = details.get(guild_id, guild_id)
+                display = f"{label} ({guild_id})"
+                if current_lower and current_lower not in display.lower():
+                    continue
+                seen.add(guild_id)
+                choices.append(
+                    app_commands.Choice(name=display[:100], value=guild_id)
+                )
+                if len(choices) >= 25:
+                    break
+
+        # Prefer configured guild IDs first.
+        await add_choices(configured_ids)
+
+        # Fallback to GW2 API search for unmatched input so admins can target
+        # guilds that are not yet configured via /guildroles.
+        if len(choices) < 25 and current.strip():
+            try:
+                search_results = await self._fetch_json(
+                    "https://api.guildwars2.com/v2/guild/search",
+                    params={"name": current.strip()},
+                )
+                if isinstance(search_results, list):
+                    api_ids = [
+                        normalise_guild_id(gid)
+                        for gid in search_results
+                        if isinstance(gid, str) and normalise_guild_id(gid)
+                    ]
+                    await add_choices(api_ids)
+            except ValueError:
+                LOGGER.warning("Guild search failed during autocomplete", exc_info=True)
+
+        return choices[:25]
 
     async def _account_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -495,18 +526,6 @@ class MemberQueryCog(commands.Cog):
         }
         allowed_guild_ids = set(normalized_guild_map.keys())
         normalized_filter_guild = normalise_guild_id(guild) if guild else None
-        if normalized_filter_guild and normalized_filter_guild not in allowed_guild_ids:
-            await self._send_embed(
-                interaction,
-                title="Member query",
-                description=(
-                    "Guild filters must use IDs configured via /guildroles set. "
-                    "Choose a mapped guild from the autocomplete list."
-                ),
-                colour=BRAND_COLOUR,
-            )
-            return
-
         guild = (
             normalized_filter_guild
             if isinstance(normalized_filter_guild, str)
@@ -640,6 +659,9 @@ class MemberQueryCog(commands.Cog):
         guild_ids_for_lookup = allowed_guild_ids or {
             guild_id for bundle in bundles.values() for guild_id in bundle["guild_ids"]
         }
+        if guild:
+            guild_ids_for_lookup = set(guild_ids_for_lookup)
+            guild_ids_for_lookup.add(guild)
         guild_details = await self._fetch_guild_details(guild_ids_for_lookup)
 
         matched: List[
@@ -656,12 +678,9 @@ class MemberQueryCog(commands.Cog):
         ] = []
         for bundle in bundles.values():
             member = bundle["member"]
-            configured_guilds = [
-                gid for gid in bundle["guild_ids"] if gid in allowed_guild_ids
-            ]
             guild_labels = {
                 gid: guild_details.get(gid, gid)
-                for gid in (configured_guilds or bundle["guild_ids"])
+                for gid in bundle["guild_ids"]
                 if gid
             }
             mapped_role_mentions: List[str] = []
