@@ -921,95 +921,97 @@ class MemberQueryCog(commands.Cog):
                 )
             ]
 
+        match_blocks: List[str] = []
+
+        if not count_only:
+            for group, entries in sorted(
+                grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
+            ):
+                display_group = group
+                if (
+                    group_by == "role"
+                    and group.startswith("<@&")
+                    and group.endswith(">")
+                ):
+                    try:
+                        role_id = int(group.strip("<@&>"))
+                    except ValueError:
+                        role_id = None
+                    role_obj = interaction.guild.get_role(role_id) if role_id else None
+                    display_group = role_obj.name if role_obj else "Role"
+
+                if group_by and display_group:
+                    match_blocks.append(f"**{display_group}**")
+
+                for (
+                    member,
+                    account_names,
+                    _characters,
+                    character_entries,
+                    matched_guilds,
+                    matched_roles,
+                    mapped_role_mentions,
+                    guild_ids,
+                ) in entries:
+                    guilds_label = matched_guilds or [
+                        self._friendly_guild_label(gid, guild_details)
+                        for gid in guild_ids
+                        if gid
+                    ]
+                    role_labels = self._role_labels(
+                        mapped_role_mentions or matched_roles, interaction.guild
+                    )
+
+                    block_lines = [
+                        member.mention,
+                        f"Roles: {', '.join(role_labels) if role_labels else 'No mapped roles'}",
+                        "```",
+                        *[f"- {label}" for label in guilds_label or ["No guilds"]],
+                        "```",
+                    ]
+
+                    if show_characters and character_entries:
+                        block_lines.append("Characters:")
+                        block_lines.append("```")
+                        block_lines.extend(
+                            [
+                                f"- {name}" + (f" — {acct}" if acct else "")
+                                for name, acct in character_entries
+                            ]
+                            or ["- None"]
+                        )
+                        block_lines.append("```")
+
+                    match_blocks.append("\n".join(block_lines))
+                match_blocks.append("")
+
+        # Build paginated embeds of match blocks to stay within Discord limits.
+        match_embeds: List[discord.Embed] = []
+        if match_blocks:
+            current: List[str] = []
+            current_len = 0
+            for block in match_blocks:
+                # Separate entries with a blank line for readability.
+                block_len = len(block) + (2 if current else 0)
+                if current and current_len + block_len > 3800:
+                    embed = self._embed(title="Matches", description="\n\n".join(current))
+                    match_embeds.append(embed)
+                    current = []
+                    current_len = 0
+
+                if block:
+                    current.append(block)
+                    current_len += block_len
+
+            if current:
+                embed = self._embed(title="Matches", description="\n\n".join(current))
+                match_embeds.append(embed)
+
         await self._safe_followup(
             interaction,
-            embeds=[summary_embed],
+            embeds=[summary_embed, *match_embeds] if match_embeds else [summary_embed],
             files=files,
         )
-
-        if count_only:
-            return
-
-        for group, entries in sorted(
-            grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
-        ):
-            display_group = group
-            if group_by == "role" and group.startswith("<@&") and group.endswith(">"):
-                try:
-                    role_id = int(group.strip("<@&>"))
-                except ValueError:
-                    role_id = None
-                role_obj = interaction.guild.get_role(role_id) if role_id else None
-                display_group = role_obj.name if role_obj else "Role"
-
-            for (
-                member,
-                account_names,
-                _characters,
-                character_entries,
-                matched_guilds,
-                matched_roles,
-                mapped_role_mentions,
-                guild_ids,
-            ) in entries:
-                guilds_label = matched_guilds or [
-                    self._friendly_guild_label(gid, guild_details)
-                    for gid in guild_ids
-                    if gid
-                ]
-                role_labels = self._role_labels(
-                    mapped_role_mentions or matched_roles, interaction.guild
-                )
-                roles_value = "```\n" + "\n".join(role_labels or ["No mapped roles"]) + "\n```"
-
-                embed = self._embed(
-                    title="Member match",
-                    description="",
-                )
-                embed.set_thumbnail(url=member.display_avatar.url)
-                if group_by:
-                    embed.add_field(
-                        name="Group",
-                        value=self._trim_field(display_group or "Matches"),
-                        inline=False,
-                    )
-
-                accounts_block = "\n".join(account_names) or "Unknown"
-                embed.add_field(
-                    name="Accounts",
-                    value=f"```\n{self._trim_field(accounts_block)}\n```",
-                    inline=False,
-                )
-
-                guild_lines = [f"- {label}" for label in guilds_label]
-                guild_value = "```\n" + "\n".join(guild_lines or ["No guilds"]) + "\n```"
-                embed.add_field(name="Guilds", value=self._trim_field(guild_value), inline=False)
-
-                embed.add_field(
-                    name="Mapped roles",
-                    value=self._trim_field(roles_value),
-                    inline=False,
-                )
-
-                if show_characters and character_entries:
-                    character_lines = [
-                        f"- {name}" + (f" — {acct}" if acct else "")
-                        for name, acct in character_entries
-                    ]
-                    embed.add_field(
-                        name="Characters",
-                        value=self._trim_field(
-                            "```\n" + "\n".join(character_lines) + "\n```"
-                        ),
-                        inline=False,
-                    )
-
-                user_link = f"[{member.display_name}](https://discord.com/users/{member.id})"
-                await self._safe_followup(
-                    interaction,
-                    embeds=[embed],
-                    content=user_link,
-                )
 
     @memberquery.command(
         name="help",
