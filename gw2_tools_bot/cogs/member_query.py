@@ -147,11 +147,13 @@ class MemberQueryCog(commands.Cog):
         *,
         embeds: Sequence[discord.Embed],
         files: Optional[Sequence[discord.File]] = None,
+        content: Optional[str] = None,
     ) -> None:
         """Send a followup only if the interaction is still active."""
 
         try:
             await interaction.followup.send(
+                content=content,
                 embeds=list(embeds),
                 files=list(files) if files is not None else [],
                 ephemeral=True,
@@ -846,169 +848,25 @@ class MemberQueryCog(commands.Cog):
         if not any([guild, role, account, character_provided, discord_member]):
             filters_label = ["None (all)"]
 
-        base_embed = self._embed(
+        summary_embed = self._embed(
             title="Member query results",
             description="",
         )
-        base_embed.add_field(
+        summary_embed.add_field(
             name="Filters",
             value=self._trim_field("```\n" + "\n".join(filters_label) + "\n```"),
             inline=False,
         )
-
-        if single_target:
-            (
-                member,
-                account_names,
-                _characters,
-                character_entries,
-                _matched_guilds,
-                matched_roles,
-                mapped_role_mentions,
-                guild_ids,
-            ) = matched[0]
-
-            embed = self._embed(
-                title=member.display_name,
-                description=member.mention,
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            embed.add_field(
-                name="Filters",
-                value=self._trim_field("\n".join(filters_label)),
-                inline=False,
-            )
-
-            accounts_block = "\n".join(account_names) or "Unknown"
-            embed.add_field(
-                name="Username",
-                value=f"```\n{accounts_block}\n```",
-                inline=False,
-            )
-
-            guild_lines = [
-                f"- {self._friendly_guild_label(gid, guild_details)}"
-                for gid in guild_ids
-                if gid
-            ]
-            guild_value = "```\n" + "\n".join(guild_lines or ["No guilds"]) + "\n```"
-            embed.add_field(name="Guilds", value=guild_value, inline=False)
-
-            role_labels = self._role_labels(
-                mapped_role_mentions or matched_roles, interaction.guild
-            )
-            roles_value = "\n".join(role_labels or ["No mapped roles"])
-            embed.add_field(
-                name="Mapped roles",
-                value=self._trim_field(roles_value),
-                inline=False,
-            )
-
-            if show_characters and character_entries:
-                character_lines = [
-                    f"- {name}" + (f" — {acct}" if acct else "")
-                    for name, acct in character_entries
-                ]
-                embed.add_field(
-                    name="Characters",
-                    value="```\n" + "\n".join(character_lines) + "\n```",
-                    inline=False,
-                )
-
-            await self._safe_followup(interaction, embeds=[embed])
-            return
-
-        base_embed.add_field(
+        summary_embed.add_field(
             name="Group by",
             value=group_by.capitalize() if group_by else "None",
             inline=False,
         )
-
-        if count_only:
-            base_embed.add_field(
-                name="Matches",
-                value=str(len(matched)),
-                inline=False,
-            )
-
-        match_fields: List[Tuple[str, str]] = []
-        for group, entries in sorted(
-            grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
-        ):
-            display_group = group
-            if group_by == "role" and group.startswith("<@&") and group.endswith(">"):
-                try:
-                    role_id = int(group.strip("<@&>"))
-                except ValueError:
-                    role_id = None
-                role_obj = interaction.guild.get_role(role_id) if role_id else None
-                display_group = role_obj.name if role_obj else "Role"
-
-            if count_only:
-                field_value = f"• Count: {len(entries)}"
-            else:
-                preview_lines: List[str] = []
-                for (
-                    member,
-                    account_names,
-                    characters,
-                    character_entries,
-                    matched_guilds,
-                    matched_roles,
-                    mapped_role_mentions,
-                    guild_ids,
-                ) in entries[:10]:
-                    guilds_label = matched_guilds or [
-                        self._friendly_guild_label(gid, guild_details)
-                        for gid in guild_ids
-                        if gid
-                    ]
-                    role_labels = self._role_labels(
-                        mapped_role_mentions or matched_roles, interaction.guild
-                    )
-                    roles_label = role_labels or ["None mapped"]
-                    detail_lines = [
-                        f"@{member.display_name}",
-                        f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
-                        f"  • Guilds: {', '.join(guilds_label)}",
-                        f"  • Roles: {', '.join(roles_label)}",
-                    ]
-                    if show_characters:
-                        character_lines = [
-                            f"    - {name}"
-                            + (f" — {account_name}" if account_name else "")
-                            for name, account_name in character_entries
-                        ]
-                        detail_lines.append(
-                            "  • Characters:\n"
-                            + self._trim_field(
-                                "\n".join(character_lines) or "    - None",
-                            )
-                        )
-                    preview_lines.append("\n".join(detail_lines))
-
-                preview_block = "\n\n".join(preview_lines) if preview_lines else "No entries"
-                field_value = f"```\n{self._trim_field(preview_block)}\n```"
-            match_fields.append(
-                (
-                    f"{display_group} ({len(entries)})",
-                    self._trim_field(field_value),
-                )
-            )
-
-        embeds: List[discord.Embed] = []
-        current_embed = base_embed
-        max_fields = 25
-        for name, value in match_fields:
-            if len(current_embed.fields) >= max_fields:
-                embeds.append(current_embed)
-                current_embed = self._embed(
-                    title="Member query results (cont.)",
-                    description="",
-                )
-            current_embed.add_field(name=name, value=value, inline=False)
-
-        embeds.append(current_embed)
+        summary_embed.add_field(
+            name="Matches",
+            value=str(len(matched)),
+            inline=False,
+        )
 
         files: List[discord.File] = []
         if as_csv:
@@ -1063,10 +921,95 @@ class MemberQueryCog(commands.Cog):
                 )
             ]
 
-        if files:
-            await self._safe_followup(interaction, embeds=embeds, files=files)
-        else:
-            await self._safe_followup(interaction, embeds=embeds)
+        await self._safe_followup(
+            interaction,
+            embeds=[summary_embed],
+            files=files,
+        )
+
+        if count_only:
+            return
+
+        for group, entries in sorted(
+            grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
+        ):
+            display_group = group
+            if group_by == "role" and group.startswith("<@&") and group.endswith(">"):
+                try:
+                    role_id = int(group.strip("<@&>"))
+                except ValueError:
+                    role_id = None
+                role_obj = interaction.guild.get_role(role_id) if role_id else None
+                display_group = role_obj.name if role_obj else "Role"
+
+            for (
+                member,
+                account_names,
+                _characters,
+                character_entries,
+                matched_guilds,
+                matched_roles,
+                mapped_role_mentions,
+                guild_ids,
+            ) in entries:
+                guilds_label = matched_guilds or [
+                    self._friendly_guild_label(gid, guild_details)
+                    for gid in guild_ids
+                    if gid
+                ]
+                role_labels = self._role_labels(
+                    mapped_role_mentions or matched_roles, interaction.guild
+                )
+                roles_value = "```\n" + "\n".join(role_labels or ["No mapped roles"]) + "\n```"
+
+                embed = self._embed(
+                    title="Member match",
+                    description="",
+                )
+                embed.set_thumbnail(url=member.display_avatar.url)
+                if group_by:
+                    embed.add_field(
+                        name="Group",
+                        value=self._trim_field(display_group or "Matches"),
+                        inline=False,
+                    )
+
+                accounts_block = "\n".join(account_names) or "Unknown"
+                embed.add_field(
+                    name="Accounts",
+                    value=f"```\n{self._trim_field(accounts_block)}\n```",
+                    inline=False,
+                )
+
+                guild_lines = [f"- {label}" for label in guilds_label]
+                guild_value = "```\n" + "\n".join(guild_lines or ["No guilds"]) + "\n```"
+                embed.add_field(name="Guilds", value=self._trim_field(guild_value), inline=False)
+
+                embed.add_field(
+                    name="Mapped roles",
+                    value=self._trim_field(roles_value),
+                    inline=False,
+                )
+
+                if show_characters and character_entries:
+                    character_lines = [
+                        f"- {name}" + (f" — {acct}" if acct else "")
+                        for name, acct in character_entries
+                    ]
+                    embed.add_field(
+                        name="Characters",
+                        value=self._trim_field(
+                            "```\n" + "\n".join(character_lines) + "\n```"
+                        ),
+                        inline=False,
+                    )
+
+                user_link = f"[{member.display_name}](https://discord.com/users/{member.id})"
+                await self._safe_followup(
+                    interaction,
+                    embeds=[embed],
+                    content=user_link,
+                )
 
     @memberquery.command(
         name="help",
