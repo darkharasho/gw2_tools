@@ -799,21 +799,19 @@ class MemberQueryCog(commands.Cog):
         filters_label: List[str] = []
         if guild:
             guild_label = guild_details.get(guild, guild)
-            filters_label.append(f"Guild: {guild_label}\n```{guild}```")
+            filters_label.append(f"Guild: {guild_label}")
         else:
-            filters_label.append("Guild: All mapped\n```All mapped```")
+            filters_label.append("Guild: All mapped")
         if role:
-            filters_label.append(f"Role: {role.name}\n```{role.id}```")
+            filters_label.append(f"Role: {role.name}")
         if account:
-            filters_label.append(f"Account\n```{account}```")
+            filters_label.append(f"Account: {account}")
         if character_provided:
-            filters_label.append(f"Character\n```{character_label}```")
+            filters_label.append(f"Character: {character_label}")
         if discord_member:
-            filters_label.append(
-                f"Discord\n```{discord_member.display_name} ({discord_member.id})```"
-            )
+            filters_label.append(f"Discord: {discord_member.display_name}")
         if not any([guild, role, account, character_provided, discord_member]):
-            filters_label = ["None (all)\n```All members```"]
+            filters_label = ["None (all)"]
 
         base_embed = self._embed(
             title="Member query results",
@@ -821,7 +819,7 @@ class MemberQueryCog(commands.Cog):
         )
         base_embed.add_field(
             name="Filters",
-            value=self._trim_field("\n".join(filters_label)),
+            value=self._trim_field("```\n" + "\n".join(filters_label) + "\n```"),
             inline=False,
         )
 
@@ -908,7 +906,7 @@ class MemberQueryCog(commands.Cog):
                 except ValueError:
                     role_id = None
                 role_obj = interaction.guild.get_role(role_id) if role_id else None
-                display_group = role_obj.name if role_obj else group
+                display_group = role_obj.name if role_obj else "Role"
 
             if count_only:
                 field_value = f"• Count: {len(entries)}"
@@ -927,25 +925,26 @@ class MemberQueryCog(commands.Cog):
                     guilds_label = matched_guilds or ["No guilds"]
                     roles_label = mapped_role_mentions or matched_roles or ["None mapped"]
                     detail_lines = [
-                        f"• {member.mention}",
-                        f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
-                        f"  • Guilds: {', '.join(guilds_label)}",
-                        f"  • Roles: {', '.join(roles_label)}",
+                        f"@{member.display_name}",
+                        f"  Accounts: {', '.join(account_names) or 'Unknown'}",
+                        f"  Guilds: {', '.join(guilds_label)}",
+                        f"  Roles: {', '.join(roles_label)}",
                     ]
                     if show_characters:
                         character_lines = [
-                            f"    • {name} — {account_name or 'Unknown account'}"
+                            f"    - {name} — {account_name or 'Unknown account'}"
                             for name, account_name in character_entries
                         ]
                         detail_lines.append(
-                            "  • Characters:\n"
+                            "  Characters:\n"
                             + self._trim_field(
-                                "\n".join(character_lines) or "    • None",
+                                "\n".join(character_lines) or "    - None",
                             )
                         )
                     preview_lines.append("\n".join(detail_lines))
 
-                field_value = "\n\n".join(preview_lines) if preview_lines else "• No entries"
+                preview_block = "\n\n".join(preview_lines) if preview_lines else "No entries"
+                field_value = f"```\n{self._trim_field(preview_block)}\n```"
             match_fields.append(
                 (
                     f"{display_group} ({len(entries)})",
