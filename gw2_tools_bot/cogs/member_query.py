@@ -4,7 +4,7 @@ import csv
 import io
 import json
 import logging
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import aiohttp
 import discord
@@ -222,6 +222,39 @@ class MemberQueryCog(commands.Cog):
             elif isinstance(name, str):
                 details[guild_id] = name
         return details
+
+    def _friendly_guild_label(
+        self, guild_id: str, guild_details: Mapping[str, str]
+    ) -> str:
+        label = guild_details.get(guild_id)
+        if label:
+            return label
+        if not guild_id:
+            return "Unknown guild"
+        shortened = (
+            f"{guild_id[:4]}…{guild_id[-4:]}" if len(guild_id) > 8 else guild_id
+        )
+        return f"Guild {shortened}"
+
+    def _role_labels(
+        self, role_strings: Sequence[str], guild: discord.Guild
+    ) -> List[str]:
+        labels: List[str] = []
+        for value in role_strings:
+            role_obj: Optional[discord.Role] = None
+            if value.isdigit():
+                role_obj = guild.get_role(int(value))
+            elif value.startswith("<@&") and value.endswith(">"):
+                try:
+                    role_obj = guild.get_role(int(value.strip("<@&>")))
+                except ValueError:
+                    role_obj = None
+            if role_obj:
+                labels.append(role_obj.name)
+            else:
+                labels.append(value)
+
+        return sorted({label.casefold(): label for label in labels}.values())
 
     async def _fetch_character_names(self, api_key: str) -> List[str]:
         payload = await self._fetch_json(
@@ -679,7 +712,7 @@ class MemberQueryCog(commands.Cog):
         for bundle in bundles.values():
             member = bundle["member"]
             guild_labels = {
-                gid: guild_details.get(gid, gid)
+                gid: self._friendly_guild_label(gid, guild_details)
                 for gid in bundle["guild_ids"]
                 if gid
             }
@@ -798,7 +831,7 @@ class MemberQueryCog(commands.Cog):
 
         filters_label: List[str] = []
         if guild:
-            guild_label = guild_details.get(guild, guild)
+            guild_label = self._friendly_guild_label(guild, guild_details)
             filters_label.append(f"Guild: {guild_label}")
         else:
             filters_label.append("Guild: All mapped")
@@ -854,14 +887,17 @@ class MemberQueryCog(commands.Cog):
             )
 
             guild_lines = [
-                f"- {guild_details.get(gid, gid)}" for gid in guild_ids if gid
+                f"- {self._friendly_guild_label(gid, guild_details)}"
+                for gid in guild_ids
+                if gid
             ]
             guild_value = "```\n" + "\n".join(guild_lines or ["No guilds"]) + "\n```"
             embed.add_field(name="Guilds", value=guild_value, inline=False)
 
-            roles_value = (
-                "\n".join(mapped_role_mentions or matched_roles or ["No mapped roles"])
+            role_labels = self._role_labels(
+                mapped_role_mentions or matched_roles, interaction.guild
             )
+            roles_value = "\n".join(role_labels or ["No mapped roles"])
             embed.add_field(
                 name="Mapped roles",
                 value=self._trim_field(roles_value),
@@ -922,21 +958,29 @@ class MemberQueryCog(commands.Cog):
                     mapped_role_mentions,
                     guild_ids,
                 ) in entries[:10]:
-                    guilds_label = matched_guilds or ["No guilds"]
-                    roles_label = mapped_role_mentions or matched_roles or ["None mapped"]
+                    guilds_label = matched_guilds or [
+                        self._friendly_guild_label(gid, guild_details)
+                        for gid in guild_ids
+                        if gid
+                    ]
+                    role_labels = self._role_labels(
+                        mapped_role_mentions or matched_roles, interaction.guild
+                    )
+                    roles_label = role_labels or ["None mapped"]
                     detail_lines = [
                         f"@{member.display_name}",
-                        f"  Accounts: {', '.join(account_names) or 'Unknown'}",
-                        f"  Guilds: {', '.join(guilds_label)}",
-                        f"  Roles: {', '.join(roles_label)}",
+                        f"  • Accounts: {', '.join(account_names) or 'Unknown'}",
+                        f"  • Guilds: {', '.join(guilds_label)}",
+                        f"  • Roles: {', '.join(roles_label)}",
                     ]
                     if show_characters:
                         character_lines = [
-                            f"    - {name} — {account_name or 'Unknown account'}"
+                            f"    - {name}"
+                            + (f" — {account_name}" if account_name else "")
                             for name, account_name in character_entries
                         ]
                         detail_lines.append(
-                            "  Characters:\n"
+                            "  • Characters:\n"
                             + self._trim_field(
                                 "\n".join(character_lines) or "    - None",
                             )
