@@ -16,6 +16,7 @@ The bot stores persistent data in SQLite at `gw2_tools_bot/data/api_keys.sqlite`
 | `account_name` | TEXT NOT NULL | Guild Wars 2 account name linked to the key. |
 | `permissions` | TEXT NOT NULL | JSON-encoded list of granted API permissions. |
 | `guild_ids` | TEXT NOT NULL | JSON-encoded list of Guild Wars 2 guild IDs tied to the account. |
+| `guild_labels` | TEXT NOT NULL | JSON object mapping guild IDs to cached display labels. |
 | `characters` | TEXT NOT NULL | JSON-encoded list of character names from the key. |
 | `created_at` | TEXT NOT NULL | ISO 8601 timestamp of record creation. |
 | `updated_at` | TEXT NOT NULL | ISO 8601 timestamp of last update. |
