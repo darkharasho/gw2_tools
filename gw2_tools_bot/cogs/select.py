@@ -418,6 +418,28 @@ class SelectCog(commands.Cog):
         match_id = id_matches[0]
         return [guild_labels.get(match_id, match_id)]
 
+    @staticmethod
+    def _split_guild_input(current: str) -> Tuple[str, str]:
+        """Split guild input into a stable prefix and a trailing partial token."""
+
+        match = re.search(r"[^()\s]+$", current)
+        if match:
+            return current[: match.start()], match.group(0)
+        return current, ""
+
+    @staticmethod
+    def _append_guild_token(prefix: str, token: str) -> str:
+        """Join the DSL-friendly prefix with the next token using tidy spacing."""
+
+        base = prefix.rstrip()
+        if not base:
+            return token
+        if base.endswith("("):
+            return f"{base}{token}"
+        if token == ")":
+            return f"{base}{token}"
+        return f"{base} {token}"
+
     def _build_filters(
         self,
         *,
@@ -508,9 +530,25 @@ class SelectCog(commands.Cog):
             if normalise_guild_id(gid)
         ]
 
+        prefix, partial = self._split_guild_input(current or "")
         choices: List[app_commands.Choice[str]] = []
         seen: set[str] = set()
-        current_lower = current.lower()
+        current_lower = partial.lower()
+
+        def add_dsl_choices() -> None:
+            keyword_tokens = ["AND", "OR", "(", ")"]
+            for token in keyword_tokens:
+                if current_lower and current_lower not in token.lower():
+                    continue
+                value = self._append_guild_token(prefix, token)
+                if not value or len(value) > 100:
+                    continue
+                display = f"{token} (keyword)"
+                choices.append(app_commands.Choice(name=display[:100], value=value))
+                if len(choices) >= 25:
+                    return
+
+        add_dsl_choices()
 
         async def add_choices(guild_ids: Iterable[str]) -> None:
             nonlocal choices
@@ -527,10 +565,11 @@ class SelectCog(commands.Cog):
                 display = f"{label} ({guild_id})"
                 if current_lower and current_lower not in display.lower():
                     continue
+                value = self._append_guild_token(prefix, label)
+                if not value or len(value) > 100:
+                    continue
                 seen.add(guild_id)
-                choices.append(
-                    app_commands.Choice(name=display[:100], value=guild_id)
-                )
+                choices.append(app_commands.Choice(name=display[:100], value=value))
                 if len(choices) >= 25:
                     break
 
@@ -539,11 +578,11 @@ class SelectCog(commands.Cog):
 
         # Fallback to GW2 API search for unmatched input so admins can target
         # guilds that are not yet configured via /guildroles.
-        if len(choices) < 25 and current.strip():
+        if len(choices) < 25 and partial.strip():
             try:
                 search_results = await self._fetch_json(
                     "https://api.guildwars2.com/v2/guild/search",
-                    params={"name": current.strip()},
+                    params={"name": partial.strip()},
                 )
                 if isinstance(search_results, list):
                     api_ids = [
