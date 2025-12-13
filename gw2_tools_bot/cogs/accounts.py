@@ -64,6 +64,15 @@ class AccountsCog(commands.Cog):
         return "\n".join(f"• {value}" for value in items)
 
     @staticmethod
+    def _character_summary(characters: Sequence[str]) -> str:
+        count = len(characters)
+        if not count:
+            return "No characters found"
+        if count == 1:
+            return "1 character synced"
+        return f"{count} characters synced"
+
+    @staticmethod
     def _normalise_guild_id(guild_id: str) -> str:
         return normalise_guild_id(guild_id)
 
@@ -893,11 +902,33 @@ class AccountsCog(commands.Cog):
         _set_status("Role sync", "✅ Completed" if not error else "⚠️ Issues")
         await _refresh_progress("Role synchronization complete.")
 
+        role_lines: List[str] = []
+        if added:
+            role_lines.append("Added: " + ", ".join(role.mention for role in added))
+        if removed:
+            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
+        if not added and not removed:
+            role_lines.append(
+                "No configured guild role mappings matched your guild memberships. Ask a moderator to set them with /guildroles set."
+            )
+        if error:
+            role_lines.append(error)
+
         embed = self._embed(
             title="API key saved",
             description="Verification completed. Your key was stored and roles were synced.",
         )
         embed.add_field(name="Verification steps", value=_steps_value(), inline=False)
+        embed.add_field(
+            name="Role sync",
+            value=self._format_list(role_lines, placeholder="No role changes"),
+            inline=False,
+        )
+        embed.add_field(
+            name="\u200b",
+            value="__Stored API key details__",
+            inline=False,
+        )
         embed.add_field(
             name="Account",
             value=self._format_list([f"Key name: `{default_name}`", f"Account name: {account_name}"]),
@@ -919,25 +950,7 @@ class AccountsCog(commands.Cog):
 
         embed.add_field(
             name="Characters",
-            value=self._format_list(characters, placeholder="No characters found"),
-            inline=False,
-        )
-
-        role_lines: List[str] = []
-        if added:
-            role_lines.append("Added: " + ", ".join(role.mention for role in added))
-        if removed:
-            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
-        if not added and not removed:
-            role_lines.append(
-                "No configured guild role mappings matched your guild memberships. Ask a moderator to set them with /guildroles set."
-            )
-        if error:
-            role_lines.append(error)
-
-        embed.add_field(
-            name="Role sync",
-            value=self._format_list(role_lines, placeholder="No role changes"),
+            value=self._character_summary(characters),
             inline=False,
         )
 
@@ -1116,6 +1129,12 @@ class AccountsCog(commands.Cog):
         )
 
         embed.add_field(
+            name="\u200b",
+            value="__Stored API key details__",
+            inline=False,
+        )
+
+        embed.add_field(
             name="Account",
             value=self._format_list(
                 [f"Key name: `{record.name}`", f"Account name: {account_name}"],
@@ -1138,6 +1157,12 @@ class AccountsCog(commands.Cog):
             guild_field_value = "None"
 
         embed.add_field(name="Guild memberships", value=guild_field_value, inline=False)
+
+        embed.add_field(
+            name="Characters",
+            value=self._character_summary(record.characters),
+            inline=False,
+        )
 
         if resolve_error or error:
             embed.add_field(
@@ -1352,9 +1377,35 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
 
         added, removed, error = await self.cog._sync_roles(guild, user)
 
+        role_lines: List[str] = []
+        if added:
+            role_lines.append("Added: " + ", ".join(role.mention for role in added))
+        if removed:
+            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
+        if error:
+            role_lines.append(error)
+
         embed = self.cog._embed(
             title="API key updated",
             description="Your key details were refreshed and roles resynced.",
+        )
+        embed.add_field(
+            name="Actions",
+            value=self.cog._format_list(
+                ["Updated stored key details", "Resynced mapped Discord roles"],
+                placeholder="No actions recorded",
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Role sync",
+            value=self.cog._format_list(role_lines, placeholder="No role changes"),
+            inline=False,
+        )
+        embed.add_field(
+            name="\u200b",
+            value="__Stored API key details__",
+            inline=False,
         )
         embed.add_field(
             name="Account",
@@ -1376,21 +1427,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
 
         embed.add_field(
             name="Characters",
-            value=self.cog._format_list(characters, placeholder="No characters found"),
-            inline=False,
-        )
-
-        role_lines: List[str] = []
-        if added:
-            role_lines.append("Added: " + ", ".join(role.mention for role in added))
-        if removed:
-            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
-        if error:
-            role_lines.append(error)
-
-        embed.add_field(
-            name="Role sync",
-            value=self.cog._format_list(role_lines, placeholder="No role changes"),
+            value=self.cog._character_summary(characters),
             inline=False,
         )
 
