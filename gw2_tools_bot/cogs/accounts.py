@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -7,7 +8,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
@@ -35,6 +36,12 @@ class AccountsCog(commands.Cog):
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
+        self._refresh_task: Optional[asyncio.Task] = None
+
+    async def cog_load(self) -> None:
+        self._guild_cache_refresher.start()
+        self._member_cache_refresher.start()
+        self._refresh_task = asyncio.create_task(self._run_initial_refreshes())
 
     # ------------------------------------------------------------------
     # Presentation helpers
@@ -55,6 +62,15 @@ class AccountsCog(commands.Cog):
         if not items:
             return placeholder
         return "\n".join(f"• {value}" for value in items)
+
+    @staticmethod
+    def _character_summary(characters: Sequence[str]) -> str:
+        count = len(characters)
+        if not count:
+            return "No characters found"
+        if count == 1:
+            return "1 character synced"
+        return f"{count} characters synced"
 
     @staticmethod
     def _normalise_guild_id(guild_id: str) -> str:
@@ -85,6 +101,10 @@ class AccountsCog(commands.Cog):
         return self._session
 
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
+        if self._refresh_task:
+            self._refresh_task.cancel()
+        self._guild_cache_refresher.cancel()
+        self._member_cache_refresher.cancel()
         if self._session and not self._session.closed:
             await self._session.close()
 
@@ -127,6 +147,7 @@ class AccountsCog(commands.Cog):
         self, guild_ids: Iterable[str], *, api_key: Optional[str] = None
     ) -> Dict[str, str]:
         details: Dict[str, str] = {}
+        cache_payload: Dict[str, Tuple[str, Optional[str]]] = {}
         for guild_id in guild_ids:
             if not guild_id:
                 continue
@@ -140,9 +161,127 @@ class AccountsCog(commands.Cog):
             tag = payload.get("tag")
             if isinstance(name, str) and isinstance(tag, str):
                 details[guild_id] = f"{name} [{tag}]"
+                cache_payload[guild_id] = (name, tag)
             elif isinstance(name, str):
                 details[guild_id] = name
+                cache_payload[guild_id] = (name, None)
+        if cache_payload:
+            self.bot.storage.upsert_guild_details(cache_payload)
         return details
+
+    async def _cached_guild_labels(self, guild_ids: Sequence[str]) -> Dict[str, str]:
+        labels = self.bot.storage.get_guild_labels(guild_ids)
+        missing = [gid for gid in guild_ids if gid and gid not in labels]
+        if missing:
+            try:
+                await self._fetch_guild_details(missing)
+            except ValueError:
+                LOGGER.warning("Guild lookup failed while warming cache", exc_info=True)
+            labels.update(self.bot.storage.get_guild_labels(guild_ids))
+        return labels
+
+    async def _run_initial_refreshes(self) -> None:
+        await self.bot.wait_until_ready()
+        try:
+            await self._refresh_guild_cache()
+            await self._refresh_member_cache()
+        except Exception:  # pragma: no cover - defensive
+            LOGGER.exception("Initial cache refresh failed")
+
+    async def _refresh_guild_cache(self) -> None:
+        guild_keys: Dict[str, str] = {}
+        for _, _, record in self.bot.storage.all_api_keys():
+            for guild_id in record.guild_ids:
+                normalised = self._normalise_guild_id(guild_id)
+                if normalised and normalised not in guild_keys:
+                    guild_keys[normalised] = record.key
+
+        if not guild_keys:
+            self.bot.storage.clear_guild_details()
+            return
+
+        refreshed: Dict[str, Tuple[str, Optional[str]]] = {}
+        for guild_id, api_key in guild_keys.items():
+            try:
+                payload = await self._fetch_json(
+                    f"https://api.guildwars2.com/v2/guild/{guild_id}", api_key=api_key
+                )
+            except ValueError as exc:
+                LOGGER.warning("Failed to refresh guild cache for %s: %s", guild_id, exc)
+                continue
+
+            name = payload.get("name")
+            tag = payload.get("tag")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            refreshed[guild_id] = (
+                name.strip(),
+                tag.strip() if isinstance(tag, str) and tag.strip() else None,
+            )
+
+        if not refreshed:
+            LOGGER.warning("Skipped guild cache rebuild; no guild details could be refreshed")
+            return
+
+        self.bot.storage.clear_guild_details()
+        self.bot.storage.upsert_guild_details(refreshed)
+
+    @tasks.loop(hours=24 * 7)
+    async def _guild_cache_refresher(self) -> None:
+        try:
+            await self._refresh_guild_cache()
+        except Exception:  # pragma: no cover - defensive
+            LOGGER.exception("Scheduled guild cache rebuild failed")
+
+    @_guild_cache_refresher.before_loop
+    async def _wait_for_guild_cache_ready(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _refresh_member_cache(self) -> None:
+        for guild_id, user_id, record in self.bot.storage.all_api_keys():
+            try:
+                (
+                    permissions,
+                    guild_ids,
+                    _guild_details,
+                    account_name,
+                    _missing,
+                    characters,
+                ) = await self._validate_api_key(
+                    record.key, allow_missing_permissions=True
+                )
+            except ValueError as exc:
+                LOGGER.warning(
+                    "Failed to refresh API key for guild %s user %s: %s",
+                    guild_id,
+                    user_id,
+                    exc,
+                )
+                continue
+
+            refreshed = ApiKeyRecord(
+                name=record.name,
+                key=record.key,
+                account_name=account_name,
+                permissions=permissions,
+                guild_ids=guild_ids,
+                guild_labels=guild_details,
+                characters=characters,
+                created_at=record.created_at,
+                updated_at=utcnow(),
+            )
+            self.bot.storage.upsert_api_key(guild_id, user_id, refreshed)
+
+    @tasks.loop(hours=24 * 7)
+    async def _member_cache_refresher(self) -> None:
+        try:
+            await self._refresh_member_cache()
+        except Exception:  # pragma: no cover - defensive
+            LOGGER.exception("Scheduled member cache refresh failed")
+
+    @_member_cache_refresher.before_loop
+    async def _wait_for_member_cache_ready(self) -> None:
+        await self.bot.wait_until_ready()
 
     async def _fetch_character_names(self, api_key: str) -> List[str]:
         payload = await self._fetch_json(
@@ -217,13 +356,17 @@ class AccountsCog(commands.Cog):
     ) -> Tuple[str, List[str], Optional[str]]:
         account_name = record.account_name or ""
         error: Optional[str] = None
+        guild_details: Dict[str, str] = {}
+
         try:
-            guild_details = await self._fetch_guild_details(record.guild_ids, api_key=record.key)
-        except ValueError as exc:
-            guild_details = {}
+            guild_details = record.guild_labels or await self._cached_guild_labels(
+                record.guild_ids
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback for legacy rows
             error = str(exc)
 
-        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in record.guild_ids]
+        if not isinstance(guild_details, dict):
+            guild_details = {}
 
         if not account_name:
             try:
@@ -239,6 +382,8 @@ class AccountsCog(commands.Cog):
         if not account_name:
             account_name = "Unknown account"
 
+        guild_ids = record.guild_ids or []
+        guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
         return account_name, guild_labels, error
 
     # ------------------------------------------------------------------
@@ -357,7 +502,7 @@ class AccountsCog(commands.Cog):
             if guild
             else {}
         )
-        guild_details = await self._fetch_guild_details(guild_ids)
+        guild_details = await self._cached_guild_labels(guild_ids)
 
         embed = self._embed(title=title, description=description)
         role_summary: List[str] = []
@@ -432,7 +577,7 @@ class AccountsCog(commands.Cog):
             )
             return
 
-        details = await self._fetch_guild_details([gid for gid in guild_ids if isinstance(gid, str)])
+        details = await self._cached_guild_labels([gid for gid in guild_ids if isinstance(gid, str)])
         embed = self._embed(title="Guild search results", description=f"Matches for `{query}`")
         for guild_id in guild_ids[:10]:
             if not isinstance(guild_id, str):
@@ -550,7 +695,7 @@ class AccountsCog(commands.Cog):
         if not guild_ids:
             return []
 
-        details = await self._fetch_guild_details(guild_ids)
+        details = await self._cached_guild_labels(guild_ids)
         current_lower = current.lower()
         choices: List[app_commands.Choice[str]] = []
         for guild_id in guild_ids:
@@ -744,6 +889,7 @@ class AccountsCog(commands.Cog):
             account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
+            guild_labels=guild_details,
             characters=characters,
             created_at=utcnow(),
             updated_at=utcnow(),
@@ -755,35 +901,6 @@ class AccountsCog(commands.Cog):
         added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
         _set_status("Role sync", "✅ Completed" if not error else "⚠️ Issues")
         await _refresh_progress("Role synchronization complete.")
-
-        embed = self._embed(
-            title="API key saved",
-            description="Verification completed. Your key was stored and roles were synced.",
-        )
-        embed.add_field(name="Verification steps", value=_steps_value(), inline=False)
-        embed.add_field(
-            name="Account",
-            value=self._format_list([f"Key name: `{default_name}`", f"Account name: {account_name}"]),
-            inline=True,
-        )
-        embed.add_field(
-            name="Permissions",
-            value=self._format_list(sorted(permissions), placeholder="No permissions"),
-            inline=True,
-        )
-
-        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
-        embed.add_field(
-            name="Guild memberships",
-            value=self._format_list(guild_labels, placeholder="No guilds found"),
-            inline=False,
-        )
-
-        embed.add_field(
-            name="Characters",
-            value=self._format_list(characters, placeholder="No characters found"),
-            inline=False,
-        )
 
         role_lines: List[str] = []
         if added:
@@ -797,9 +914,43 @@ class AccountsCog(commands.Cog):
         if error:
             role_lines.append(error)
 
+        embed = self._embed(
+            title="API key saved",
+            description="Verification completed. Your key was stored and roles were synced.",
+        )
+        embed.add_field(name="Verification steps", value=_steps_value(), inline=False)
         embed.add_field(
             name="Role sync",
             value=self._format_list(role_lines, placeholder="No role changes"),
+            inline=False,
+        )
+        embed.add_field(
+            name="\u200b",
+            value="__Stored API key details__",
+            inline=False,
+        )
+        embed.add_field(
+            name="Account",
+            value=self._format_list([f"Key name: `{default_name}`", f"Account name: {account_name}"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Permissions",
+            value=self._format_list(sorted(permissions), placeholder="No permissions"),
+            inline=True,
+        )
+
+        cached_guild_details = await self._cached_guild_labels(guild_ids)
+        guild_labels = [cached_guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
+        embed.add_field(
+            name="Guild memberships",
+            value=self._format_list(guild_labels, placeholder="No guilds found"),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="Characters",
+            value=self._character_summary(characters),
             inline=False,
         )
 
@@ -931,7 +1082,9 @@ class AccountsCog(commands.Cog):
         action_lines: List[str] = []
         action_lines.append("✅ Deleted stored key." if deleted else "❌ Failed to delete the stored key.")
         role_sync_lines: List[str] = []
-        guild_detail_map = await self._fetch_guild_details(lost_guilds) if lost_guilds else {}
+        guild_detail_map = (
+            await self._cached_guild_labels(lost_guilds) if lost_guilds else {}
+        )
         removed_ids = {role.id for role in removed}
         member_roles = set(interaction.user.roles)
         for guild_id in sorted(lost_guilds):
@@ -976,6 +1129,12 @@ class AccountsCog(commands.Cog):
         )
 
         embed.add_field(
+            name="\u200b",
+            value="__Stored API key details__",
+            inline=False,
+        )
+
+        embed.add_field(
             name="Account",
             value=self._format_list(
                 [f"Key name: `{record.name}`", f"Account name: {account_name}"],
@@ -998,6 +1157,12 @@ class AccountsCog(commands.Cog):
             guild_field_value = "None"
 
         embed.add_field(name="Guild memberships", value=guild_field_value, inline=False)
+
+        embed.add_field(
+            name="Characters",
+            value=self._character_summary(record.characters),
+            inline=False,
+        )
 
         if resolve_error or error:
             embed.add_field(
@@ -1203,6 +1368,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
+            guild_labels=guild_details,
             characters=characters,
             created_at=self.record.created_at,
             updated_at=utcnow(),
@@ -1211,9 +1377,35 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
 
         added, removed, error = await self.cog._sync_roles(guild, user)
 
+        role_lines: List[str] = []
+        if added:
+            role_lines.append("Added: " + ", ".join(role.mention for role in added))
+        if removed:
+            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
+        if error:
+            role_lines.append(error)
+
         embed = self.cog._embed(
             title="API key updated",
             description="Your key details were refreshed and roles resynced.",
+        )
+        embed.add_field(
+            name="Actions",
+            value=self.cog._format_list(
+                ["Updated stored key details", "Resynced mapped Discord roles"],
+                placeholder="No actions recorded",
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Role sync",
+            value=self.cog._format_list(role_lines, placeholder="No role changes"),
+            inline=False,
+        )
+        embed.add_field(
+            name="\u200b",
+            value="__Stored API key details__",
+            inline=False,
         )
         embed.add_field(
             name="Account",
@@ -1235,21 +1427,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
 
         embed.add_field(
             name="Characters",
-            value=self.cog._format_list(characters, placeholder="No characters found"),
-            inline=False,
-        )
-
-        role_lines: List[str] = []
-        if added:
-            role_lines.append("Added: " + ", ".join(role.mention for role in added))
-        if removed:
-            role_lines.append("Removed: " + ", ".join(role.mention for role in removed))
-        if error:
-            role_lines.append(error)
-
-        embed.add_field(
-            name="Role sync",
-            value=self.cog._format_list(role_lines, placeholder="No role changes"),
+            value=self.cog._character_summary(characters),
             inline=False,
         )
 

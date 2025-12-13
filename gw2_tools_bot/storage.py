@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -303,6 +303,7 @@ class ApiKeyRecord:
     account_name: str = ""
     permissions: List[str] = field(default_factory=list)
     guild_ids: List[str] = field(default_factory=list)
+    guild_labels: Dict[str, str] = field(default_factory=dict)
     characters: List[str] = field(default_factory=list)
     created_at: str = field(default_factory=utcnow)
     updated_at: str = field(default_factory=utcnow)
@@ -337,6 +338,17 @@ class ApiKeyRecord:
                     if cleaned:
                         guild_ids.append(cleaned)
 
+        labels_payload = payload.get("guild_labels") or {}
+        guild_labels: Dict[str, str] = {}
+        if isinstance(labels_payload, dict):
+            for guild_id, label in labels_payload.items():
+                if not isinstance(guild_id, str) or not isinstance(label, str):
+                    continue
+                gid_clean = normalise_guild_id(guild_id)
+                label_clean = label.strip()
+                if gid_clean and label_clean:
+                    guild_labels[gid_clean] = label_clean
+
         characters_payload = payload.get("characters") or []
         characters: List[str] = []
         if isinstance(characters_payload, list):
@@ -358,6 +370,7 @@ class ApiKeyRecord:
             account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
+            guild_labels=guild_labels,
             characters=characters,
             created_at=created_at,
             updated_at=updated_at,
@@ -393,6 +406,7 @@ class ApiKeyStore:
                     account_name TEXT NOT NULL,
                     permissions TEXT NOT NULL,
                     guild_ids TEXT NOT NULL,
+                    guild_labels TEXT NOT NULL DEFAULT '{}',
                     characters TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -402,6 +416,13 @@ class ApiKeyStore:
                     api_key_id INTEGER NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
                     guild_id TEXT NOT NULL,
                     PRIMARY KEY(api_key_id, guild_id)
+                );
+                CREATE TABLE IF NOT EXISTS guild_details (
+                    guild_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    tag TEXT,
+                    label TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild_user ON api_keys(guild_id, user_id);
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild ON api_keys(guild_id);
@@ -417,6 +438,10 @@ class ApiKeyStore:
             if "characters" not in columns:
                 connection.execute(
                     "ALTER TABLE api_keys ADD COLUMN characters TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "guild_labels" not in columns:
+                connection.execute(
+                    "ALTER TABLE api_keys ADD COLUMN guild_labels TEXT NOT NULL DEFAULT '{}'"
                 )
 
     def _migrate_json_stores(self) -> None:
@@ -519,10 +544,62 @@ class ApiKeyStore:
             cleaned.append(name_clean)
         return cleaned
 
+    def upsert_guild_details(
+        self, details: Mapping[str, Tuple[str, Optional[str]]]
+    ) -> None:
+        """Store or refresh Guild Wars 2 guild metadata."""
+
+        rows: List[Tuple[str, str, Optional[str], str, str]] = []
+        for guild_id, (name, tag) in details.items():
+            normalized_id = normalise_guild_id(guild_id)
+            name_clean = name.strip()
+            tag_clean = tag.strip() if isinstance(tag, str) else None
+            if not normalized_id or not name_clean:
+                continue
+            label = f"{name_clean} [{tag_clean}]" if tag_clean else name_clean
+            rows.append((normalized_id, name_clean, tag_clean, label, utcnow()))
+
+        if not rows:
+            return
+
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO guild_details (guild_id, name, tag, label, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    name=excluded.name,
+                    tag=excluded.tag,
+                    label=excluded.label,
+                    updated_at=excluded.updated_at
+                """,
+                rows,
+            )
+
+    def get_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
+        """Return cached guild labels for the provided guild IDs."""
+
+        normalized = [gid for gid in (normalise_guild_id(gid) for gid in guild_ids) if gid]
+        if not normalized:
+            return {}
+
+        placeholders = ",".join("?" for _ in normalized)
+        query = f"SELECT guild_id, label FROM guild_details WHERE guild_id IN ({placeholders})"
+
+        with self._connect() as connection:
+            rows = connection.execute(query, normalized).fetchall()
+
+        return {row["guild_id"]: row["label"] for row in rows}
+
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> ApiKeyRecord:
         permissions = json.loads(row["permissions"]) if row["permissions"] else []
         guild_ids = json.loads(row["guild_ids"]) if row["guild_ids"] else []
+        guild_labels = (
+            json.loads(row["guild_labels"])
+            if "guild_labels" in row.keys() and row["guild_labels"]
+            else {}
+        )
         characters = (
             json.loads(row["characters"])
             if "characters" in row.keys() and row["characters"]
@@ -534,6 +611,7 @@ class ApiKeyStore:
             account_name=row["account_name"],
             permissions=permissions,
             guild_ids=guild_ids,
+            guild_labels=guild_labels,
             characters=characters,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -568,6 +646,11 @@ class ApiKeyStore:
                 account_name=record.account_name.strip(),
                 permissions=self._normalise_permissions(record.permissions),
                 guild_ids=self._normalise_guild_ids(record.guild_ids),
+                guild_labels={
+                    gid: label.strip()
+                    for gid, label in (record.guild_labels or {}).items()
+                    if normalise_guild_id(gid) and isinstance(label, str) and label.strip()
+                },
                 characters=self._normalise_characters(record.characters),
                 created_at=record.created_at,
                 updated_at=utcnow(),
@@ -585,8 +668,8 @@ class ApiKeyStore:
                     """
                     INSERT INTO api_keys (
                         guild_id, user_id, name, name_normalized, key, account_name,
-                        permissions, guild_ids, characters, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        permissions, guild_ids, guild_labels, characters, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         guild_id,
@@ -597,6 +680,7 @@ class ApiKeyStore:
                         record.account_name,
                         json.dumps(self._normalise_permissions(record.permissions)),
                         json.dumps(self._normalise_guild_ids(record.guild_ids)),
+                        json.dumps(record.guild_labels),
                         json.dumps(self._normalise_characters(record.characters)),
                         record.created_at,
                         record.updated_at,
@@ -624,6 +708,11 @@ class ApiKeyStore:
         name_normalized = record.name.strip().lower()
         account_name = record.account_name.strip()
         key_value = record.key.strip()
+        guild_labels = {
+            gid: label.strip()
+            for gid, label in (record.guild_labels or {}).items()
+            if normalise_guild_id(gid) and isinstance(label, str) and label.strip()
+        }
         characters = self._normalise_characters(record.characters)
         if not name_normalized or not key_value:
             return
@@ -644,7 +733,7 @@ class ApiKeyStore:
                     """
                     UPDATE api_keys
                     SET name = ?, key = ?, account_name = ?, permissions = ?, guild_ids = ?,
-                        characters = ?, updated_at = ?, created_at = ?
+                        guild_labels = ?, characters = ?, updated_at = ?, created_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -653,6 +742,7 @@ class ApiKeyStore:
                         account_name,
                         json.dumps(permissions),
                         json.dumps(guild_ids),
+                        json.dumps(guild_labels),
                         json.dumps(characters),
                         utcnow(),
                         created_at,
@@ -668,8 +758,8 @@ class ApiKeyStore:
                     """
                     INSERT INTO api_keys (
                         guild_id, user_id, name, name_normalized, key, account_name,
-                        permissions, guild_ids, characters, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        permissions, guild_ids, guild_labels, characters, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         guild_id,
@@ -680,6 +770,7 @@ class ApiKeyStore:
                         account_name,
                         json.dumps(permissions),
                         json.dumps(guild_ids),
+                        json.dumps(guild_labels),
                         json.dumps(characters),
                         record.created_at,
                         utcnow(),
@@ -736,6 +827,35 @@ class ApiKeyStore:
             (row["guild_id"], row["user_id"], self._row_to_record(row))
             for row in rows
         ]
+
+    def all_api_keys(self) -> List[Tuple[int, int, ApiKeyRecord]]:
+        """Return every stored API key across all guilds."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM api_keys ORDER BY guild_id, user_id, name_normalized"
+            ).fetchall()
+
+        return [
+            (row["guild_id"], row["user_id"], self._row_to_record(row))
+            for row in rows
+        ]
+
+    def all_gw2_guild_ids(self) -> List[str]:
+        """Return all distinct Guild Wars 2 guild IDs referenced by stored keys."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT guild_id FROM api_key_guilds ORDER BY guild_id"
+            ).fetchall()
+
+        return [row["guild_id"] for row in rows if row["guild_id"]]
+
+    def clear_guild_details(self) -> None:
+        """Remove all cached guild details."""
+
+        with self._connect() as connection:
+            connection.execute("DELETE FROM guild_details")
 
 
 class StorageManager:
@@ -915,6 +1035,21 @@ class StorageManager:
         return self.api_key_store.query_api_keys(
             guild_id=guild_id, user_id=user_id, gw2_guild_id=gw2_guild_id
         )
+
+    def upsert_guild_details(self, details: Mapping[str, Tuple[str, Optional[str]]]) -> None:
+        self.api_key_store.upsert_guild_details(details)
+
+    def get_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
+        return self.api_key_store.get_guild_labels(guild_ids)
+
+    def all_api_keys(self) -> List[Tuple[int, int, ApiKeyRecord]]:
+        return self.api_key_store.all_api_keys()
+
+    def all_gw2_guild_ids(self) -> List[str]:
+        return self.api_key_store.all_gw2_guild_ids()
+
+    def clear_guild_details(self) -> None:
+        self.api_key_store.clear_guild_details()
 
     # ------------------------------------------------------------------
     # RSS feed subscriptions
