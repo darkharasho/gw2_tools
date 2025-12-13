@@ -20,7 +20,7 @@ from ..storage import normalise_guild_id
 LOGGER = logging.getLogger(__name__)
 
 
-class MemberQueryCog(commands.Cog):
+class SelectCog(commands.Cog):
     """Admin member lookup with selectable filters and grouping."""
 
     select = app_commands.Group(
@@ -294,11 +294,11 @@ class MemberQueryCog(commands.Cog):
         def evaluate(
             self, guild_labels: Mapping[str, str]
         ) -> Tuple[bool, List[str]]:
-            matches = MemberQueryCog._match_guild_term(self.value, guild_labels)
+            matches = SelectCog._match_guild_term(self.value, guild_labels)
             return bool(matches), matches
 
     class _GuildExprAnd(_GuildExprNode):
-        def __init__(self, left: "MemberQueryCog._GuildExprNode", right: "MemberQueryCog._GuildExprNode") -> None:
+        def __init__(self, left: "SelectCog._GuildExprNode", right: "SelectCog._GuildExprNode") -> None:
             self.left = left
             self.right = right
 
@@ -314,7 +314,7 @@ class MemberQueryCog(commands.Cog):
             return True, sorted(set(left_matches + right_matches))
 
     class _GuildExprOr(_GuildExprNode):
-        def __init__(self, left: "MemberQueryCog._GuildExprNode", right: "MemberQueryCog._GuildExprNode") -> None:
+        def __init__(self, left: "SelectCog._GuildExprNode", right: "SelectCog._GuildExprNode") -> None:
             self.left = left
             self.right = right
 
@@ -337,21 +337,21 @@ class MemberQueryCog(commands.Cog):
         if not tokens:
             return None
 
-        def parse_expression(index: int = 0) -> Tuple["MemberQueryCog._GuildExprNode", int]:
+        def parse_expression(index: int = 0) -> Tuple["SelectCog._GuildExprNode", int]:
             node, index = parse_term(index)
             while index < len(tokens) and tokens[index].lower() == "or":
                 right, index = parse_term(index + 1)
                 node = self._GuildExprOr(node, right)
             return node, index
 
-        def parse_term(index: int) -> Tuple["MemberQueryCog._GuildExprNode", int]:
+        def parse_term(index: int) -> Tuple["SelectCog._GuildExprNode", int]:
             node, index = parse_factor(index)
             while index < len(tokens) and tokens[index].lower() == "and":
                 right, index = parse_factor(index + 1)
                 node = self._GuildExprAnd(node, right)
             return node, index
 
-        def parse_factor(index: int) -> Tuple["MemberQueryCog._GuildExprNode", int]:
+        def parse_factor(index: int) -> Tuple["SelectCog._GuildExprNode", int]:
             if tokens[index] == "(":
                 node, index = parse_expression(index + 1)
                 if index >= len(tokens) or tokens[index] != ")":
@@ -1215,13 +1215,18 @@ class MemberQueryCog(commands.Cog):
 
 
 async def setup(bot: GW2ToolsBot) -> None:
+    for stale_cog in ("MemberQueryCog", "SelectCog"):
+        if bot.get_cog(stale_cog):
+            LOGGER.info("Removing stale %s during cog load", stale_cog)
+            bot.remove_cog(stale_cog)
+
     for legacy in ("memberquery", "select"):
         existing = bot.tree.get_command(legacy)
         if existing:
             LOGGER.info("Replacing existing %s command during cog load", legacy)
             bot.tree.remove_command(legacy, type=discord.AppCommandType.chat_input)
 
-    cog = MemberQueryCog(bot)
+    cog = SelectCog(bot)
     await bot.add_cog(cog, override=True)
     # Explicitly (re)attach the group to the command tree so it registers even if
     # stale state lingered from prior runs.
