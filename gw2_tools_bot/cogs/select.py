@@ -224,6 +224,7 @@ class SelectCog(commands.Cog):
         self, guild_ids: Iterable[str], *, api_key: Optional[str] = None
     ) -> Dict[str, str]:
         details: Dict[str, str] = {}
+        cache_payload: Dict[str, Tuple[str, Optional[str]]] = {}
         for guild_id in guild_ids:
             if not guild_id:
                 continue
@@ -237,9 +238,25 @@ class SelectCog(commands.Cog):
             tag = payload.get("tag")
             if isinstance(name, str) and isinstance(tag, str):
                 details[guild_id] = f"{name} [{tag}]"
+                cache_payload[guild_id] = (name, tag)
             elif isinstance(name, str):
                 details[guild_id] = name
+                cache_payload[guild_id] = (name, None)
+        if cache_payload:
+            self.bot.storage.upsert_guild_details(cache_payload)
         return details
+
+    async def _cached_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
+        guild_list = list(guild_ids)
+        labels = self.bot.storage.get_guild_labels(guild_list)
+        missing = [gid for gid in guild_list if gid and gid not in labels]
+        if missing:
+            try:
+                await self._fetch_guild_details(missing)
+            except ValueError:
+                LOGGER.warning("Guild lookup failed while warming cache", exc_info=True)
+            labels.update(self.bot.storage.get_guild_labels(guild_list))
+        return labels
 
     def _friendly_guild_label(
         self, guild_id: str, guild_details: Mapping[str, str]
@@ -453,7 +470,7 @@ class SelectCog(commands.Cog):
         async def add_choices(guild_ids: Iterable[str]) -> None:
             nonlocal choices
             try:
-                details = await self._fetch_guild_details(list(guild_ids))
+                details = await self._cached_guild_labels(list(guild_ids))
             except ValueError:
                 LOGGER.warning("Guild lookup failed during autocomplete", exc_info=True)
                 details = {}
@@ -715,7 +732,7 @@ class SelectCog(commands.Cog):
             for gid in fset.guilds:
                 if gid:
                     guild_ids_for_lookup.add(gid)
-        guild_details = await self._fetch_guild_details(guild_ids_for_lookup)
+        guild_details = await self._cached_guild_labels(guild_ids_for_lookup)
 
         matched: List[
             Tuple[

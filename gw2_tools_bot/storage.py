@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -403,6 +403,13 @@ class ApiKeyStore:
                     guild_id TEXT NOT NULL,
                     PRIMARY KEY(api_key_id, guild_id)
                 );
+                CREATE TABLE IF NOT EXISTS guild_details (
+                    guild_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    tag TEXT,
+                    label TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild_user ON api_keys(guild_id, user_id);
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild ON api_keys(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_api_key_guilds_lookup ON api_key_guilds(guild_id, api_key_id);
@@ -518,6 +525,53 @@ class ApiKeyStore:
             seen.add(key)
             cleaned.append(name_clean)
         return cleaned
+
+    def upsert_guild_details(
+        self, details: Mapping[str, Tuple[str, Optional[str]]]
+    ) -> None:
+        """Store or refresh Guild Wars 2 guild metadata."""
+
+        rows: List[Tuple[str, str, Optional[str], str, str]] = []
+        for guild_id, (name, tag) in details.items():
+            normalized_id = normalise_guild_id(guild_id)
+            name_clean = name.strip()
+            tag_clean = tag.strip() if isinstance(tag, str) else None
+            if not normalized_id or not name_clean:
+                continue
+            label = f"{name_clean} [{tag_clean}]" if tag_clean else name_clean
+            rows.append((normalized_id, name_clean, tag_clean, label, utcnow()))
+
+        if not rows:
+            return
+
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO guild_details (guild_id, name, tag, label, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    name=excluded.name,
+                    tag=excluded.tag,
+                    label=excluded.label,
+                    updated_at=excluded.updated_at
+                """,
+                rows,
+            )
+
+    def get_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
+        """Return cached guild labels for the provided guild IDs."""
+
+        normalized = [gid for gid in (normalise_guild_id(gid) for gid in guild_ids) if gid]
+        if not normalized:
+            return {}
+
+        placeholders = ",".join("?" for _ in normalized)
+        query = f"SELECT guild_id, label FROM guild_details WHERE guild_id IN ({placeholders})"
+
+        with self._connect() as connection:
+            rows = connection.execute(query, normalized).fetchall()
+
+        return {row["guild_id"]: row["label"] for row in rows}
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> ApiKeyRecord:
@@ -915,6 +969,12 @@ class StorageManager:
         return self.api_key_store.query_api_keys(
             guild_id=guild_id, user_id=user_id, gw2_guild_id=gw2_guild_id
         )
+
+    def upsert_guild_details(self, details: Mapping[str, Tuple[str, Optional[str]]]) -> None:
+        self.api_key_store.upsert_guild_details(details)
+
+    def get_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
+        return self.api_key_store.get_guild_labels(guild_ids)
 
     # ------------------------------------------------------------------
     # RSS feed subscriptions

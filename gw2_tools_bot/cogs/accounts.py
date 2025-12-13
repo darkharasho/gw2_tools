@@ -127,6 +127,7 @@ class AccountsCog(commands.Cog):
         self, guild_ids: Iterable[str], *, api_key: Optional[str] = None
     ) -> Dict[str, str]:
         details: Dict[str, str] = {}
+        cache_payload: Dict[str, Tuple[str, Optional[str]]] = {}
         for guild_id in guild_ids:
             if not guild_id:
                 continue
@@ -140,9 +141,24 @@ class AccountsCog(commands.Cog):
             tag = payload.get("tag")
             if isinstance(name, str) and isinstance(tag, str):
                 details[guild_id] = f"{name} [{tag}]"
+                cache_payload[guild_id] = (name, tag)
             elif isinstance(name, str):
                 details[guild_id] = name
+                cache_payload[guild_id] = (name, None)
+        if cache_payload:
+            self.bot.storage.upsert_guild_details(cache_payload)
         return details
+
+    async def _cached_guild_labels(self, guild_ids: Sequence[str]) -> Dict[str, str]:
+        labels = self.bot.storage.get_guild_labels(guild_ids)
+        missing = [gid for gid in guild_ids if gid and gid not in labels]
+        if missing:
+            try:
+                await self._fetch_guild_details(missing)
+            except ValueError:
+                LOGGER.warning("Guild lookup failed while warming cache", exc_info=True)
+            labels.update(self.bot.storage.get_guild_labels(guild_ids))
+        return labels
 
     async def _fetch_character_names(self, api_key: str) -> List[str]:
         payload = await self._fetch_json(
@@ -217,13 +233,7 @@ class AccountsCog(commands.Cog):
     ) -> Tuple[str, List[str], Optional[str]]:
         account_name = record.account_name or ""
         error: Optional[str] = None
-        try:
-            guild_details = await self._fetch_guild_details(record.guild_ids, api_key=record.key)
-        except ValueError as exc:
-            guild_details = {}
-            error = str(exc)
-
-        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in record.guild_ids]
+        guild_details = await self._cached_guild_labels(record.guild_ids)
 
         if not account_name:
             try:
@@ -357,7 +367,7 @@ class AccountsCog(commands.Cog):
             if guild
             else {}
         )
-        guild_details = await self._fetch_guild_details(guild_ids)
+        guild_details = await self._cached_guild_labels(guild_ids)
 
         embed = self._embed(title=title, description=description)
         role_summary: List[str] = []
@@ -432,7 +442,7 @@ class AccountsCog(commands.Cog):
             )
             return
 
-        details = await self._fetch_guild_details([gid for gid in guild_ids if isinstance(gid, str)])
+        details = await self._cached_guild_labels([gid for gid in guild_ids if isinstance(gid, str)])
         embed = self._embed(title="Guild search results", description=f"Matches for `{query}`")
         for guild_id in guild_ids[:10]:
             if not isinstance(guild_id, str):
@@ -550,7 +560,7 @@ class AccountsCog(commands.Cog):
         if not guild_ids:
             return []
 
-        details = await self._fetch_guild_details(guild_ids)
+        details = await self._cached_guild_labels(guild_ids)
         current_lower = current.lower()
         choices: List[app_commands.Choice[str]] = []
         for guild_id in guild_ids:
@@ -772,7 +782,8 @@ class AccountsCog(commands.Cog):
             inline=True,
         )
 
-        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
+        cached_guild_details = await self._cached_guild_labels(guild_ids)
+        guild_labels = [cached_guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
         embed.add_field(
             name="Guild memberships",
             value=self._format_list(guild_labels, placeholder="No guilds found"),
@@ -931,7 +942,9 @@ class AccountsCog(commands.Cog):
         action_lines: List[str] = []
         action_lines.append("✅ Deleted stored key." if deleted else "❌ Failed to delete the stored key.")
         role_sync_lines: List[str] = []
-        guild_detail_map = await self._fetch_guild_details(lost_guilds) if lost_guilds else {}
+        guild_detail_map = (
+            await self._cached_guild_labels(lost_guilds) if lost_guilds else {}
+        )
         removed_ids = {role.id for role in removed}
         member_roles = set(interaction.user.roles)
         for guild_id in sorted(lost_guilds):
@@ -1226,7 +1239,8 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             inline=True,
         )
 
-        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
+        cached_guild_details = await self.cog._cached_guild_labels(guild_ids)
+        guild_labels = [cached_guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
         embed.add_field(
             name="Guild memberships",
             value=self.cog._format_list(guild_labels, placeholder="No guilds found"),
