@@ -791,6 +791,35 @@ class ApiKeyStore:
             for row in rows
         ]
 
+    def all_api_keys(self) -> List[Tuple[int, int, ApiKeyRecord]]:
+        """Return every stored API key across all guilds."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM api_keys ORDER BY guild_id, user_id, name_normalized"
+            ).fetchall()
+
+        return [
+            (row["guild_id"], row["user_id"], self._row_to_record(row))
+            for row in rows
+        ]
+
+    def all_gw2_guild_ids(self) -> List[str]:
+        """Return all distinct Guild Wars 2 guild IDs referenced by stored keys."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT guild_id FROM api_key_guilds ORDER BY guild_id"
+            ).fetchall()
+
+        return [row["guild_id"] for row in rows if row["guild_id"]]
+
+    def clear_guild_details(self) -> None:
+        """Remove all cached guild details."""
+
+        with self._connect() as connection:
+            connection.execute("DELETE FROM guild_details")
+
 
 class StorageManager:
     """Handle isolated storage per guild to respect data privacy."""
@@ -975,6 +1004,15 @@ class StorageManager:
 
     def get_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
         return self.api_key_store.get_guild_labels(guild_ids)
+
+    def all_api_keys(self) -> List[Tuple[int, int, ApiKeyRecord]]:
+        return self.api_key_store.all_api_keys()
+
+    def all_gw2_guild_ids(self) -> List[str]:
+        return self.api_key_store.all_gw2_guild_ids()
+
+    def clear_guild_details(self) -> None:
+        self.api_key_store.clear_guild_details()
 
     # ------------------------------------------------------------------
     # RSS feed subscriptions
