@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+import re
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import aiohttp
@@ -22,10 +23,10 @@ LOGGER = logging.getLogger(__name__)
 class MemberQueryCog(commands.Cog):
     """Admin member lookup with selectable filters and grouping."""
 
-    memberquery = app_commands.Group(
-        name="memberquery",
+    select = app_commands.Group(
+        name="select",
         description=(
-            "Admin search to group members by GW2 guild, Discord role, account, character, or Discord name."
+            "Admin search with SQL-style filters to group members by guild, role, account, character, or Discord name."
         ),
         # Force an explicit default permission set so Discord refreshes any
         # previously cached administrator-only defaults and surfaces the
@@ -280,6 +281,143 @@ class MemberQueryCog(commands.Cog):
     # ------------------------------------------------------------------
     # Filtering helpers
     # ------------------------------------------------------------------
+    class _GuildExprNode:
+        def evaluate(
+            self, guild_labels: Mapping[str, str]
+        ) -> Tuple[bool, List[str]]:
+            raise NotImplementedError
+
+    class _GuildExprTerm(_GuildExprNode):
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+        def evaluate(
+            self, guild_labels: Mapping[str, str]
+        ) -> Tuple[bool, List[str]]:
+            matches = MemberQueryCog._match_guild_term(self.value, guild_labels)
+            return bool(matches), matches
+
+    class _GuildExprAnd(_GuildExprNode):
+        def __init__(self, left: "MemberQueryCog._GuildExprNode", right: "MemberQueryCog._GuildExprNode") -> None:
+            self.left = left
+            self.right = right
+
+        def evaluate(
+            self, guild_labels: Mapping[str, str]
+        ) -> Tuple[bool, List[str]]:
+            left_ok, left_matches = self.left.evaluate(guild_labels)
+            if not left_ok:
+                return False, []
+            right_ok, right_matches = self.right.evaluate(guild_labels)
+            if not right_ok:
+                return False, []
+            return True, sorted(set(left_matches + right_matches))
+
+    class _GuildExprOr(_GuildExprNode):
+        def __init__(self, left: "MemberQueryCog._GuildExprNode", right: "MemberQueryCog._GuildExprNode") -> None:
+            self.left = left
+            self.right = right
+
+        def evaluate(
+            self, guild_labels: Mapping[str, str]
+        ) -> Tuple[bool, List[str]]:
+            left_ok, left_matches = self.left.evaluate(guild_labels)
+            right_ok, right_matches = self.right.evaluate(guild_labels)
+
+            if left_ok and right_ok:
+                return True, sorted(set(left_matches + right_matches))
+            if left_ok:
+                return True, left_matches
+            if right_ok:
+                return True, right_matches
+            return False, []
+
+    def _parse_guild_expression(self, text: str) -> Optional[_GuildExprNode]:
+        tokens = self._tokenize_guild_expression(text)
+        if not tokens:
+            return None
+
+        def parse_expression(index: int = 0) -> Tuple["MemberQueryCog._GuildExprNode", int]:
+            node, index = parse_term(index)
+            while index < len(tokens) and tokens[index].lower() == "or":
+                right, index = parse_term(index + 1)
+                node = self._GuildExprOr(node, right)
+            return node, index
+
+        def parse_term(index: int) -> Tuple["MemberQueryCog._GuildExprNode", int]:
+            node, index = parse_factor(index)
+            while index < len(tokens) and tokens[index].lower() == "and":
+                right, index = parse_factor(index + 1)
+                node = self._GuildExprAnd(node, right)
+            return node, index
+
+        def parse_factor(index: int) -> Tuple["MemberQueryCog._GuildExprNode", int]:
+            if tokens[index] == "(":
+                node, index = parse_expression(index + 1)
+                if index >= len(tokens) or tokens[index] != ")":
+                    raise ValueError("Mismatched parentheses in guild filter")
+                return node, index + 1
+            if tokens[index] == ")":
+                raise ValueError("Unexpected closing parenthesis in guild filter")
+            if tokens[index].lower() in {"and", "or"}:
+                raise ValueError("Expected a guild before an AND/OR operator")
+            return self._GuildExprTerm(tokens[index]), index + 1
+
+        node, position = parse_expression()
+        if position != len(tokens):
+            raise ValueError("Unexpected token in guild filter. Use AND/OR between guilds.")
+        return node
+
+    @staticmethod
+    def _tokenize_guild_expression(text: str) -> List[str]:
+        import shlex
+
+        cleaned = text.strip()
+        if not cleaned:
+            return []
+
+        raw_tokens = shlex.split(cleaned)
+        tokens: List[str] = []
+        for token in raw_tokens:
+            parts = re.findall(r"\(|\)|[^()]+", token)
+            for part in parts:
+                stripped = part.strip()
+                if not stripped:
+                    continue
+                upper = stripped.upper()
+                if upper in {"AND", "OR"}:
+                    tokens.append(upper.lower())
+                elif stripped in {"&", "&&"}:
+                    tokens.append("and")
+                elif stripped in {"|", "||"}:
+                    tokens.append("or")
+                elif stripped in {"(", ")"}:
+                    tokens.append(stripped)
+                else:
+                    tokens.append(stripped)
+        return tokens
+
+    @staticmethod
+    def _match_guild_term(needle: str, guild_labels: Mapping[str, str]) -> List[str]:
+        normalized_needle = normalise_guild_id(needle)
+        needle_lower = needle.casefold()
+        label_matches = [
+            label
+            for label in guild_labels.values()
+            if needle_lower in label.casefold() or needle_lower in label.lower()
+        ]
+        id_matches = [
+            gid
+            for gid in guild_labels
+            if needle_lower in gid.lower() or normalise_guild_id(gid) == normalized_needle
+        ]
+        if not label_matches and not id_matches:
+            return []
+        if label_matches:
+            return sorted(set(label_matches))
+        match_id = id_matches[0]
+        return [guild_labels.get(match_id, match_id)]
+
     def _build_filters(
         self,
         *,
@@ -288,10 +426,10 @@ class MemberQueryCog(commands.Cog):
         account: Optional[str],
         character: Optional[str],
         discord_member: Optional[discord.Member],
-    ) -> List[Tuple[str, str]]:
+    ) -> Tuple[Optional[_GuildExprNode], List[Tuple[str, str]]]:
+        guild_expression = self._parse_guild_expression(guild) if guild else None
+
         filters: List[Tuple[str, str]] = []
-        if guild:
-            filters.append(("guild", normalise_guild_id(guild)))
         if role:
             filters.append(("role", str(role.id)))
         if account:
@@ -300,10 +438,11 @@ class MemberQueryCog(commands.Cog):
             filters.append(("character", character))
         if discord_member:
             filters.append(("discord", str(discord_member.id)))
-        return filters
+        return guild_expression, filters
 
     def _match_member_filters(
         self,
+        guild_expression: Optional[_GuildExprNode],
         filters: Sequence[Tuple[str, str]],
         member: discord.Member,
         account_names: Sequence[str],
@@ -314,27 +453,14 @@ class MemberQueryCog(commands.Cog):
         matched_guilds: List[str] = []
         matched_roles: List[str] = []
 
+        if guild_expression:
+            ok, matched_guilds = guild_expression.evaluate(guild_labels)
+            if not ok:
+                return False, [], []
+
         for filter_type, raw_value in filters:
             needle = raw_value.casefold()
-            if filter_type == "guild":
-                normalized_needle = normalise_guild_id(raw_value)
-                label_matches = [
-                    label
-                    for label in guild_labels.values()
-                    if needle in label.casefold() or needle in label.lower()
-                ]
-                id_matches = [
-                    gid
-                    for gid in guild_labels
-                    if needle in gid.lower()
-                    or normalise_guild_id(gid) == normalized_needle
-                ]
-                if not label_matches and not id_matches:
-                    return False, matched_guilds, matched_roles
-                matched_guilds.extend(
-                    label_matches or [guild_labels.get(id_matches[0], id_matches[0])]
-                )
-            elif filter_type == "role":
+            if filter_type == "role":
                 role_id = None
                 if raw_value.isdigit():
                     role_id = int(raw_value)
@@ -500,14 +626,16 @@ class MemberQueryCog(commands.Cog):
         ]
         return choices
 
-    @memberquery.command(
+    @select.command(
         name="query",
         description=(
-            "Admin search to group members by GW2 guild, Discord role, account, character, or Discord name."
+            "Admin search with SQL-style filters to group members by GW2 guild, Discord role, account, character, or Discord name."
         ),
     )
     @app_commands.describe(
-        guild="Match a GW2 guild name/tag/ID (autocomplete)",
+        guild=(
+            "Match a GW2 guild name/tag/ID with SQL-style AND/OR (e.g. 'EWW AND DUI' or 'EWW OR DUI')"
+        ),
         role="Match members with this Discord role",
         account="Match a stored GW2 account name",
         character="Match a stored GW2 character name",
@@ -547,7 +675,7 @@ class MemberQueryCog(commands.Cog):
         if not interaction.guild:
             await self._send_embed(
                 interaction,
-                title="Member query",
+                title="Select",
                 description="This command can only be used in a server.",
                 colour=BRAND_COLOUR,
             )
@@ -560,12 +688,7 @@ class MemberQueryCog(commands.Cog):
             if normalise_guild_id(gid)
         }
         allowed_guild_ids = set(normalized_guild_map.keys())
-        normalized_filter_guild = normalise_guild_id(guild) if guild else None
-        guild = (
-            normalized_filter_guild
-            if isinstance(normalized_filter_guild, str)
-            else normalized_filter_guild
-        )
+        guild = (guild.strip() or None) if isinstance(guild, str) else guild
         account = (account.strip() or None) if isinstance(account, str) else account
         character = (character.strip() or None) if isinstance(character, str) else character
 
@@ -574,13 +697,22 @@ class MemberQueryCog(commands.Cog):
         character_key = self._character_key(character) if character_provided else None
         character_label = character
 
-        filters = self._build_filters(
-            guild=guild,
-            role=role,
-            account=account,
-            character=character_key,
-            discord_member=discord_member,
-        )
+        try:
+            guild_expression, filters = self._build_filters(
+                guild=guild,
+                role=role,
+                account=account,
+                character=character_key,
+                discord_member=discord_member,
+            )
+        except ValueError as exc:
+            await self._send_embed(
+                interaction,
+                title="Select",
+                description=f"Invalid guild filter: {exc}",
+                colour=BRAND_COLOUR,
+            )
+            return
         # Only surface character lists when the character filter was provided.
         # Suppress character details when only counts are requested.
         show_characters = character_provided and not count_only
@@ -590,7 +722,7 @@ class MemberQueryCog(commands.Cog):
         if group_by and group_by not in allowed_groups:
             await self._send_embed(
                 interaction,
-                title="Member query",
+                title="Select",
                 description="Unsupported group. Choose guild, role, account, or discord.",
                 colour=BRAND_COLOUR,
             )
@@ -602,7 +734,7 @@ class MemberQueryCog(commands.Cog):
         if not results:
             await self._send_embed(
                 interaction,
-                title="Member query",
+                title="Select",
                 description="No stored API keys were found for this server.",
                 use_followup=True,
             )
@@ -670,7 +802,7 @@ class MemberQueryCog(commands.Cog):
             if not canonical_character:
                 await self._send_embed(
                     interaction,
-                    title="Member query",
+                    title="Select",
                     description=(
                         "No stored characters matched that name. Try selecting a name "
                         "from the autocomplete list or refresh your API keys with `/apikey update`."
@@ -685,7 +817,7 @@ class MemberQueryCog(commands.Cog):
         if not bundles:
             await self._send_embed(
                 interaction,
-                title="Member query",
+                title="Select",
                 description="No stored API keys were found for this server.",
                 use_followup=True,
             )
@@ -696,7 +828,12 @@ class MemberQueryCog(commands.Cog):
         }
         if guild:
             guild_ids_for_lookup = set(guild_ids_for_lookup)
-            guild_ids_for_lookup.add(guild)
+            for token in self._tokenize_guild_expression(guild):
+                if token in {"and", "or", "(", ")"}:
+                    continue
+                normalized_token = normalise_guild_id(token)
+                if normalized_token:
+                    guild_ids_for_lookup.add(normalized_token)
         guild_details = await self._fetch_guild_details(guild_ids_for_lookup)
 
         matched: List[
@@ -727,6 +864,7 @@ class MemberQueryCog(commands.Cog):
                         mapped_role_mentions.append(role_obj.mention)
             mapped_role_mentions = sorted(set(mapped_role_mentions))
             ok, matched_guilds, matched_roles = self._match_member_filters(
+                guild_expression,
                 filters,
                 member,
                 bundle["account_names"],
@@ -762,7 +900,7 @@ class MemberQueryCog(commands.Cog):
         if not matched:
             await self._send_embed(
                 interaction,
-                title="Member query",
+                title="Select",
                 description="No members matched the provided filters.",
                 use_followup=True,
             )
@@ -833,8 +971,7 @@ class MemberQueryCog(commands.Cog):
 
         filters_label: List[str] = []
         if guild:
-            guild_label = self._friendly_guild_label(guild, guild_details)
-            filters_label.append(f"Guild: {guild_label}")
+            filters_label.append(f"Guild filter: {guild}")
         else:
             filters_label.append("Guild: All mapped")
         if role:
@@ -849,7 +986,7 @@ class MemberQueryCog(commands.Cog):
             filters_label = ["None (all)"]
 
         summary_embed = self._embed(
-            title="Member query results",
+            title="Select results",
             description="",
         )
         summary_embed.add_field(
@@ -917,7 +1054,7 @@ class MemberQueryCog(commands.Cog):
             files = [
                 discord.File(
                     fp=io.BytesIO(buffer.getvalue().encode("utf-8")),
-                    filename="member_query.csv",
+                    filename="select_query.csv",
                 )
             ]
 
@@ -1013,24 +1150,24 @@ class MemberQueryCog(commands.Cog):
             files=files,
         )
 
-    @memberquery.command(
+    @select.command(
         name="help",
-        description="Explain the member query filters and grouping options.",
+        description="Explain the select filters and grouping options.",
     )
     async def member_query_help(self, interaction: discord.Interaction) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
 
         embed = self._embed(
-            title="Member query help",
-            description="Use the options to select filters and grouping. All filters are optional.",
+            title="Select help",
+            description="Use SQL-style filters and grouping. All filters are optional.",
         )
 
         embed.add_field(
             name="Common examples",
             value="\n".join(
                 [
-                    "Set **Guild** to `EWW` and **Group by** to `Guild` to see members in that guild.",
+                    "Set **Guild** to `EWW AND DUI` and **Group by** to `Guild` to see members in both guilds.",
                     "Choose a **Role** to find everyone holding that Discord role.",
                     "Combine **Account** and **Character** filters to narrow to specific players.",
                 ]
@@ -1042,7 +1179,7 @@ class MemberQueryCog(commands.Cog):
             name="Filters",
             value=self._format_list(
                 [
-                    "**Guild** — autocomplete mapped GW2 guilds configured via `/guildroles`.",
+                    "**Guild** — autocomplete mapped GW2 guilds configured via `/guildroles` and combine them with AND/OR.",
                     "**Role** — pick any non-@everyone Discord role to match holders.",
                     "**Account** — autocomplete stored GW2 account names.",
                     "**Character** — autocomplete stored character names.",
@@ -1078,13 +1215,14 @@ class MemberQueryCog(commands.Cog):
 
 
 async def setup(bot: GW2ToolsBot) -> None:
-    existing = bot.tree.get_command("memberquery")
-    if existing:
-        LOGGER.info("Replacing existing memberquery command during cog load")
-        bot.tree.remove_command("memberquery", type=discord.AppCommandType.chat_input)
+    for legacy in ("memberquery", "select"):
+        existing = bot.tree.get_command(legacy)
+        if existing:
+            LOGGER.info("Replacing existing %s command during cog load", legacy)
+            bot.tree.remove_command(legacy, type=discord.AppCommandType.chat_input)
 
     cog = MemberQueryCog(bot)
     await bot.add_cog(cog, override=True)
     # Explicitly (re)attach the group to the command tree so it registers even if
     # stale state lingered from prior runs.
-    bot.tree.add_command(cog.memberquery, override=True)
+    bot.tree.add_command(cog.select, override=True)
