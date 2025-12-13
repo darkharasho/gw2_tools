@@ -1013,11 +1013,18 @@ class SelectCog(commands.Cog):
                     guild_ids,
                     filter_set,
                 ) in entries:
-                    guilds_label = matched_guilds or [
+                    all_guild_labels = [
                         self._friendly_guild_label(gid, guild_details)
                         for gid in guild_ids
                         if gid
                     ]
+                    guilds_label = sorted(
+                        {
+                            label.casefold(): label
+                            for label in matched_guilds + all_guild_labels
+                            if label
+                        }.values()
+                    )
                     role_labels = self._role_labels(
                         mapped_role_mentions or matched_roles, interaction.guild
                     )
