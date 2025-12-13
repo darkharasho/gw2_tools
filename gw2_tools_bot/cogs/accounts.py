@@ -256,6 +256,7 @@ class AccountsCog(commands.Cog):
                 account_name=account_name,
                 permissions=permissions,
                 guild_ids=guild_ids,
+                guild_labels=guild_details,
                 characters=characters,
                 created_at=record.created_at,
                 updated_at=utcnow(),
@@ -346,7 +347,7 @@ class AccountsCog(commands.Cog):
     ) -> Tuple[str, List[str], Optional[str]]:
         account_name = record.account_name or ""
         error: Optional[str] = None
-        guild_details = await self._cached_guild_labels(record.guild_ids)
+        guild_details = record.guild_labels or await self._cached_guild_labels(record.guild_ids)
 
         if not account_name:
             try:
@@ -362,6 +363,7 @@ class AccountsCog(commands.Cog):
         if not account_name:
             account_name = "Unknown account"
 
+        guild_labels = [guild_details.get(gid, gid) for gid in record.guild_ids]
         return account_name, guild_labels, error
 
     # ------------------------------------------------------------------
@@ -867,6 +869,7 @@ class AccountsCog(commands.Cog):
             account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
+            guild_labels=guild_details,
             characters=characters,
             created_at=utcnow(),
             updated_at=utcnow(),
@@ -1329,6 +1332,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
+            guild_labels=guild_details,
             characters=characters,
             created_at=self.record.created_at,
             updated_at=utcnow(),
@@ -1352,8 +1356,7 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
             inline=True,
         )
 
-        cached_guild_details = await self.cog._cached_guild_labels(guild_ids)
-        guild_labels = [cached_guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
+        guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
         embed.add_field(
             name="Guild memberships",
             value=self.cog._format_list(guild_labels, placeholder="No guilds found"),
