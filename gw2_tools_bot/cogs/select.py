@@ -591,6 +591,13 @@ class SelectCog(commands.Cog):
         }
         allowed_guild_ids = set(normalized_guild_map.keys())
 
+        # Drop completely empty filter sets when at least one set has filters so
+        # that a blank set does not match everyone and short-circuit OR queries
+        # that rely on the populated sets.
+        populated_filter_sets = [fs for fs in filter_sets if fs.filters]
+        if populated_filter_sets:
+            filter_sets = populated_filter_sets
+
         show_characters = any(fs.character_provided for fs in filter_sets) and not count_only
         if group_by:
             group_by = group_by.lower()
