@@ -1226,3 +1226,13 @@ async def setup(bot: GW2ToolsBot) -> None:
     # Explicitly (re)attach the group to the command tree so it registers even if
     # stale state lingered from prior runs.
     bot.tree.add_command(cog.select, override=True)
+
+    # Force an immediate resync when the bot is already connected so the renamed
+    # command propagates without requiring a restart.
+    if bot.user:
+        try:
+            await bot.tree.sync()
+            for guild in bot.guilds:
+                await bot.tree.sync(guild=guild)
+        except Exception:  # pragma: no cover - defensive logging
+            LOGGER.exception("Failed to sync select commands during cog load")
