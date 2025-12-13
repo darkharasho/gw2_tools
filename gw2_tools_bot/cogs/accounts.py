@@ -347,7 +347,17 @@ class AccountsCog(commands.Cog):
     ) -> Tuple[str, List[str], Optional[str]]:
         account_name = record.account_name or ""
         error: Optional[str] = None
-        guild_details = record.guild_labels or await self._cached_guild_labels(record.guild_ids)
+        guild_details: Dict[str, str] = {}
+
+        try:
+            guild_details = record.guild_labels or await self._cached_guild_labels(
+                record.guild_ids
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback for legacy rows
+            error = str(exc)
+
+        if not isinstance(guild_details, dict):
+            guild_details = {}
 
         if not account_name:
             try:
@@ -363,7 +373,8 @@ class AccountsCog(commands.Cog):
         if not account_name:
             account_name = "Unknown account"
 
-        guild_labels = [guild_details.get(gid, gid) for gid in record.guild_ids]
+        guild_ids = record.guild_ids or []
+        guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
         return account_name, guild_labels, error
 
     # ------------------------------------------------------------------
