@@ -26,7 +26,7 @@ class SelectCog(commands.Cog):
     select = app_commands.Group(
         name="select",
         description=(
-            "Admin search with SQL-style filters to group members by guild, role, account, character, or Discord name."
+            "SQL-style admin search to group members by guild, role, account, character, or Discord name."
         ),
         # Force an explicit default permission set so Discord refreshes any
         # previously cached administrator-only defaults and surfaces the
@@ -629,13 +629,11 @@ class SelectCog(commands.Cog):
     @select.command(
         name="query",
         description=(
-            "Admin search with SQL-style filters to group members by GW2 guild, Discord role, account, character, or Discord name."
+            "SQL-style admin member search by GW2 guild, Discord role, account, character, or Discord name."
         ),
     )
     @app_commands.describe(
-        guild=(
-            "Match a GW2 guild name/tag/ID with SQL-style AND/OR (e.g. 'EWW AND DUI' or 'EWW OR DUI')"
-        ),
+        guild="SQL-style AND/OR GW2 guild filter (e.g. 'EWW AND DUI' or 'EWW OR DUI')",
         role="Match members with this Discord role",
         account="Match a stored GW2 account name",
         character="Match a stored GW2 character name",
