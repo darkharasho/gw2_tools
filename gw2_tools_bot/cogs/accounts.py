@@ -63,6 +63,30 @@ class AccountsCog(commands.Cog):
         return "\n".join(f"• {value}" for value in items)
 
     @staticmethod
+    def _format_table(
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        *,
+        placeholder: str = "None",
+    ) -> str:
+        if not rows:
+            return placeholder
+
+        widths = [len(header) for header in headers]
+        for row in rows:
+            for idx, cell in enumerate(row):
+                widths[idx] = max(widths[idx], len(cell))
+
+        def _format_row(row: Sequence[str]) -> str:
+            return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))
+
+        divider = " | ".join("-" * width for width in widths)
+        lines = [_format_row(headers), divider]
+        lines.extend(_format_row(row) for row in rows)
+        table = "\n".join(lines)
+        return f"```\n{table}\n```"
+
+    @staticmethod
     def _character_summary(characters: Sequence[str]) -> str:
         count = len(characters)
         if not count:
@@ -596,9 +620,7 @@ class AccountsCog(commands.Cog):
             if entry.get("wvw_member"):
                 wvw_members[normalized_name] = name
 
-        role_members_missing_data: List[str] = []
-        role_members_not_in_guild: List[str] = []
-        role_members_not_wvw: List[str] = []
+        discrepancy_rows: List[Sequence[str]] = []
         role_account_names: set[str] = set()
 
         for member in role.members:
@@ -619,21 +641,26 @@ class AccountsCog(commands.Cog):
             role_account_names.update(normalized_accounts)
 
             if not account_names:
-                role_members_missing_data.append(f"{member.mention} — no stored GW2 account")
+                discrepancy_rows.append(
+                    (member.display_name, "—", "Missing GW2 account data")
+                )
                 continue
 
             in_guild = normalized_accounts.intersection(guild_member_lookup)
             wvw_matches = normalized_accounts.intersection(wvw_members)
 
+            summary = ", ".join(sorted(account_names)) or "—"
+
             if not in_guild:
-                summary = ", ".join(sorted(account_names))
-                role_members_not_in_guild.append(f"{member.mention} — {summary}")
+                discrepancy_rows.append((member.display_name, summary, "Not in guild"))
             elif not wvw_matches:
-                summary = ", ".join(sorted(account_names))
-                role_members_not_wvw.append(f"{member.mention} — {summary}")
+                discrepancy_rows.append((member.display_name, summary, "Not WvW member"))
 
         missing_role_names = [
             name for key, name in wvw_members.items() if key not in role_account_names
+        ]
+        missing_role_rows: List[Sequence[str]] = [
+            ("—", name, "Missing Discord role") for name in missing_role_names
         ]
 
         guild_labels = await self._cached_guild_labels([guild_id])
@@ -654,23 +681,21 @@ class AccountsCog(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Role holders missing data",
-            value=self._format_list(role_members_missing_data, placeholder="None"),
-            inline=False,
-        )
-        embed.add_field(
-            name="Role holders not in guild / not WvW members",
-            value=self._format_list(role_members_not_in_guild, placeholder="None"),
-            inline=False,
-        )
-        embed.add_field(
-            name="Role holders without WvW access",
-            value=self._format_list(role_members_not_wvw, placeholder="None"),
+            name="Role holder discrepancies",
+            value=self._format_table(
+                ["Discord", "GW2 account(s)", "Infraction"],
+                discrepancy_rows,
+                placeholder="None",
+            ),
             inline=False,
         )
         embed.add_field(
             name="Guild WvW members missing the role",
-            value=self._format_list(missing_role_names, placeholder="None"),
+            value=self._format_table(
+                ["Discord", "GW2 account", "Infraction"],
+                missing_role_rows,
+                placeholder="None",
+            ),
             inline=False,
         )
 
