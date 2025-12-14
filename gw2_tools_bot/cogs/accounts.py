@@ -76,6 +76,10 @@ class AccountsCog(commands.Cog):
     def _normalise_guild_id(guild_id: str) -> str:
         return normalise_guild_id(guild_id)
 
+    @staticmethod
+    def _normalise_account_name(name: str) -> str:
+        return name.strip().casefold()
+
     async def _send_embed(
         self,
         interaction: discord.Interaction,
@@ -271,6 +275,52 @@ class AccountsCog(commands.Cog):
                 updated_at=utcnow(),
             )
             self.bot.storage.upsert_api_key(guild_id, user_id, refreshed)
+
+    async def _fetch_guild_members(
+        self, guild_id: str, *, api_key: str
+    ) -> List[Dict[str, object]]:
+        payload = await self._fetch_json(
+            f"https://api.guildwars2.com/v2/guild/{guild_id}/members", api_key=api_key
+        )
+
+        if not isinstance(payload, list):
+            raise ValueError(
+                "Unexpected response from /v2/guild/:id/members. The endpoint should return a list of members."
+            )
+
+        members: List[Dict[str, object]] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            members.append(
+                {
+                    "name": name.strip(),
+                    "wvw_member": bool(entry.get("wvw_member")),
+                }
+            )
+
+        return members
+
+    def _find_mapped_guild(self, config: GuildConfig, role_id: int) -> Optional[str]:
+        for guild_id, configured_role_id in config.guild_role_ids.items():
+            if configured_role_id == role_id:
+                return guild_id
+        return None
+
+    def _find_user_guild_key(
+        self, guild: discord.Guild, user_id: int, guild_id: str
+    ) -> Optional[ApiKeyRecord]:
+        keys = self.bot.storage.get_user_api_keys(guild.id, user_id)
+        target = self._normalise_guild_id(guild_id)
+        for record in keys:
+            guild_memberships = {self._normalise_guild_id(value) for value in record.guild_ids}
+            permissions = {value.lower() for value in record.permissions}
+            if target in guild_memberships and "guilds" in permissions:
+                return record
+        return None
 
     @tasks.loop(hours=24 * 7)
     async def _member_cache_refresher(self) -> None:
@@ -537,6 +587,150 @@ class AccountsCog(commands.Cog):
 
         embeds.append(embed)
         return embeds
+
+    @guild_roles.command(
+        name="audit", description="Audit Discord role assignments against live guild membership data."
+    )
+    @app_commands.describe(role="Discord role mapped to a Guild Wars 2 guild")
+    async def audit_guild_role(self, interaction: discord.Interaction, role: discord.Role) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        if not interaction.guild:
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description="This command can only be used in a server.",
+            )
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        guild_id = self._find_mapped_guild(config, role.id)
+        if not guild_id:
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description=(
+                    "That role is not mapped to a Guild Wars 2 guild. Use /guildroles set to map it before running"
+                    " an audit."
+                ),
+            )
+            return
+
+        caller_key = self._find_user_guild_key(interaction.guild, interaction.user.id, guild_id)
+        if not caller_key:
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description=(
+                    "You need a stored API key with access to that guild. Use /apikey add with a key that"
+                    " belongs to the guild and includes the guilds permission, then try again."
+                ),
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            members = await self._fetch_guild_members(guild_id, api_key=caller_key.key)
+        except ValueError as exc:
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description=str(exc),
+                colour=BRAND_COLOUR,
+                use_followup=True,
+            )
+            return
+
+        guild_member_lookup: Dict[str, str] = {}
+        wvw_members: Dict[str, str] = {}
+        for entry in members:
+            name = str(entry["name"])
+            normalized_name = self._normalise_account_name(name)
+            guild_member_lookup[normalized_name] = name
+            if entry.get("wvw_member"):
+                wvw_members[normalized_name] = name
+
+        role_members_missing_data: List[str] = []
+        role_members_not_in_guild: List[str] = []
+        role_members_not_wvw: List[str] = []
+        role_account_names: set[str] = set()
+
+        for member in role.members:
+            stored_keys = self.bot.storage.get_user_api_keys(
+                interaction.guild.id, member.id
+            )
+            account_names = {
+                record.account_name
+                for record in stored_keys
+                if self._normalise_guild_id(guild_id)
+                in {self._normalise_guild_id(value) for value in record.guild_ids}
+                and record.account_name
+            }
+
+            normalized_accounts = {
+                self._normalise_account_name(name) for name in account_names if name
+            }
+            role_account_names.update(normalized_accounts)
+
+            if not account_names:
+                role_members_missing_data.append(f"{member.mention} — no stored GW2 account")
+                continue
+
+            in_guild = normalized_accounts.intersection(guild_member_lookup)
+            wvw_matches = normalized_accounts.intersection(wvw_members)
+
+            if not in_guild:
+                summary = ", ".join(sorted(account_names))
+                role_members_not_in_guild.append(f"{member.mention} — {summary}")
+            elif not wvw_matches:
+                summary = ", ".join(sorted(account_names))
+                role_members_not_wvw.append(f"{member.mention} — {summary}")
+
+        missing_role_names = [
+            name for key, name in wvw_members.items() if key not in role_account_names
+        ]
+
+        guild_labels = await self._cached_guild_labels([guild_id])
+        guild_label = guild_labels.get(guild_id, guild_id)
+
+        embed = self._embed(
+            title="Guild membership audit",
+            description=(
+                "Compared live Guild Wars 2 guild membership against current Discord role assignments using"
+                " your API key to avoid stale data."
+            ),
+        )
+        embed.add_field(
+            name="Guild",
+            value=self._format_list(
+                [f"{guild_label}", f"Guild ID: `{guild_id}`", f"Role: {role.mention}"]
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Role holders missing data",
+            value=self._format_list(role_members_missing_data, placeholder="None"),
+            inline=False,
+        )
+        embed.add_field(
+            name="Role holders not in guild / not WvW members",
+            value=self._format_list(role_members_not_in_guild, placeholder="None"),
+            inline=False,
+        )
+        embed.add_field(
+            name="Role holders without WvW access",
+            value=self._format_list(role_members_not_wvw, placeholder="None"),
+            inline=False,
+        )
+        embed.add_field(
+            name="Guild WvW members missing the role",
+            value=self._format_list(missing_role_names, placeholder="None"),
+            inline=False,
+        )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
     # Guild lookup
