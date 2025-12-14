@@ -1140,6 +1140,65 @@ class AccountsCog(commands.Cog):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @api_keys.command(name="help", description="Show help for API key commands.")
+    async def api_key_help(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await self._send_embed(
+                interaction,
+                title="API key",
+                description="This command can only be used in a server.",
+                colour=BRAND_COLOUR,
+            )
+            return
+
+        embed = self._embed(
+            title="API key commands",
+            description=(
+                "Manage your Guild Wars 2 API keys. Commands use your saved keys to sync guild roles and keep"
+                " your account data up to date."
+            ),
+        )
+
+        embed.add_field(
+            name="/apikey add",
+            value=(
+                "Register a new Guild Wars 2 API key. You'll be asked to paste your key and it must include"
+                " the required permissions. Verification checks your account, guilds, and characters, then"
+                " syncs any configured roles."
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="/apikey refresh <name>",
+            value=(
+                "Revalidate a stored key. This re-reads your account, guild, and character data, updates the"
+                " saved record, and resyncs your mapped Discord roles. Use this after changing guilds or when"
+                " your key permissions change."
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="/apikey list",
+            value=(
+                "View all of your saved keys along with their recorded permissions, guild memberships, and"
+                " account names."
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="/apikey remove <name>",
+            value=(
+                "Delete a stored key. Any Discord roles that came from that key's guild memberships will be"
+                " resynced afterward."
+            ),
+            inline=False,
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @remove_api_key.autocomplete("name")
     async def remove_api_key_autocomplete(
         self, interaction: discord.Interaction, current: str
