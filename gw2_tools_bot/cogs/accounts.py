@@ -843,7 +843,7 @@ class AccountsCog(commands.Cog):
         if duplicate_key:
             _set_status("Key validation", "❌ Duplicate")
             await _refresh_progress(
-                "You have already saved this API key. Use `/apikey update` if you need to refresh it.",
+                "You have already saved this API key.",
                 colour=BRAND_COLOUR,
             )
             return
@@ -957,48 +957,6 @@ class AccountsCog(commands.Cog):
         embed.add_field(name="API key", value=f"```{key_clean}```", inline=False)
 
         await interaction.edit_original_response(embed=embed)
-
-    @api_keys.command(name="update", description="Update or rename a stored API key.")
-    @app_commands.describe(name="Existing key name")
-    async def update_api_key(self, interaction: discord.Interaction, name: str) -> None:
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await self._send_embed(
-                interaction,
-                title="API key",
-                description="This command can only be used in a server.",
-                colour=BRAND_COLOUR,
-            )
-            return
-
-        name_clean = name.strip()
-        if not name_clean:
-            await self._send_embed(
-                interaction,
-                title="API key",
-                description="Please provide a key name to update.",
-                colour=BRAND_COLOUR,
-            )
-            return
-
-        existing_keys = self.bot.storage.get_user_api_keys(interaction.guild.id, interaction.user.id)
-        record = self._find_existing_name(existing_keys, name_clean)
-        if not record:
-            await self._send_embed(
-                interaction,
-                title="API key",
-                description="No stored key found with that name. Use /apikey list to see saved keys.",
-                colour=BRAND_COLOUR,
-            )
-            return
-
-        await interaction.response.send_modal(UpdateApiKeyModal(self, interaction, record, existing_keys))
-
-    @update_api_key.autocomplete("name")
-    async def update_api_key_autocomplete(
-        self, interaction: discord.Interaction, current: str
-    ) -> List[app_commands.Choice[str]]:
-        return await self._autocomplete_key_names(interaction, current)
-
 
     @api_keys.command(name="remove", description="Delete a stored API key.")
     @app_commands.describe(name="Name of the key to delete")
@@ -1182,6 +1140,65 @@ class AccountsCog(commands.Cog):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @api_keys.command(name="help", description="Show help for API key commands.")
+    async def api_key_help(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await self._send_embed(
+                interaction,
+                title="API key",
+                description="This command can only be used in a server.",
+                colour=BRAND_COLOUR,
+            )
+            return
+
+        embed = self._embed(
+            title="API key commands",
+            description=(
+                "Manage your Guild Wars 2 API keys. Commands use your saved keys to sync guild roles and keep"
+                " your account data up to date."
+            ),
+        )
+
+        embed.add_field(
+            name="/apikey add",
+            value=(
+                "Register a new Guild Wars 2 API key. You'll be asked to paste your key and it must include"
+                " the required permissions. Verification checks your account, guilds, and characters, then"
+                " syncs any configured roles."
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="/apikey refresh <name>",
+            value=(
+                "Revalidate a stored key. This re-reads your account, guild, and character data, updates the"
+                " saved record, and resyncs your mapped Discord roles. Use this after changing guilds or when"
+                " your key permissions change."
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="/apikey list",
+            value=(
+                "View all of your saved keys along with their recorded permissions, guild memberships, and"
+                " account names."
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="/apikey remove <name>",
+            value=(
+                "Delete a stored key. Any Discord roles that came from that key's guild memberships will be"
+                " resynced afterward."
+            ),
+            inline=False,
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @remove_api_key.autocomplete("name")
     async def remove_api_key_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -1256,93 +1273,44 @@ class AccountsCog(commands.Cog):
             await interaction.followup.send(embeds=remaining[:10], ephemeral=True)
             remaining = remaining[10:]
 
-
-
-class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
-    """Modal that captures a new API key and optional name."""
-
-    new_key: discord.ui.TextInput[discord.ui.Modal]
-    new_name: discord.ui.TextInput[discord.ui.Modal]
-
-    def __init__(
-        self,
-        cog: AccountsCog,
-        interaction: discord.Interaction,
-        record: ApiKeyRecord,
-        existing_records: Sequence[ApiKeyRecord],
-    ) -> None:
-        super().__init__()
-        self.cog = cog
-        self.record = record
-        self.existing_records = existing_records
-
-        self.new_key = discord.ui.TextInput(
-            label="New API key",
-            placeholder="Enter the new Guild Wars 2 API key",
-            required=True,
-            style=discord.TextStyle.paragraph,
-            min_length=5,
-        )
-        self.new_name = discord.ui.TextInput(
-            label="New name (optional)",
-            placeholder="Leave blank to keep current name",
-            default=record.name,
-            required=False,
-            max_length=100,
-        )
-        self.add_item(self.new_key)
-        self.add_item(self.new_name)
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:  # pragma: no cover - Discord callback
-        guild = interaction.guild
-        user = interaction.user
-        if guild is None or not isinstance(user, discord.Member):
-            embed = self.cog._embed(
+    @api_keys.command(
+        name="refresh",
+        description="Refresh a stored API key and resync your roles.",
+    )
+    @app_commands.describe(name="Existing key name")
+    async def refresh_api_key(self, interaction: discord.Interaction, name: str) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await self._send_embed(
+                interaction,
                 title="API key",
                 description="This command can only be used in a server.",
                 colour=BRAND_COLOUR,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        key_clean = self.new_key.value.strip()
-        name_clean = (self.new_name.value or self.record.name).strip()
+        name_clean = name.strip()
         if not name_clean:
-            embed = self.cog._embed(
+            await self._send_embed(
+                interaction,
                 title="API key",
-                description="Please provide a valid name.",
+                description="Please provide a key name to refresh.",
                 colour=BRAND_COLOUR,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        if name_clean.lower() != self.record.name.lower() and self.cog._find_existing_name(
-            self.existing_records, name_clean
-        ):
-            embed = self.cog._embed(
-                title="API key",
-                description="You already have a key with that new name. Choose another.",
-                colour=BRAND_COLOUR,
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
-        duplicate_key = next(
-            (
-                existing
-                for existing in self.existing_records
-                if existing.key == key_clean and existing.name.lower() != self.record.name.lower()
-            ),
-            None,
+        record = self.bot.storage.find_api_key(
+            interaction.guild.id, interaction.user.id, name_clean
         )
-        if duplicate_key:
-            embed = self.cog._embed(
+        if not record:
+            await self._send_embed(
+                interaction,
                 title="API key",
-                description="You already have another saved API key with this value.",
+                description="No stored key found with that name. Use /apikey list to see saved keys.",
                 colour=BRAND_COLOUR,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
             (
@@ -1352,30 +1320,34 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
                 account_name,
                 _,
                 characters,
-            ) = await self.cog._validate_api_key(key_clean)
+            ) = await self._validate_api_key(record.key)
         except ValueError as exc:
-            embed = self.cog._embed(
+            await self._send_embed(
+                interaction,
                 title="API key validation failed",
                 description=str(exc),
                 colour=BRAND_COLOUR,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        updated_record = ApiKeyRecord(
-            name=name_clean,
-            key=key_clean,
+        refreshed_record = ApiKeyRecord(
+            name=record.name,
+            key=record.key,
             account_name=account_name,
             permissions=permissions,
             guild_ids=guild_ids,
             guild_labels=guild_details,
             characters=characters,
-            created_at=self.record.created_at,
+            created_at=record.created_at,
             updated_at=utcnow(),
         )
-        self.cog.bot.storage.upsert_api_key(guild.id, user.id, updated_record)
+        self.bot.storage.upsert_api_key(
+            interaction.guild.id, interaction.user.id, refreshed_record
+        )
 
-        added, removed, error = await self.cog._sync_roles(guild, user)
+        added, removed, error = await self._sync_roles(
+            interaction.guild, interaction.user
+        )
 
         role_lines: List[str] = []
         if added:
@@ -1385,13 +1357,13 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
         if error:
             role_lines.append(error)
 
-        embed = self.cog._embed(
-            title="API key updated",
-            description="Your key details were refreshed and roles resynced.",
+        embed = self._embed(
+            title="API key refreshed",
+            description="Your key details were revalidated and roles resynced.",
         )
         embed.add_field(
             name="Actions",
-            value=self.cog._format_list(
+            value=self._format_list(
                 ["Updated stored key details", "Resynced mapped Discord roles"],
                 placeholder="No actions recorded",
             ),
@@ -1399,46 +1371,47 @@ class UpdateApiKeyModal(discord.ui.Modal, title="Update API key"):
         )
         embed.add_field(
             name="Role sync",
-            value=self.cog._format_list(role_lines, placeholder="No role changes"),
+            value=self._format_list(role_lines, placeholder="No role changes"),
             inline=False,
         )
-        embed.add_field(
-            name="\u200b",
-            value="__Stored API key details__",
-            inline=False,
-        )
+        embed.add_field(name="\u200b", value="__Stored API key details__", inline=False)
         embed.add_field(
             name="Account",
-            value=self.cog._format_list([f"Key name: `{name_clean}`", f"Account name: {account_name}"]),
+            value=self._format_list(
+                [f"Key name: `{record.name}`", f"Account name: {account_name}"]
+            ),
             inline=True,
         )
         embed.add_field(
             name="Permissions",
-            value=self.cog._format_list(sorted(permissions), placeholder="No permissions"),
+            value=self._format_list(sorted(permissions), placeholder="No permissions"),
             inline=True,
         )
 
         guild_labels = [guild_details.get(guild_id, guild_id) for guild_id in guild_ids]
         embed.add_field(
             name="Guild memberships",
-            value=self.cog._format_list(guild_labels, placeholder="No guilds found"),
+            value=self._format_list(guild_labels, placeholder="No guilds found"),
             inline=False,
         )
 
         embed.add_field(
             name="Characters",
-            value=self.cog._character_summary(characters),
+            value=self._character_summary(characters),
             inline=False,
         )
 
         embed.add_field(
-            name="API key",
-            value=f"```{self.cog._mask_key(self.record.key)} → {self.cog._mask_key(key_clean)}```",
-            inline=False,
+            name="API key", value=f"```{self._mask_key(record.key)}```", inline=False
         )
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @refresh_api_key.autocomplete("name")
+    async def refresh_api_key_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        return await self._autocomplete_key_names(interaction, current)
 
 async def setup(bot: GW2ToolsBot) -> None:
     await bot.add_cog(AccountsCog(bot))
