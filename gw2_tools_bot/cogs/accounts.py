@@ -39,7 +39,6 @@ class AccountsCog(commands.Cog):
         self._refresh_task: Optional[asyncio.Task] = None
 
     async def cog_load(self) -> None:
-        self._guild_cache_refresher.start()
         self._member_cache_refresher.start()
         self._refresh_task = asyncio.create_task(self._run_initial_refreshes())
 
@@ -107,7 +106,6 @@ class AccountsCog(commands.Cog):
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         if self._refresh_task:
             self._refresh_task.cancel()
-        self._guild_cache_refresher.cancel()
         self._member_cache_refresher.cancel()
         if self._session and not self._session.closed:
             await self._session.close()
@@ -174,72 +172,20 @@ class AccountsCog(commands.Cog):
         return details
 
     async def _cached_guild_labels(self, guild_ids: Sequence[str]) -> Dict[str, str]:
-        labels = self.bot.storage.get_guild_labels(guild_ids)
-        missing = [gid for gid in guild_ids if gid and gid not in labels]
-        if missing:
-            try:
-                await self._fetch_guild_details(missing)
-            except ValueError:
-                LOGGER.warning("Guild lookup failed while warming cache", exc_info=True)
-            labels.update(self.bot.storage.get_guild_labels(guild_ids))
-        return labels
+        if not guild_ids:
+            return {}
+        try:
+            return await self._fetch_guild_details(guild_ids)
+        except ValueError:
+            LOGGER.warning("Guild lookup failed while fetching live labels", exc_info=True)
+            return {}
 
     async def _run_initial_refreshes(self) -> None:
         await self.bot.wait_until_ready()
         try:
-            await self._refresh_guild_cache()
             await self._refresh_member_cache()
         except Exception:  # pragma: no cover - defensive
             LOGGER.exception("Initial cache refresh failed")
-
-    async def _refresh_guild_cache(self) -> None:
-        guild_keys: Dict[str, str] = {}
-        for _, _, record in self.bot.storage.all_api_keys():
-            for guild_id in record.guild_ids:
-                normalised = self._normalise_guild_id(guild_id)
-                if normalised and normalised not in guild_keys:
-                    guild_keys[normalised] = record.key
-
-        if not guild_keys:
-            self.bot.storage.clear_guild_details()
-            return
-
-        refreshed: Dict[str, Tuple[str, Optional[str]]] = {}
-        for guild_id, api_key in guild_keys.items():
-            try:
-                payload = await self._fetch_json(
-                    f"https://api.guildwars2.com/v2/guild/{guild_id}", api_key=api_key
-                )
-            except ValueError as exc:
-                LOGGER.warning("Failed to refresh guild cache for %s: %s", guild_id, exc)
-                continue
-
-            name = payload.get("name")
-            tag = payload.get("tag")
-            if not isinstance(name, str) or not name.strip():
-                continue
-            refreshed[guild_id] = (
-                name.strip(),
-                tag.strip() if isinstance(tag, str) and tag.strip() else None,
-            )
-
-        if not refreshed:
-            LOGGER.warning("Skipped guild cache rebuild; no guild details could be refreshed")
-            return
-
-        self.bot.storage.clear_guild_details()
-        self.bot.storage.upsert_guild_details(refreshed)
-
-    @tasks.loop(hours=24 * 7)
-    async def _guild_cache_refresher(self) -> None:
-        try:
-            await self._refresh_guild_cache()
-        except Exception:  # pragma: no cover - defensive
-            LOGGER.exception("Scheduled guild cache rebuild failed")
-
-    @_guild_cache_refresher.before_loop
-    async def _wait_for_guild_cache_ready(self) -> None:
-        await self.bot.wait_until_ready()
 
     async def _refresh_member_cache(self) -> None:
         for guild_id, user_id, record in self.bot.storage.all_api_keys():
@@ -269,7 +215,7 @@ class AccountsCog(commands.Cog):
                 account_name=account_name,
                 permissions=permissions,
                 guild_ids=guild_ids,
-                guild_labels=guild_details,
+                guild_labels=_guild_details,
                 characters=characters,
                 created_at=record.created_at,
                 updated_at=utcnow(),
@@ -409,9 +355,7 @@ class AccountsCog(commands.Cog):
         guild_details: Dict[str, str] = {}
 
         try:
-            guild_details = record.guild_labels or await self._cached_guild_labels(
-                record.guild_ids
-            )
+            guild_details = await self._cached_guild_labels(record.guild_ids)
         except Exception as exc:  # pragma: no cover - defensive fallback for legacy rows
             error = str(exc)
 
