@@ -134,6 +134,62 @@ class AccountsCog(commands.Cog):
             )
             part += 1
 
+    def _table_sections(
+        self,
+        *,
+        base_title: str,
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        placeholder: str = "None",
+        limit: int = 1800,
+    ) -> List[str]:
+        """Format one or more text sections containing tables under a character limit."""
+
+        def _truncate_table(table: str, allowed_length: int) -> str:
+            if allowed_length <= 0:
+                return ""
+            if table.startswith("```\n") and table.endswith("\n```"):
+                body = table[4:-4]
+                allowed_body_length = max(0, allowed_length - 8)
+                if len(body) <= allowed_body_length:
+                    return table
+                truncated_body = body[: max(0, allowed_body_length - 3)] + "..."
+                return f"```\n{truncated_body}\n```"
+            return table[:allowed_length]
+
+        if not rows:
+            return [f"**{base_title}**\n{placeholder}"]
+
+        remaining_rows = list(rows)
+        sections: List[str] = []
+        part = 1
+        while remaining_rows:
+            chunk: List[Sequence[str]] = []
+            while remaining_rows:
+                candidate_row = remaining_rows[0]
+                candidate_chunk = chunk + [candidate_row]
+                candidate_table = self._format_table(headers, candidate_chunk)
+                candidate_title = base_title if part == 1 else f"{base_title} (part {part})"
+                candidate_content = f"**{candidate_title}**\n{candidate_table}"
+                if len(candidate_content) > limit:
+                    break
+                chunk.append(remaining_rows.pop(0))
+
+            if not chunk:
+                chunk.append(remaining_rows.pop(0))
+
+            title = base_title if part == 1 else f"{base_title} (part {part})"
+            table = self._format_table(headers, chunk)
+            content = f"**{title}**\n{table}"
+            if len(content) > limit:
+                allowed_table_length = max(0, limit - len(f"**{title}**\n"))
+                table = _truncate_table(table, allowed_table_length)
+                content = f"**{title}**\n{table}" if table else f"**{title}**"
+            sections.append(content)
+            part += 1
+
+        return sections
+
     @staticmethod
     def _character_summary(characters: Sequence[str]) -> str:
         count = len(characters)
@@ -751,33 +807,31 @@ class AccountsCog(commands.Cog):
         guild_labels = await self._cached_guild_labels([guild_id])
         guild_label = guild_labels.get(guild_id, guild_id)
 
-        embed = self._embed(
-            title="Guild membership audit",
-            description=(
-                "Compared live Guild Wars 2 guild membership against current Discord role assignments using"
-                " your API key to avoid stale data."
-            ),
+        summary_lines = [
+            "**Guild membership audit**",
+            "Compared live Guild Wars 2 guild membership against current Discord role assignments using your API key to avoid stale data.",
+            "",
+            f"Guild: {guild_label}",
+            f"Guild ID: `{guild_id}`",
+            f"Role: {role.mention}",
+        ]
+
+        sections = ["\n".join(summary_lines)]
+        sections.extend(
+            self._table_sections(
+                base_title="Role holder discrepancies",
+                headers=["Discord", "GW2 account(s)", "Infraction"],
+                rows=discrepancy_rows,
+                placeholder="None",
+            )
         )
-        embed.add_field(
-            name="Guild",
-            value=self._format_list(
-                [f"{guild_label}", f"Guild ID: `{guild_id}`", f"Role: {role.mention}"]
-            ),
-            inline=False,
-        )
-        self._add_table_field_with_chunks(
-            embed,
-            base_name="Role holder discrepancies",
-            headers=["Discord", "GW2 account(s)", "Infraction"],
-            rows=discrepancy_rows,
-            placeholder="None",
-        )
-        self._add_table_field_with_chunks(
-            embed,
-            base_name="Guild WvW members missing the role",
-            headers=["Discord", "GW2 account", "Infraction"],
-            rows=missing_role_rows,
-            placeholder="None",
+        sections.extend(
+            self._table_sections(
+                base_title="Guild WvW members missing the role",
+                headers=["Discord", "GW2 account", "Infraction"],
+                rows=missing_role_rows,
+                placeholder="None",
+            )
         )
 
         files: List[discord.File] = []
@@ -789,7 +843,13 @@ class AccountsCog(commands.Cog):
             buffer.seek(0)
             files.append(discord.File(fp=StringIO(buffer.read()), filename="guild_audit.csv"))
 
-        await interaction.followup.send(embed=embed, files=files, ephemeral=True)
+        if sections:
+            first, *rest = sections
+            await interaction.followup.send(content=first, files=files, ephemeral=True)
+            for section in rest:
+                await interaction.followup.send(content=section, ephemeral=True)
+        else:
+            await interaction.followup.send(files=files, ephemeral=True)
 
     # ------------------------------------------------------------------
     # Guild lookup
