@@ -641,9 +641,7 @@ class AccountsCog(commands.Cog):
             role_account_names.update(normalized_accounts)
 
             if not account_names:
-                discrepancy_rows.append(
-                    (member.display_name, "—", "Missing GW2 account data")
-                )
+                discrepancy_rows.append((member.display_name, "—", "No API key"))
                 continue
 
             in_guild = normalized_accounts.intersection(guild_member_lookup)
@@ -660,7 +658,7 @@ class AccountsCog(commands.Cog):
             name for key, name in wvw_members.items() if key not in role_account_names
         ]
         missing_role_rows: List[Sequence[str]] = [
-            ("—", name, "Missing Discord role") for name in missing_role_names
+            ("—", name, f"Not in {role.mention}") for name in missing_role_names
         ]
 
         guild_labels = await self._cached_guild_labels([guild_id])
