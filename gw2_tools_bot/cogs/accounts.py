@@ -89,6 +89,51 @@ class AccountsCog(commands.Cog):
         table = "\n".join(lines)
         return f"```\n{table}\n```"
 
+    def _add_table_field_with_chunks(
+        self,
+        embed: discord.Embed,
+        *,
+        base_name: str,
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        placeholder: str = "None",
+    ) -> None:
+        """Add one or more embed fields for a table while respecting Discord limits."""
+
+        if not rows:
+            embed.add_field(name=base_name, value=placeholder, inline=False)
+            return
+
+        remaining_rows = list(rows)
+        part = 1
+        while remaining_rows:
+            chunk: List[Sequence[str]] = []
+            while remaining_rows:
+                candidate_row = remaining_rows[0]
+                candidate_chunk = chunk + [candidate_row]
+                candidate_table = self._format_table(headers, candidate_chunk)
+                if len(candidate_table) > 1024:
+                    break
+                chunk.append(remaining_rows.pop(0))
+
+            # Safety fallback: ensure progress even if a single row exceeds the limit.
+            if not chunk:
+                chunk.append(remaining_rows.pop(0))
+
+            name = base_name if part == 1 else f"{base_name} (part {part})"
+            table_value = self._format_table(headers, chunk)
+            if len(table_value) > 1024:
+                body = table_value[4:-4] if table_value.startswith("```\n") and table_value.endswith("```") else table_value
+                allowed_body_length = 1024 - 8  # opening and closing code fences
+                truncated_body = body[: allowed_body_length - 3] + "..."
+                table_value = f"```\n{truncated_body}\n```" if table_value.startswith("```\n") else truncated_body[:1024]
+            embed.add_field(
+                name=name,
+                value=table_value,
+                inline=False,
+            )
+            part += 1
+
     @staticmethod
     def _character_summary(characters: Sequence[str]) -> str:
         count = len(characters)
@@ -720,23 +765,19 @@ class AccountsCog(commands.Cog):
             ),
             inline=False,
         )
-        embed.add_field(
-            name="Role holder discrepancies",
-            value=self._format_table(
-                ["Discord", "GW2 account(s)", "Infraction"],
-                discrepancy_rows,
-                placeholder="None",
-            ),
-            inline=False,
+        self._add_table_field_with_chunks(
+            embed,
+            base_name="Role holder discrepancies",
+            headers=["Discord", "GW2 account(s)", "Infraction"],
+            rows=discrepancy_rows,
+            placeholder="None",
         )
-        embed.add_field(
-            name="Guild WvW members missing the role",
-            value=self._format_table(
-                ["Discord", "GW2 account", "Infraction"],
-                missing_role_rows,
-                placeholder="None",
-            ),
-            inline=False,
+        self._add_table_field_with_chunks(
+            embed,
+            base_name="Guild WvW members missing the role",
+            headers=["Discord", "GW2 account", "Infraction"],
+            rows=missing_role_rows,
+            placeholder="None",
         )
 
         files: List[discord.File] = []
