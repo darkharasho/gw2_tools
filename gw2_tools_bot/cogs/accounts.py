@@ -747,9 +747,18 @@ class AccountsCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=ephemeral, thinking=True)
 
+        chunk_task: Optional[asyncio.Task] = None
+        if interaction.guild and not interaction.guild.chunked:
+            chunk_task = asyncio.create_task(interaction.guild.chunk(cache=True))
+
         try:
             members = await self._fetch_guild_members(guild_id, api_key=caller_key.key)
         except ValueError as exc:
+            if chunk_task:
+                try:
+                    await chunk_task
+                except Exception:
+                    LOGGER.exception("Failed to chunk guild members before audit")
             await self._send_embed(
                 interaction,
                 title="Guild membership audit",
@@ -763,11 +772,11 @@ class AccountsCog(commands.Cog):
         role_to_guild = {role_id: gid for gid, role_id in config.guild_role_ids.items()}
         guild_labels = self.bot.storage.get_guild_labels(role_to_guild.values())
 
-        # Ensure we have the full member list before inspecting role holders.
-        try:
-            await interaction.guild.chunk(cache=True)
-        except Exception:
-            LOGGER.exception("Failed to chunk guild members before audit")
+        if chunk_task:
+            try:
+                await chunk_task
+            except Exception:
+                LOGGER.exception("Failed to chunk guild members before audit")
 
         def guild_tag_for_id(gid: str) -> str:
             label = guild_labels.get(gid, gid)
@@ -985,20 +994,17 @@ class AccountsCog(commands.Cog):
             code_block=False,
         )
 
-        report_buffer = StringIO()
-        report_buffer.write(report_table)
-        report_buffer.seek(0)
+        report_buffer = StringIO(report_table)
 
         files: List[discord.File] = [
-            discord.File(fp=StringIO(report_buffer.read()), filename="guild_audit.txt")
+            discord.File(fp=StringIO(report_buffer.getvalue()), filename="guild_audit.txt")
         ]
         if csv_output:
             buffer = StringIO()
             writer = csv.writer(buffer)
             writer.writerow(["Discord username", "GW2 account", "Guilds", "Issue", "Roles"])
             writer.writerows(csv_rows)
-            buffer.seek(0)
-            files.append(discord.File(fp=StringIO(buffer.read()), filename="guild_audit.csv"))
+            files.append(discord.File(fp=StringIO(buffer.getvalue()), filename="guild_audit.csv"))
 
         content = "\n".join(summary_lines + ["", "Attached guild_audit.txt with audit results."])
         await interaction.followup.send(content=content, files=files, ephemeral=ephemeral)
