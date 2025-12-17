@@ -866,29 +866,23 @@ class AccountsCog(commands.Cog):
                 is_wvw = normalised in wvw_members
                 clean_account = self._strip_emoji(account_name)
 
+                issues: List[str] = []
                 if not in_guild:
+                    issues.append("Not in guild")
+                if in_guild and not is_wvw:
+                    issues.append("Not WvW member")
+
+                if issues:
+                    combined_issues = "; ".join(issues)
                     discrepancy_rows.append(
-                        (display_name, clean_account, guild_tags, "Not in guild")
+                        (display_name, clean_account, guild_tags, combined_issues)
                     )
                     csv_rows.append(
                         (
                             self._strip_emoji(member.name),
                             clean_account,
                             guild_tags,
-                            "Not in guild",
-                            roles,
-                        )
-                    )
-                elif not is_wvw:
-                    discrepancy_rows.append(
-                        (display_name, clean_account, guild_tags, "Not WvW member")
-                    )
-                    csv_rows.append(
-                        (
-                            self._strip_emoji(member.name),
-                            clean_account,
-                            guild_tags,
-                            "Not WvW member",
+                            combined_issues,
                             roles,
                         )
                     )
@@ -937,33 +931,21 @@ class AccountsCog(commands.Cog):
                     else target_guild_tag
                 )
 
+                issues: List[str] = []
                 has_role = member is not None and role in member.roles
                 if not has_role:
-                    discrepancy_rows.append(
-                        (
-                            display_name,
-                            self._strip_emoji(record.account_name or original_name),
-                            guild_tags,
-                            f"Not in {missing_role_label}",
-                        )
-                    )
-                    csv_rows.append(
-                        (
-                            self._strip_emoji(member.name) if member else "—",
-                            self._strip_emoji(record.account_name or original_name),
-                            guild_tags,
-                            f"Not in {missing_role_label}",
-                            roles,
-                        )
-                    )
+                    issues.append(f"Not in {missing_role_label}")
+                if not member_wvw_lookup.get(normalized_name, False):
+                    issues.append("Not WvW member")
 
-                if has_role and not member_wvw_lookup.get(normalized_name, False):
+                if issues:
+                    combined_issues = "; ".join(issues)
                     discrepancy_rows.append(
                         (
                             display_name,
                             self._strip_emoji(record.account_name or original_name),
                             guild_tags,
-                            "Not WvW member",
+                            combined_issues,
                         )
                     )
                     csv_rows.append(
@@ -971,7 +953,7 @@ class AccountsCog(commands.Cog):
                             self._strip_emoji(member.name) if member else "—",
                             self._strip_emoji(record.account_name or original_name),
                             guild_tags,
-                            "Not WvW member",
+                            combined_issues,
                             roles,
                         )
                     )
