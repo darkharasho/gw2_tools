@@ -120,14 +120,14 @@ class DatabaseCog(commands.Cog):
                 api_key_ids = [row["id"] for row in guild_rows]
                 if api_key_ids:
                     placeholders = ",".join("?" for _ in api_key_ids)
-                    key_rows, _ = self._copy_table(
+                    key_rows, key_columns = self._copy_table(
                         source,
                         scoped,
                         name="api_key_guilds",
                         where=f"api_key_id IN ({placeholders})",
                         params=api_key_ids,
                     )
-                    if key_rows:
+                    if key_columns:
                         allowed_tables.add("api_key_guilds")
 
                     guild_ids = set()
@@ -140,14 +140,14 @@ class DatabaseCog(commands.Cog):
 
                     if guild_ids:
                         placeholders = ",".join("?" for _ in guild_ids)
-                        details_rows, _ = self._copy_table(
+                        details_rows, detail_columns = self._copy_table(
                             source,
                             scoped,
                             name="guild_details",
                             where=f"guild_id IN ({placeholders})",
                             params=list(guild_ids),
                         )
-                        if details_rows:
+                        if detail_columns:
                             allowed_tables.add("guild_details")
 
         if not allowed_tables:
@@ -195,6 +195,8 @@ class DatabaseCog(commands.Cog):
                     return sqlite3.SQLITE_DENY
                 return sqlite3.SQLITE_OK
             if action == sqlite3.SQLITE_READ:
+                if param1 is None:
+                    return sqlite3.SQLITE_OK
                 if param1 not in allowed_tables and param1 not in {
                     "sqlite_schema",
                     "sqlite_master",
@@ -203,7 +205,7 @@ class DatabaseCog(commands.Cog):
                     # SQLite exposes PRAGMA results via virtual tables prefixed with
                     # "pragma_" (e.g. pragma_table_info). Allow those as part of
                     # read-only inspection while continuing to block other tables.
-                    if not param1 or not param1.startswith("pragma_"):
+                    if not param1.startswith("pragma_"):
                         return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
 
