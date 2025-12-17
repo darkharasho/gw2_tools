@@ -190,6 +190,7 @@ class DatabaseCog(commands.Cog):
                     "index_list",
                     "foreign_key_list",
                     "table_list",
+                    "query_only",
                 }
                 if param1 and param1.lower() not in allowed_pragmas:
                     return sqlite3.SQLITE_DENY
