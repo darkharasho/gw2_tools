@@ -71,6 +71,7 @@ class AccountsCog(commands.Cog):
         rows: Sequence[Sequence[str]],
         *,
         placeholder: str = "None",
+        code_block: bool = True,
     ) -> str:
         if not rows:
             return placeholder
@@ -87,7 +88,7 @@ class AccountsCog(commands.Cog):
         lines = [_format_row(headers), divider]
         lines.extend(_format_row(row) for row in rows)
         table = "\n".join(lines)
-        return f"```\n{table}\n```"
+        return f"```\n{table}\n```" if code_block else table
 
     def _add_table_field_with_chunks(
         self,
@@ -820,17 +821,22 @@ class AccountsCog(commands.Cog):
             f"Role: {role.mention}",
         ]
 
-        sections = ["\n".join(summary_lines)]
-        sections.extend(
-            self._table_sections(
-                base_title="Role holder discrepancies",
-                headers=["Discord", "GW2 account(s)", "Infraction"],
-                rows=[*discrepancy_rows, *missing_role_rows],
-                placeholder="None",
-            )
+        report_table = self._format_table(
+            ["Discord", "GW2 account(s)", "Infraction"],
+            [*discrepancy_rows, *missing_role_rows],
+            placeholder="None",
+            code_block=False,
         )
 
-        files: List[discord.File] = []
+        report_buffer = StringIO()
+        report_buffer.write("\n".join(summary_lines))
+        report_buffer.write("\n\nRole holder discrepancies\n")
+        report_buffer.write(report_table)
+        report_buffer.seek(0)
+
+        files: List[discord.File] = [
+            discord.File(fp=StringIO(report_buffer.read()), filename="guild_audit.txt")
+        ]
         if csv_output:
             buffer = StringIO()
             writer = csv.writer(buffer)
@@ -839,13 +845,8 @@ class AccountsCog(commands.Cog):
             buffer.seek(0)
             files.append(discord.File(fp=StringIO(buffer.read()), filename="guild_audit.csv"))
 
-        if sections:
-            first, *rest = sections
-            await interaction.followup.send(content=first, files=files, ephemeral=True)
-            for section in rest:
-                await interaction.followup.send(content=section, ephemeral=True)
-        else:
-            await interaction.followup.send(files=files, ephemeral=True)
+        content = "\n".join(summary_lines + ["", "Attached guild_audit.txt with audit results."])
+        await interaction.followup.send(content=content, files=files, ephemeral=True)
 
     # ------------------------------------------------------------------
     # Guild lookup
