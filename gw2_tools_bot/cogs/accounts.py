@@ -82,11 +82,19 @@ class AccountsCog(commands.Cog):
                 widths[idx] = max(widths[idx], len(cell))
 
         def _format_row(row: Sequence[str]) -> str:
-            return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))
+            padded_cells = [f" {cell.ljust(widths[idx])} " for idx, cell in enumerate(row)]
+            return "|" + "|".join(padded_cells) + "|"
 
-        divider = " | ".join("-" * width for width in widths)
-        lines = [_format_row(headers), divider]
+        def _divider(char: str) -> str:
+            segments = (char * (width + 2) for width in widths)
+            return "+" + "+".join(segments) + "+"
+
+        header_divider = _divider("=")
+        row_divider = _divider("-")
+
+        lines = [header_divider, _format_row(headers), header_divider]
         lines.extend(_format_row(row) for row in rows)
+        lines.append(row_divider)
         table = "\n".join(lines)
         return f"```\n{table}\n```" if code_block else table
 
