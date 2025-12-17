@@ -772,7 +772,11 @@ class AccountsCog(commands.Cog):
 
             display_name = self._strip_emoji(member.display_name)
             roles = ", ".join(
-                sorted(self._strip_emoji(role.name) for role in member.roles if role.name)
+                sorted(
+                    self._strip_emoji(role.name)
+                    for role in member.roles
+                    if role.name and not role.is_default()
+                )
             )
 
             if not account_names:
@@ -821,15 +825,7 @@ class AccountsCog(commands.Cog):
             self._table_sections(
                 base_title="Role holder discrepancies",
                 headers=["Discord", "GW2 account(s)", "Infraction"],
-                rows=discrepancy_rows,
-                placeholder="None",
-            )
-        )
-        sections.extend(
-            self._table_sections(
-                base_title="Guild WvW members missing the role",
-                headers=["Discord", "GW2 account", "Infraction"],
-                rows=missing_role_rows,
+                rows=[*discrepancy_rows, *missing_role_rows],
                 placeholder="None",
             )
         )
