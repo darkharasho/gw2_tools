@@ -759,6 +759,25 @@ class AccountsCog(commands.Cog):
             )
             return
 
+        role_to_guild = {role_id: gid for gid, role_id in config.guild_role_ids.items()}
+        guild_labels = await self._cached_guild_labels(list(role_to_guild.values()))
+
+        def guild_tag_for_id(gid: str) -> str:
+            label = guild_labels.get(gid, gid)
+            match = re.search(r"\[(.+?)\]", label)
+            return f"[{match.group(1)}]" if match else label
+
+        def guild_tags_for_member(member: discord.Member) -> List[str]:
+            tags: List[str] = []
+            for member_role in member.roles:
+                mapped_guild_id = role_to_guild.get(member_role.id)
+                if not mapped_guild_id:
+                    continue
+                tag = guild_tag_for_id(mapped_guild_id)
+                if tag not in tags:
+                    tags.append(tag)
+            return tags
+
         guild_member_lookup: Dict[str, str] = {}
         wvw_members: Dict[str, str] = {}
         for entry in members:
@@ -797,35 +816,68 @@ class AccountsCog(commands.Cog):
                     if role.name and not role.is_default()
                 )
             )
+            guild_tags = ", ".join(guild_tags_for_member(member)) or "—"
 
             if not account_names:
-                discrepancy_rows.append((display_name, "—", "No API key"))
-                csv_rows.append((self._strip_emoji(member.name), "—", "No API key", roles))
+                discrepancy_rows.append((display_name, "—", guild_tags, "No API key"))
+                csv_rows.append(
+                    (
+                        self._strip_emoji(member.name),
+                        "—",
+                        guild_tags,
+                        "No API key",
+                        roles,
+                    )
+                )
                 continue
 
-            in_guild = normalized_accounts.intersection(guild_member_lookup)
-            wvw_matches = normalized_accounts.intersection(wvw_members)
+            for account_name in sorted(account_names):
+                normalised = self._normalise_account_name(account_name)
+                in_guild = normalised in guild_member_lookup
+                is_wvw = normalised in wvw_members
+                clean_account = self._strip_emoji(account_name)
 
-            summary = ", ".join(
-                sorted(self._strip_emoji(name) for name in account_names)
-            ) or "—"
-
-            if not in_guild:
-                discrepancy_rows.append((display_name, summary, "Not in guild"))
-                csv_rows.append((self._strip_emoji(member.name), summary, "Not in guild", roles))
-            elif not wvw_matches:
-                discrepancy_rows.append((display_name, summary, "Not WvW member"))
-                csv_rows.append((self._strip_emoji(member.name), summary, "Not WvW member", roles))
+                if not in_guild:
+                    discrepancy_rows.append(
+                        (display_name, clean_account, guild_tags, "Not in guild")
+                    )
+                    csv_rows.append(
+                        (
+                            self._strip_emoji(member.name),
+                            clean_account,
+                            guild_tags,
+                            "Not in guild",
+                            roles,
+                        )
+                    )
+                elif not is_wvw:
+                    discrepancy_rows.append(
+                        (display_name, clean_account, guild_tags, "Not WvW member")
+                    )
+                    csv_rows.append(
+                        (
+                            self._strip_emoji(member.name),
+                            clean_account,
+                            guild_tags,
+                            "Not WvW member",
+                            roles,
+                        )
+                    )
 
         missing_role_names = [
             self._strip_emoji(name)
             for key, name in wvw_members.items()
             if key not in role_account_names
         ]
+        target_guild_tag = guild_tag_for_id(guild_id)
         missing_role_rows: List[Sequence[str]] = [
-            ("—", name, f"Not in {role.mention}") for name in missing_role_names
+            ("—", name, target_guild_tag, f"Not in {role.mention}")
+            for name in missing_role_names
         ]
-        csv_rows.extend(("—", name, f"Not in {role.name}", "—") for name in missing_role_names)
+        csv_rows.extend(
+            ("—", name, target_guild_tag, f"Not in {role.name}", "—")
+            for name in missing_role_names
+        )
 
         guild_labels = await self._cached_guild_labels([guild_id])
         guild_label = guild_labels.get(guild_id, guild_id)
@@ -840,7 +892,7 @@ class AccountsCog(commands.Cog):
         ]
 
         report_table = self._format_table(
-            ["Discord", "GW2 account(s)", "Infraction"],
+            ["Discord", "GW2 account", "Guilds", "Infraction"],
             [*discrepancy_rows, *missing_role_rows],
             placeholder="None",
             code_block=False,
@@ -856,7 +908,9 @@ class AccountsCog(commands.Cog):
         if csv_output:
             buffer = StringIO()
             writer = csv.writer(buffer)
-            writer.writerow(["Discord username", "GW2 accounts", "Infraction", "Roles"])
+            writer.writerow(
+                ["Discord username", "GW2 account", "Guilds", "Infraction", "Roles"]
+            )
             writer.writerows(csv_rows)
             buffer.seek(0)
             files.append(discord.File(fp=StringIO(buffer.read()), filename="guild_audit.csv"))
