@@ -829,8 +829,6 @@ class AccountsCog(commands.Cog):
         )
 
         report_buffer = StringIO()
-        report_buffer.write("\n".join(summary_lines))
-        report_buffer.write("\n\nRole holder discrepancies\n")
         report_buffer.write(report_table)
         report_buffer.seek(0)
 
