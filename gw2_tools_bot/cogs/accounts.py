@@ -686,10 +686,16 @@ class AccountsCog(commands.Cog):
         name="audit", description="Audit Discord role assignments against live guild membership data."
     )
     @app_commands.describe(
-        role="Discord role mapped to a Guild Wars 2 guild", csv_output="Attach a CSV export"
+        role="Discord role mapped to a Guild Wars 2 guild",
+        csv_output="Attach a CSV export",
+        ephemeral="Send the audit response privately",
     )
     async def audit_guild_role(
-        self, interaction: discord.Interaction, role: discord.Role, csv_output: bool = False
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role,
+        csv_output: bool = False,
+        ephemeral: bool = True,
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
@@ -699,6 +705,7 @@ class AccountsCog(commands.Cog):
                 interaction,
                 title="Guild membership audit",
                 description="This command can only be used in a server.",
+                ephemeral=ephemeral,
             )
             return
 
@@ -712,6 +719,7 @@ class AccountsCog(commands.Cog):
                     "That role is not mapped to a Guild Wars 2 guild. Use /guildroles set to map it before running"
                     " an audit."
                 ),
+                ephemeral=ephemeral,
             )
             return
 
@@ -724,10 +732,11 @@ class AccountsCog(commands.Cog):
                     "You need a stored API key with access to that guild. Use /apikey add with a key that"
                     " belongs to the guild and includes the guilds permission, then try again."
                 ),
+                ephemeral=ephemeral,
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=ephemeral, thinking=True)
 
         try:
             members = await self._fetch_guild_members(guild_id, api_key=caller_key.key)
@@ -738,6 +747,7 @@ class AccountsCog(commands.Cog):
                 description=str(exc),
                 colour=BRAND_COLOUR,
                 use_followup=True,
+                ephemeral=ephemeral,
             )
             return
 
@@ -844,7 +854,7 @@ class AccountsCog(commands.Cog):
             files.append(discord.File(fp=StringIO(buffer.read()), filename="guild_audit.csv"))
 
         content = "\n".join(summary_lines + ["", "Attached guild_audit.txt with audit results."])
-        await interaction.followup.send(content=content, files=files, ephemeral=True)
+        await interaction.followup.send(content=content, files=files, ephemeral=ephemeral)
 
     # ------------------------------------------------------------------
     # Guild lookup
