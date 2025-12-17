@@ -979,7 +979,7 @@ class AccountsCog(commands.Cog):
         ]
 
         report_table = self._format_table(
-            ["Discord", "GW2 account", "Guilds", "Infraction"],
+            ["Discord", "GW2 account", "Guilds", "Issue"],
             discrepancy_rows,
             placeholder="None",
             code_block=False,
@@ -995,9 +995,7 @@ class AccountsCog(commands.Cog):
         if csv_output:
             buffer = StringIO()
             writer = csv.writer(buffer)
-            writer.writerow(
-                ["Discord username", "GW2 account", "Guilds", "Infraction", "Roles"]
-            )
+            writer.writerow(["Discord username", "GW2 account", "Guilds", "Issue", "Roles"])
             writer.writerows(csv_rows)
             buffer.seek(0)
             files.append(discord.File(fp=StringIO(buffer.read()), filename="guild_audit.csv"))
