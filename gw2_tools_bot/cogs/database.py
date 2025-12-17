@@ -100,7 +100,6 @@ class DatabaseCog(commands.Cog):
         scoped.row_factory = sqlite3.Row
         scoped.execute("PRAGMA foreign_keys = ON")
         scoped.execute("PRAGMA trusted_schema = OFF")
-        scoped.execute("PRAGMA query_only = ON")
 
         allowed_tables = set()
         guild_rows: List[sqlite3.Row] = []
@@ -205,6 +204,7 @@ class DatabaseCog(commands.Cog):
             return sqlite3.SQLITE_OK
 
         scoped.set_authorizer(_authorizer)
+        scoped.execute("PRAGMA query_only = ON")
         return scoped
 
     async def _execute_query(
