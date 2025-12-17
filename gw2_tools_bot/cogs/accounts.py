@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import logging
+import re
+from collections import defaultdict
+from io import StringIO
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import aiohttp
@@ -39,7 +43,6 @@ class AccountsCog(commands.Cog):
         self._refresh_task: Optional[asyncio.Task] = None
 
     async def cog_load(self) -> None:
-        self._guild_cache_refresher.start()
         self._member_cache_refresher.start()
         self._refresh_task = asyncio.create_task(self._run_initial_refreshes())
 
@@ -64,6 +67,140 @@ class AccountsCog(commands.Cog):
         return "\n".join(f"• {value}" for value in items)
 
     @staticmethod
+    def _format_table(
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        *,
+        placeholder: str = "None",
+        code_block: bool = True,
+    ) -> str:
+        if not rows:
+            return placeholder
+
+        widths = [len(header) for header in headers]
+        for row in rows:
+            for idx, cell in enumerate(row):
+                widths[idx] = max(widths[idx], len(cell))
+
+        def _format_row(row: Sequence[str]) -> str:
+            padded_cells = [f" {cell.ljust(widths[idx])} " for idx, cell in enumerate(row)]
+            return "|" + "|".join(padded_cells) + "|"
+
+        def _divider(char: str) -> str:
+            segments = (char * (width + 2) for width in widths)
+            return "+" + "+".join(segments) + "+"
+
+        header_divider = _divider("=")
+        row_divider = _divider("-")
+
+        lines = [header_divider, _format_row(headers), header_divider]
+        lines.extend(_format_row(row) for row in rows)
+        lines.append(row_divider)
+        table = "\n".join(lines)
+        return f"```\n{table}\n```" if code_block else table
+
+    def _add_table_field_with_chunks(
+        self,
+        embed: discord.Embed,
+        *,
+        base_name: str,
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        placeholder: str = "None",
+    ) -> None:
+        """Add one or more embed fields for a table while respecting Discord limits."""
+
+        if not rows:
+            embed.add_field(name=base_name, value=placeholder, inline=False)
+            return
+
+        remaining_rows = list(rows)
+        part = 1
+        while remaining_rows:
+            chunk: List[Sequence[str]] = []
+            while remaining_rows:
+                candidate_row = remaining_rows[0]
+                candidate_chunk = chunk + [candidate_row]
+                candidate_table = self._format_table(headers, candidate_chunk)
+                if len(candidate_table) > 1024:
+                    break
+                chunk.append(remaining_rows.pop(0))
+
+            # Safety fallback: ensure progress even if a single row exceeds the limit.
+            if not chunk:
+                chunk.append(remaining_rows.pop(0))
+
+            name = base_name if part == 1 else f"{base_name} (part {part})"
+            table_value = self._format_table(headers, chunk)
+            if len(table_value) > 1024:
+                body = table_value[4:-4] if table_value.startswith("```\n") and table_value.endswith("```") else table_value
+                allowed_body_length = 1024 - 8  # opening and closing code fences
+                truncated_body = body[: allowed_body_length - 3] + "..."
+                table_value = f"```\n{truncated_body}\n```" if table_value.startswith("```\n") else truncated_body[:1024]
+            embed.add_field(
+                name=name,
+                value=table_value,
+                inline=False,
+            )
+            part += 1
+
+    def _table_sections(
+        self,
+        *,
+        base_title: str,
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        placeholder: str = "None",
+        limit: int = 1800,
+    ) -> List[str]:
+        """Format one or more text sections containing tables under a character limit."""
+
+        def _truncate_table(table: str, allowed_length: int) -> str:
+            if allowed_length <= 0:
+                return ""
+            if table.startswith("```\n") and table.endswith("\n```"):
+                body = table[4:-4]
+                allowed_body_length = max(0, allowed_length - 8)
+                if len(body) <= allowed_body_length:
+                    return table
+                truncated_body = body[: max(0, allowed_body_length - 3)] + "..."
+                return f"```\n{truncated_body}\n```"
+            return table[:allowed_length]
+
+        if not rows:
+            return [f"**{base_title}**\n{placeholder}"]
+
+        remaining_rows = list(rows)
+        sections: List[str] = []
+        part = 1
+        while remaining_rows:
+            chunk: List[Sequence[str]] = []
+            while remaining_rows:
+                candidate_row = remaining_rows[0]
+                candidate_chunk = chunk + [candidate_row]
+                candidate_table = self._format_table(headers, candidate_chunk)
+                candidate_title = base_title if part == 1 else f"{base_title} (part {part})"
+                candidate_content = f"**{candidate_title}**\n{candidate_table}"
+                if len(candidate_content) > limit:
+                    break
+                chunk.append(remaining_rows.pop(0))
+
+            if not chunk:
+                chunk.append(remaining_rows.pop(0))
+
+            title = base_title if part == 1 else f"{base_title} (part {part})"
+            table = self._format_table(headers, chunk)
+            content = f"**{title}**\n{table}"
+            if len(content) > limit:
+                allowed_table_length = max(0, limit - len(f"**{title}**\n"))
+                table = _truncate_table(table, allowed_table_length)
+                content = f"**{title}**\n{table}" if table else f"**{title}**"
+            sections.append(content)
+            part += 1
+
+        return sections
+
+    @staticmethod
     def _character_summary(characters: Sequence[str]) -> str:
         count = len(characters)
         if not count:
@@ -75,6 +212,31 @@ class AccountsCog(commands.Cog):
     @staticmethod
     def _normalise_guild_id(guild_id: str) -> str:
         return normalise_guild_id(guild_id)
+
+    @staticmethod
+    def _normalise_account_name(name: str) -> str:
+        return name.strip().casefold()
+
+    @staticmethod
+    def _strip_emoji(text: str) -> str:
+        emoji_pattern = re.compile(
+            """
+            [\U0001F1E6-\U0001F1FF]  # flags (iOS)
+            |[\U0001F300-\U0001F5FF]  # symbols & pictographs
+            |[\U0001F600-\U0001F64F]  # emoticons
+            |[\U0001F680-\U0001F6FF]  # transport & map symbols
+            |[\U0001F700-\U0001F77F]
+            |[\U0001F780-\U0001F7FF]
+            |[\U0001F800-\U0001F8FF]
+            |[\U0001F900-\U0001F9FF]
+            |[\U0001FA00-\U0001FA6F]
+            |[\U0001FA70-\U0001FAFF]
+            |[\U00002702-\U000027B0]
+            |[\U000024C2-\U0001F251]
+            """,
+            flags=re.UNICODE | re.VERBOSE,
+        )
+        return emoji_pattern.sub("", text)
 
     async def _send_embed(
         self,
@@ -103,7 +265,6 @@ class AccountsCog(commands.Cog):
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         if self._refresh_task:
             self._refresh_task.cancel()
-        self._guild_cache_refresher.cancel()
         self._member_cache_refresher.cancel()
         if self._session and not self._session.closed:
             await self._session.close()
@@ -170,72 +331,20 @@ class AccountsCog(commands.Cog):
         return details
 
     async def _cached_guild_labels(self, guild_ids: Sequence[str]) -> Dict[str, str]:
-        labels = self.bot.storage.get_guild_labels(guild_ids)
-        missing = [gid for gid in guild_ids if gid and gid not in labels]
-        if missing:
-            try:
-                await self._fetch_guild_details(missing)
-            except ValueError:
-                LOGGER.warning("Guild lookup failed while warming cache", exc_info=True)
-            labels.update(self.bot.storage.get_guild_labels(guild_ids))
-        return labels
+        if not guild_ids:
+            return {}
+        try:
+            return await self._fetch_guild_details(guild_ids)
+        except ValueError:
+            LOGGER.warning("Guild lookup failed while fetching live labels", exc_info=True)
+            return {}
 
     async def _run_initial_refreshes(self) -> None:
         await self.bot.wait_until_ready()
         try:
-            await self._refresh_guild_cache()
             await self._refresh_member_cache()
         except Exception:  # pragma: no cover - defensive
             LOGGER.exception("Initial cache refresh failed")
-
-    async def _refresh_guild_cache(self) -> None:
-        guild_keys: Dict[str, str] = {}
-        for _, _, record in self.bot.storage.all_api_keys():
-            for guild_id in record.guild_ids:
-                normalised = self._normalise_guild_id(guild_id)
-                if normalised and normalised not in guild_keys:
-                    guild_keys[normalised] = record.key
-
-        if not guild_keys:
-            self.bot.storage.clear_guild_details()
-            return
-
-        refreshed: Dict[str, Tuple[str, Optional[str]]] = {}
-        for guild_id, api_key in guild_keys.items():
-            try:
-                payload = await self._fetch_json(
-                    f"https://api.guildwars2.com/v2/guild/{guild_id}", api_key=api_key
-                )
-            except ValueError as exc:
-                LOGGER.warning("Failed to refresh guild cache for %s: %s", guild_id, exc)
-                continue
-
-            name = payload.get("name")
-            tag = payload.get("tag")
-            if not isinstance(name, str) or not name.strip():
-                continue
-            refreshed[guild_id] = (
-                name.strip(),
-                tag.strip() if isinstance(tag, str) and tag.strip() else None,
-            )
-
-        if not refreshed:
-            LOGGER.warning("Skipped guild cache rebuild; no guild details could be refreshed")
-            return
-
-        self.bot.storage.clear_guild_details()
-        self.bot.storage.upsert_guild_details(refreshed)
-
-    @tasks.loop(hours=24 * 7)
-    async def _guild_cache_refresher(self) -> None:
-        try:
-            await self._refresh_guild_cache()
-        except Exception:  # pragma: no cover - defensive
-            LOGGER.exception("Scheduled guild cache rebuild failed")
-
-    @_guild_cache_refresher.before_loop
-    async def _wait_for_guild_cache_ready(self) -> None:
-        await self.bot.wait_until_ready()
 
     async def _refresh_member_cache(self) -> None:
         for guild_id, user_id, record in self.bot.storage.all_api_keys():
@@ -265,12 +374,58 @@ class AccountsCog(commands.Cog):
                 account_name=account_name,
                 permissions=permissions,
                 guild_ids=guild_ids,
-                guild_labels=guild_details,
+                guild_labels=_guild_details,
                 characters=characters,
                 created_at=record.created_at,
                 updated_at=utcnow(),
             )
             self.bot.storage.upsert_api_key(guild_id, user_id, refreshed)
+
+    async def _fetch_guild_members(
+        self, guild_id: str, *, api_key: str
+    ) -> List[Dict[str, object]]:
+        payload = await self._fetch_json(
+            f"https://api.guildwars2.com/v2/guild/{guild_id}/members", api_key=api_key
+        )
+
+        if not isinstance(payload, list):
+            raise ValueError(
+                "Unexpected response from /v2/guild/:id/members. The endpoint should return a list of members."
+            )
+
+        members: List[Dict[str, object]] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            members.append(
+                {
+                    "name": name.strip(),
+                    "wvw_member": bool(entry.get("wvw_member")),
+                }
+            )
+
+        return members
+
+    def _find_mapped_guild(self, config: GuildConfig, role_id: int) -> Optional[str]:
+        for guild_id, configured_role_id in config.guild_role_ids.items():
+            if configured_role_id == role_id:
+                return guild_id
+        return None
+
+    def _find_user_guild_key(
+        self, guild: discord.Guild, user_id: int, guild_id: str
+    ) -> Optional[ApiKeyRecord]:
+        keys = self.bot.storage.get_user_api_keys(guild.id, user_id)
+        target = self._normalise_guild_id(guild_id)
+        for record in keys:
+            guild_memberships = {self._normalise_guild_id(value) for value in record.guild_ids}
+            permissions = {value.lower() for value in record.permissions}
+            if target in guild_memberships and "guilds" in permissions:
+                return record
+        return None
 
     @tasks.loop(hours=24 * 7)
     async def _member_cache_refresher(self) -> None:
@@ -359,9 +514,7 @@ class AccountsCog(commands.Cog):
         guild_details: Dict[str, str] = {}
 
         try:
-            guild_details = record.guild_labels or await self._cached_guild_labels(
-                record.guild_ids
-            )
+            guild_details = await self._cached_guild_labels(record.guild_ids)
         except Exception as exc:  # pragma: no cover - defensive fallback for legacy rows
             error = str(exc)
 
@@ -537,6 +690,306 @@ class AccountsCog(commands.Cog):
 
         embeds.append(embed)
         return embeds
+
+    @guild_roles.command(
+        name="audit", description="Audit Discord role assignments against live guild membership data."
+    )
+    @app_commands.describe(
+        role="Discord role mapped to a Guild Wars 2 guild",
+        csv_output="Attach a CSV export",
+        ephemeral="Send the audit response privately",
+    )
+    async def audit_guild_role(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role,
+        csv_output: bool = False,
+        ephemeral: bool = True,
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        if not interaction.guild:
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description="This command can only be used in a server.",
+                ephemeral=ephemeral,
+            )
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        guild_id = self._find_mapped_guild(config, role.id)
+        if not guild_id:
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description=(
+                    "That role is not mapped to a Guild Wars 2 guild. Use /guildroles set to map it before running"
+                    " an audit."
+                ),
+                ephemeral=ephemeral,
+            )
+            return
+
+        caller_key = self._find_user_guild_key(interaction.guild, interaction.user.id, guild_id)
+        if not caller_key:
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description=(
+                    "You need a stored API key with access to that guild. Use /apikey add with a key that"
+                    " belongs to the guild and includes the guilds permission, then try again."
+                ),
+                ephemeral=ephemeral,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=ephemeral, thinking=True)
+
+        chunk_task: Optional[asyncio.Task] = None
+        if interaction.guild and not interaction.guild.chunked:
+            chunk_task = asyncio.create_task(interaction.guild.chunk(cache=True))
+
+        try:
+            members = await self._fetch_guild_members(guild_id, api_key=caller_key.key)
+        except ValueError as exc:
+            if chunk_task:
+                try:
+                    await chunk_task
+                except Exception:
+                    LOGGER.exception("Failed to chunk guild members before audit")
+            await self._send_embed(
+                interaction,
+                title="Guild membership audit",
+                description=str(exc),
+                colour=BRAND_COLOUR,
+                use_followup=True,
+                ephemeral=ephemeral,
+            )
+            return
+
+        role_to_guild = {role_id: gid for gid, role_id in config.guild_role_ids.items()}
+        guild_labels = self.bot.storage.get_guild_labels(role_to_guild.values())
+
+        if chunk_task:
+            try:
+                await chunk_task
+            except Exception:
+                LOGGER.exception("Failed to chunk guild members before audit")
+
+        def guild_tag_for_id(gid: str) -> str:
+            label = guild_labels.get(gid, gid)
+            match = re.search(r"\[(.+?)\]", label)
+            return f"[{match.group(1)}]" if match else label
+
+        def guild_tags_for_member(member: discord.Member) -> List[str]:
+            tags: List[str] = []
+            for member_role in member.roles:
+                mapped_guild_id = role_to_guild.get(member_role.id)
+                if not mapped_guild_id:
+                    continue
+                tag = guild_tag_for_id(mapped_guild_id)
+                if tag not in tags:
+                    tags.append(tag)
+            return tags
+
+        guild_member_lookup: Dict[str, str] = {}
+        wvw_members: Dict[str, str] = {}
+        member_wvw_lookup: Dict[str, bool] = {}
+        for entry in members:
+            name = str(entry["name"])
+            normalized_name = self._normalise_account_name(name)
+            guild_member_lookup[normalized_name] = name
+            is_wvw_member = bool(entry.get("wvw_member"))
+            member_wvw_lookup[normalized_name] = is_wvw_member
+            if is_wvw_member:
+                wvw_members[normalized_name] = name
+
+        discrepancy_rows: List[Sequence[str]] = []
+        csv_rows: List[Sequence[str]] = []
+        processed_accounts: set[str] = set()
+
+        account_records: Dict[str, List[Tuple[int, ApiKeyRecord]]] = defaultdict(list)
+        user_records: Dict[int, List[ApiKeyRecord]] = defaultdict(list)
+        for _guild_id, user_id, record in self.bot.storage.query_api_keys(
+            guild_id=interaction.guild.id, gw2_guild_id=guild_id
+        ):
+            user_records[user_id].append(record)
+            if record.account_name:
+                account_records[self._normalise_account_name(record.account_name)].append(
+                    (user_id, record)
+                )
+
+        for member in role.members:
+            records = [
+                record
+                for record in user_records.get(member.id, [])
+                if self._normalise_guild_id(guild_id)
+                in {self._normalise_guild_id(value) for value in record.guild_ids}
+            ]
+
+            account_names = {
+                record.account_name for record in records if record.account_name
+            }
+            normalized_accounts = {
+                self._normalise_account_name(name) for name in account_names if name
+            }
+            processed_accounts.update(normalized_accounts)
+
+            display_name = self._strip_emoji(member.display_name)
+            roles = ", ".join(
+                sorted(
+                    self._strip_emoji(role.name)
+                    for role in member.roles
+                    if role.name and not role.is_default()
+                )
+            )
+            guild_tags = ", ".join(guild_tags_for_member(member)) or "—"
+
+            if not account_names:
+                discrepancy_rows.append((display_name, "—", guild_tags, "No API key"))
+                csv_rows.append(
+                    (
+                        self._strip_emoji(member.name),
+                        "—",
+                        guild_tags,
+                        "No API key",
+                        roles,
+                    )
+                )
+                continue
+
+            for account_name in sorted(account_names):
+                normalised = self._normalise_account_name(account_name)
+                in_guild = normalised in guild_member_lookup
+                is_wvw = normalised in wvw_members
+                clean_account = self._strip_emoji(account_name)
+
+                issues: List[str] = []
+                if not in_guild:
+                    issues.append("Not in guild")
+                if in_guild and not is_wvw:
+                    issues.append("Not WvW member")
+
+                if issues:
+                    combined_issues = "; ".join(issues)
+                    discrepancy_rows.append(
+                        (display_name, clean_account, guild_tags, combined_issues)
+                    )
+                    csv_rows.append(
+                        (
+                            self._strip_emoji(member.name),
+                            clean_account,
+                            guild_tags,
+                            combined_issues,
+                            roles,
+                        )
+                    )
+
+        target_guild_tag = guild_tag_for_id(guild_id)
+        missing_role_label = self._strip_emoji(role.name) or "role"
+        for normalized_name, original_name in guild_member_lookup.items():
+            if normalized_name in processed_accounts:
+                continue
+
+            records = account_records.get(normalized_name)
+            if not records:
+                discrepancy_rows.append(
+                    ("—", self._strip_emoji(original_name), target_guild_tag, "No API key")
+                )
+                csv_rows.append(
+                    (
+                        "—",
+                        self._strip_emoji(original_name),
+                        target_guild_tag,
+                        "No API key",
+                        "—",
+                    )
+                )
+                continue
+
+            for user_id, record in records:
+                member = interaction.guild.get_member(user_id)
+                display_name = (
+                    self._strip_emoji(member.display_name) if member else "—"
+                )
+                roles = (
+                    ", ".join(
+                        sorted(
+                            self._strip_emoji(role.name)
+                            for role in member.roles
+                            if role.name and not role.is_default()
+                        )
+                    )
+                    if member
+                    else "—"
+                )
+                guild_tags = (
+                    ", ".join(guild_tags_for_member(member)) or target_guild_tag
+                    if member
+                    else target_guild_tag
+                )
+
+                issues: List[str] = []
+                has_role = member is not None and role in member.roles
+                if not has_role:
+                    issues.append(f"Not in {missing_role_label}")
+                if not member_wvw_lookup.get(normalized_name, False):
+                    issues.append("Not WvW member")
+
+                if issues:
+                    combined_issues = "; ".join(issues)
+                    discrepancy_rows.append(
+                        (
+                            display_name,
+                            self._strip_emoji(record.account_name or original_name),
+                            guild_tags,
+                            combined_issues,
+                        )
+                    )
+                    csv_rows.append(
+                        (
+                            self._strip_emoji(member.name) if member else "—",
+                            self._strip_emoji(record.account_name or original_name),
+                            guild_tags,
+                            combined_issues,
+                            roles,
+                        )
+                    )
+
+        guild_label = guild_labels.get(guild_id, guild_id)
+
+        summary_lines = [
+            "**Guild membership audit**",
+            "Compared live Guild Wars 2 guild membership against current Discord role assignments using your API key to avoid stale data.",
+            "",
+            f"Guild: {guild_label}",
+            f"Guild ID: `{guild_id}`",
+            f"Role: {role.mention}",
+        ]
+
+        report_table = self._format_table(
+            ["Discord", "GW2 account", "Guilds", "Issue"],
+            discrepancy_rows,
+            placeholder="None",
+            code_block=False,
+        )
+
+        report_buffer = StringIO(report_table)
+
+        files: List[discord.File] = [
+            discord.File(fp=StringIO(report_buffer.getvalue()), filename="guild_audit.txt")
+        ]
+        if csv_output:
+            buffer = StringIO()
+            writer = csv.writer(buffer)
+            writer.writerow(["Discord username", "GW2 account", "Guilds", "Issue", "Roles"])
+            writer.writerows(csv_rows)
+            files.append(discord.File(fp=StringIO(buffer.getvalue()), filename="guild_audit.csv"))
+
+        content = "\n".join(summary_lines + ["", "Attached guild_audit.txt with audit results."])
+        await interaction.followup.send(content=content, files=files, ephemeral=ephemeral)
 
     # ------------------------------------------------------------------
     # Guild lookup
