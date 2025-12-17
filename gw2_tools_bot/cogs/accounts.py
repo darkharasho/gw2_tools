@@ -762,6 +762,12 @@ class AccountsCog(commands.Cog):
         role_to_guild = {role_id: gid for gid, role_id in config.guild_role_ids.items()}
         guild_labels = await self._cached_guild_labels(list(role_to_guild.values()))
 
+        # Ensure we have the full member list before inspecting role holders.
+        try:
+            await interaction.guild.chunk(cache=True)
+        except Exception:
+            LOGGER.exception("Failed to chunk guild members before audit")
+
         def guild_tag_for_id(gid: str) -> str:
             label = guild_labels.get(gid, gid)
             match = re.search(r"\[(.+?)\]", label)
@@ -870,12 +876,13 @@ class AccountsCog(commands.Cog):
             if key not in role_account_names
         ]
         target_guild_tag = guild_tag_for_id(guild_id)
+        missing_role_label = self._strip_emoji(role.name) or "role"
         missing_role_rows: List[Sequence[str]] = [
-            ("—", name, target_guild_tag, f"Not in {role.mention}")
+            ("—", name, target_guild_tag, f"Not in {missing_role_label}")
             for name in missing_role_names
         ]
         csv_rows.extend(
-            ("—", name, target_guild_tag, f"Not in {role.name}", "—")
+            ("—", name, target_guild_tag, f"Not in {missing_role_label}", "—")
             for name in missing_role_names
         )
 
