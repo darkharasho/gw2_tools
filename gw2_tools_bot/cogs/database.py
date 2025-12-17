@@ -200,7 +200,11 @@ class DatabaseCog(commands.Cog):
                     "sqlite_master",
                     "sqlite_temp_schema",
                 }:
-                    return sqlite3.SQLITE_DENY
+                    # SQLite exposes PRAGMA results via virtual tables prefixed with
+                    # "pragma_" (e.g. pragma_table_info). Allow those as part of
+                    # read-only inspection while continuing to block other tables.
+                    if not param1 or not param1.startswith("pragma_"):
+                        return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
 
         scoped.set_authorizer(_authorizer)
