@@ -1135,151 +1135,6 @@ class SelectCog(commands.Cog):
         )
 
     @select.command(
-        name="and",
-        description=(
-            "Match members where two values of the same filter type must all be true."
-        ),
-    )
-    @app_commands.describe(
-        guild_one="First GW2 guild to match",
-        guild_two="Second GW2 guild to match",
-        role_one="First Discord role to match",
-        role_two="Second Discord role to match",
-        account_one="First GW2 account name to match",
-        account_two="Second GW2 account name to match",
-        character_one="First GW2 character name to match",
-        character_two="Second GW2 character name to match",
-        discord_member_one="First Discord member to match",
-        discord_member_two="Second Discord member to match",
-        group_by="Group results by this field",
-        as_csv="Export the results to a CSV attachment",
-        count_only="Return only counts instead of detailed entries",
-    )
-    @app_commands.autocomplete(
-        guild_one=_guild_autocomplete,
-        guild_two=_guild_autocomplete,
-        account_one=_account_autocomplete,
-        account_two=_account_autocomplete,
-        character_one=_character_autocomplete,
-        character_two=_character_autocomplete,
-    )
-    @app_commands.choices(
-        group_by=[
-            app_commands.Choice(name="Guild", value="guild"),
-            app_commands.Choice(name="Role", value="role"),
-            app_commands.Choice(name="Account", value="account"),
-            app_commands.Choice(name="Discord", value="discord"),
-        ]
-    )
-    async def member_query_and(
-        self,
-        interaction: discord.Interaction,
-        guild_one: Optional[str] = None,
-        guild_two: Optional[str] = None,
-        role_one: Optional[discord.Role] = None,
-        role_two: Optional[discord.Role] = None,
-        account_one: Optional[str] = None,
-        account_two: Optional[str] = None,
-        character_one: Optional[str] = None,
-        character_two: Optional[str] = None,
-        discord_member_one: Optional[discord.Member] = None,
-        discord_member_two: Optional[discord.Member] = None,
-        group_by: Optional[str] = None,
-        as_csv: bool = False,
-        count_only: bool = False,
-    ) -> None:
-        filter_set = self._prepare_filter_set(
-            guilds=[guild_one, guild_two],
-            roles=[role_one, role_two],
-            accounts=[account_one, account_two],
-            characters=[character_one, character_two],
-            discord_members=[discord_member_one, discord_member_two],
-        )
-        await self._run_query(
-            interaction,
-            filter_sets=[filter_set],
-            group_by=group_by,
-            as_csv=as_csv,
-            count_only=count_only,
-        )
-
-    @select.command(
-        name="or",
-        description=(
-            "Match members where either set of provided filters can succeed."
-        ),
-    )
-    @app_commands.describe(
-        guild_one="First GW2 guild to match",
-        guild_two="Second GW2 guild to match",
-        role_one="First Discord role to match",
-        role_two="Second Discord role to match",
-        account_one="First GW2 account name to match",
-        account_two="Second GW2 account name to match",
-        character_one="First GW2 character name to match",
-        character_two="Second GW2 character name to match",
-        discord_member_one="First Discord member to match",
-        discord_member_two="Second Discord member to match",
-        group_by="Group results by this field",
-        as_csv="Export the results to a CSV attachment",
-        count_only="Return only counts instead of detailed entries",
-    )
-    @app_commands.autocomplete(
-        guild_one=_guild_autocomplete,
-        guild_two=_guild_autocomplete,
-        account_one=_account_autocomplete,
-        account_two=_account_autocomplete,
-        character_one=_character_autocomplete,
-        character_two=_character_autocomplete,
-    )
-    @app_commands.choices(
-        group_by=[
-            app_commands.Choice(name="Guild", value="guild"),
-            app_commands.Choice(name="Role", value="role"),
-            app_commands.Choice(name="Account", value="account"),
-            app_commands.Choice(name="Discord", value="discord"),
-        ]
-    )
-    async def member_query_or(
-        self,
-        interaction: discord.Interaction,
-        guild_one: Optional[str] = None,
-        guild_two: Optional[str] = None,
-        role_one: Optional[discord.Role] = None,
-        role_two: Optional[discord.Role] = None,
-        account_one: Optional[str] = None,
-        account_two: Optional[str] = None,
-        character_one: Optional[str] = None,
-        character_two: Optional[str] = None,
-        discord_member_one: Optional[discord.Member] = None,
-        discord_member_two: Optional[discord.Member] = None,
-        group_by: Optional[str] = None,
-        as_csv: bool = False,
-        count_only: bool = False,
-    ) -> None:
-        filter_set_one = self._prepare_filter_set(
-            guilds=[guild_one],
-            roles=[role_one],
-            accounts=[account_one],
-            characters=[character_one],
-            discord_members=[discord_member_one],
-        )
-        filter_set_two = self._prepare_filter_set(
-            guilds=[guild_two],
-            roles=[role_two],
-            accounts=[account_two],
-            characters=[character_two],
-            discord_members=[discord_member_two],
-        )
-        await self._run_query(
-            interaction,
-            filter_sets=[filter_set_one, filter_set_two],
-            group_by=group_by,
-            as_csv=as_csv,
-            count_only=count_only,
-        )
-
-    @select.command(
         name="help",
         description="Explain the select filters and grouping options.",
     )
@@ -1290,9 +1145,8 @@ class SelectCog(commands.Cog):
         embed = self._embed(
             title="Select help",
             description=(
-                "Use `/select query` for a single set of optional filters, `/select and` "
-                "to require two values of the same type, or `/select or` to try "
-                "alternate filters. All filters are optional."
+                "Use `/select query` with any combination of optional filters to find members."
+                " All filters are optional."
             ),
         )
 
@@ -1300,9 +1154,9 @@ class SelectCog(commands.Cog):
             name="Common examples",
             value="\n".join(
                 [
-                    "Use `/select and` with two **Guild** values to require members in both guilds.",
                     "Choose a **Role** to find everyone holding that Discord role.",
                     "Combine **Account** and **Character** filters to narrow to specific players.",
+                    "Group results to summarise by guild, role, account, or Discord user.",
                 ]
             ),
             inline=False,
