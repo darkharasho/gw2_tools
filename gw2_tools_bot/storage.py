@@ -211,6 +211,13 @@ class GuildConfig:
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
     update_notes_channel_id: Optional[int] = None
+    alliance_channel_id: Optional[int] = None
+    alliance_guild_id: Optional[str] = None
+    alliance_guild_name: Optional[str] = None
+    alliance_server_id: Optional[int] = None
+    alliance_server_name: Optional[str] = None
+    alliance_last_prediction_at: Optional[str] = None
+    alliance_last_actual_at: Optional[str] = None
     comp: CompConfig = field(default_factory=CompConfig)
     comp_active_preset: Optional[str] = None
 
@@ -924,6 +931,42 @@ class StorageManager:
             payload["comp_active_preset"] = active_preset.strip() or None
         else:
             payload["comp_active_preset"] = None
+        alliance_channel_id = payload.get("alliance_channel_id")
+        if isinstance(alliance_channel_id, int):
+            payload["alliance_channel_id"] = alliance_channel_id
+        elif isinstance(alliance_channel_id, str):
+            try:
+                payload["alliance_channel_id"] = int(alliance_channel_id)
+            except ValueError:
+                payload["alliance_channel_id"] = None
+        else:
+            payload["alliance_channel_id"] = None
+        alliance_server_id = payload.get("alliance_server_id")
+        if isinstance(alliance_server_id, int):
+            payload["alliance_server_id"] = alliance_server_id
+        elif isinstance(alliance_server_id, str):
+            try:
+                payload["alliance_server_id"] = int(alliance_server_id)
+            except ValueError:
+                payload["alliance_server_id"] = None
+        else:
+            payload["alliance_server_id"] = None
+        alliance_guild_id = payload.get("alliance_guild_id")
+        if isinstance(alliance_guild_id, str):
+            cleaned = normalise_guild_id(alliance_guild_id)
+            payload["alliance_guild_id"] = cleaned or None
+        else:
+            payload["alliance_guild_id"] = None
+        alliance_guild_name = payload.get("alliance_guild_name")
+        if isinstance(alliance_guild_name, str):
+            payload["alliance_guild_name"] = alliance_guild_name.strip() or None
+        else:
+            payload["alliance_guild_name"] = None
+        alliance_server_name = payload.get("alliance_server_name")
+        if isinstance(alliance_server_name, str):
+            payload["alliance_server_name"] = alliance_server_name.strip() or None
+        else:
+            payload["alliance_server_name"] = None
         return GuildConfig(**payload)
 
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
@@ -950,6 +993,25 @@ class StorageManager:
                     except ValueError:
                         continue
             config.guild_role_ids = cleaned_roles
+        if config.alliance_guild_id:
+            cleaned_guild_id = normalise_guild_id(config.alliance_guild_id)
+            config.alliance_guild_id = cleaned_guild_id or None
+        if config.alliance_guild_name:
+            cleaned_name = str(config.alliance_guild_name).strip()
+            config.alliance_guild_name = cleaned_name or None
+        if config.alliance_server_name:
+            cleaned_server = str(config.alliance_server_name).strip()
+            config.alliance_server_name = cleaned_server or None
+        if config.alliance_channel_id is not None:
+            try:
+                config.alliance_channel_id = int(config.alliance_channel_id)
+            except (TypeError, ValueError):
+                config.alliance_channel_id = None
+        if config.alliance_server_id is not None:
+            try:
+                config.alliance_server_id = int(config.alliance_server_id)
+            except (TypeError, ValueError):
+                config.alliance_server_id = None
         path = self._guild_path(guild_id) / "config.json"
         self._write_json(path, asdict(config))
 
