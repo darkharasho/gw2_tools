@@ -23,7 +23,10 @@ LOGGER = logging.getLogger(__name__)
 
 GW2_GUILD_SEARCH_URL = "https://api.guildwars2.com/v2/guild/search"
 GW2_GUILD_INFO_URL = "https://api.guildwars2.com/v2/guild/{guild_id}"
-GW2_GUILD_WVW_URL = "https://api.guildwars2.com/v2/wvw/guilds/na"
+GW2_GUILD_WVW_URLS = (
+    "https://api.guildwars2.com/v2/wvw/guilds/na",
+    "https://api.guildwars2.com/v2/wvw/guilds/eu",
+)
 GW2MISTS_MATCHES_URL = "https://api.gw2mists.com/wvw/matches/all"
 SHEET_ID = "1Txjpcet-9FDVek6uJ0N3OciwgbpE0cfWozUK7ATfWx4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq"
@@ -144,20 +147,21 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         if self._guild_world_cache and self._guild_world_cache_at:
             if (now - self._guild_world_cache_at).total_seconds() < 3600:
                 return self._guild_world_cache
-        payload = await self._fetch_json(GW2_GUILD_WVW_URL)
-        if not isinstance(payload, dict):
-            raise ValueError("Unexpected response from GW2 guild WvW endpoint")
         mapped: Dict[str, int] = {}
-        for guild_id, world_id in payload.items():
-            if not isinstance(guild_id, str):
-                continue
-            normalized = normalise_guild_id(guild_id)
-            if not normalized:
-                continue
-            try:
-                mapped[normalized] = int(world_id)
-            except (TypeError, ValueError):
-                continue
+        for url in GW2_GUILD_WVW_URLS:
+            payload = await self._fetch_json(url)
+            if not isinstance(payload, dict):
+                raise ValueError("Unexpected response from GW2 guild WvW endpoint")
+            for guild_id, world_id in payload.items():
+                if not isinstance(guild_id, str):
+                    continue
+                normalized = normalise_guild_id(guild_id)
+                if not normalized:
+                    continue
+                try:
+                    mapped[normalized] = int(world_id)
+                except (TypeError, ValueError):
+                    continue
         self._guild_world_cache = mapped
         self._guild_world_cache_at = now
         return mapped
@@ -348,7 +352,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         world_id = await self._resolve_guild_world(config.alliance_guild_id)
         if world_id:
             config.alliance_server_id = world_id
-            config.alliance_server_name = WVW_SERVER_NAMES.get(world_id)
+            config.alliance_server_name = WVW_SERVER_NAMES.get(world_id, str(world_id))
         return world_id
 
     async def _post_matchup(
