@@ -419,24 +419,27 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         alliances: Dict[str, AllianceRoster],
         footer: str,
     ) -> discord.Embed:
-        team_label = "Unknown"
-        team_emoji = ""
-        home_team = next((team for team in teams if home_world_id in team.world_ids), None)
-        if home_team:
-            team_label = home_team.color.capitalize()
-            team_emoji = COLOR_EMOJI.get(home_team.color, "")
-        home_world_name = WVW_SERVER_NAMES.get(home_world_id, str(home_world_id))
-        summary_lines = [
-            f"**Alliance guild:** {config.alliance_guild_name or 'Unknown'}",
-            f"**Home world:** {home_world_name}",
-            f"**Your team color:** {team_emoji} {team_label}".strip(),
-            f"**Tier:** Tier {tier}",
-        ]
         embed = discord.Embed(
             title=title,
-            description="\n".join(summary_lines),
             color=BRAND_COLOUR,
         )
+        embed.add_field(
+            name="Alliance guild",
+            value=f"**{config.alliance_guild_name or 'Unknown'}**",
+            inline=True,
+        )
+        embed.add_field(
+            name="Home world",
+            value=f"**{WVW_SERVER_NAMES.get(home_world_id, str(home_world_id))}**",
+            inline=True,
+        )
+        home_team = next((team for team in teams if home_world_id in team.world_ids), None)
+        if home_team:
+            color_label = home_team.color.capitalize()
+            emoji = COLOR_EMOJI.get(home_team.color, "")
+            embed.add_field(name="Your team color", value=f"**{emoji} {color_label}**".strip(), inline=True)
+        embed.add_field(name="Tier", value=f"**Tier {tier}**", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
 
         for team in teams:
             world_label = self._format_worlds(team.world_ids)
@@ -448,8 +451,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             name = f"{emoji} {color_name} team".strip()
             alliance_list = alliances.get(world_label, AllianceRoster(alliances=[], solo_guilds=[]))
             roster_value = self._format_alliance_list(alliance_list)
-            value = f"**Worlds:** {world_label}\n{roster_value}"
-            embed.add_field(name=name, value=value, inline=False)
+            value = f"__Worlds__\n*{world_label}*\n\n__Roster__\n{roster_value}"
+            embed.add_field(name=name, value=value, inline=True)
 
         embed.set_footer(text=footer)
         return embed
