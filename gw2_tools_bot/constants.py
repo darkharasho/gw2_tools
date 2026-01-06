@@ -102,3 +102,19 @@ SPECIALIZATIONS: Dict[str, Specialization] = {
 CLASS_CHOICES = sorted(
     list(PROFESSIONS.keys()) + list(SPECIALIZATIONS.keys())
 )
+
+# Manual Guild Wars 2 WvW server mapping (see reference settings list).
+WVW_SERVER_NAMES: Dict[int, str] = {
+    11001: "Moogooloo",
+    11002: "Rall's Rest",
+    11003: "Domain of Torment",
+    11004: "Yohlon Haven",
+    11005: "Tomb of Drascir",
+    11006: "Hall of Judgment",
+    11007: "Throne of Balthazar",
+    11008: "Dwayna's Temple",
+    11009: "Abaddon's Prison",
+    11010: "Cathedral of Blood",
+    11011: "Lutgardis Conservatory",
+    11012: "Mosswood",
+}
