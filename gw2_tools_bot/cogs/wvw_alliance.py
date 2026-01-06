@@ -353,62 +353,28 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 names.append(name)
         return ", ".join(names) if names else "Unknown world"
 
-    def _format_alliance_list(self, roster: AllianceRoster) -> str:
+    def _format_alliance_table_lines(self, roster: AllianceRoster, max_line_length: int = 120) -> List[str]:
         if not roster.alliances and not roster.solo_guilds:
-            return "No roster data found."
-        alliances_lines: List[str] = []
+            return ["No roster data found."]
+
+        lines: List[str] = []
         for name, guilds in roster.alliances:
-            alliances_lines.append(f"**{name}**")
-            for guild in guilds:
-                alliances_lines.append(f"• {guild}")
-            alliances_lines.append("")
-        solo_lines: List[str] = []
+            if guilds:
+                lines.append(f"{name}: {', '.join(guilds)}")
+            else:
+                lines.append(f"{name}: (no guilds)")
         if roster.solo_guilds:
-            if alliances_lines and alliances_lines[-1] != "":
-                solo_lines.append("")
-            solo_lines.append("**Solo Guilds**")
-            for guild in roster.solo_guilds:
-                solo_lines.append(f"• {guild}")
-        lines = alliances_lines + solo_lines
-        while lines and lines[-1] == "":
-            lines.pop()
-        combined = "\n".join(lines)
-        if len(combined) <= 1000:
-            return combined
-        trimmed: List[str] = []
-        max_length = 980
+            lines.append(f"Solo: {', '.join(roster.solo_guilds)}")
 
-        def _lines_length(items: List[str]) -> int:
-            if not items:
-                return 0
-            return sum(len(item) for item in items) + (len(items) - 1)
+        trimmed_lines: List[str] = []
+        for line in lines:
+            if len(line) > max_line_length:
+                trimmed_lines.append(f"{line[: max_line_length - 1]}…")
+            else:
+                trimmed_lines.append(line)
+        return trimmed_lines
 
-        def _trim_lines(items: List[str], limit: int) -> List[str]:
-            kept: List[str] = []
-            total = 0
-            for line in items:
-                next_total = total + len(line) + (1 if kept else 0)
-                if next_total > limit:
-                    break
-                kept.append(line)
-                total = next_total
-            return kept
-
-        if solo_lines:
-            solo_length = _lines_length(solo_lines)
-            if solo_length > max_length:
-                trimmed = _trim_lines(solo_lines, max_length)
-                return "\n".join(trimmed) + "\n…"
-            remaining = max_length - solo_length
-            trimmed = _trim_lines(alliances_lines, remaining)
-            if not trimmed and solo_lines and solo_lines[0] == "":
-                solo_lines = solo_lines[1:]
-            return "\n".join(trimmed + solo_lines) + "\n…"
-
-        trimmed = _trim_lines(lines, max_length)
-        return "\n".join(trimmed) + "\n…"
-
-    def _build_embed(
+    def _build_matchup_message(
         self,
         *,
         title: str,
@@ -418,42 +384,71 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         home_world_id: int,
         alliances: Dict[str, AllianceRoster],
         footer: str,
-    ) -> discord.Embed:
-        embed = discord.Embed(
-            title=title,
-            color=BRAND_COLOUR,
-        )
-        embed.add_field(
-            name="Alliance guild",
-            value=config.alliance_guild_name or "Unknown",
-            inline=True,
-        )
-        embed.add_field(
-            name="Home world",
-            value=WVW_SERVER_NAMES.get(home_world_id, str(home_world_id)),
-            inline=True,
-        )
+    ) -> str:
+        header_lines = [
+            title,
+            f"Alliance guild: {config.alliance_guild_name or 'Unknown'}",
+            f"Home world: {WVW_SERVER_NAMES.get(home_world_id, str(home_world_id))}",
+            f"Tier: Tier {tier}",
+        ]
         home_team = next((team for team in teams if home_world_id in team.world_ids), None)
         if home_team:
             color_label = home_team.color.capitalize()
             emoji = COLOR_EMOJI.get(home_team.color, "")
-            embed.add_field(name="Your team color", value=f"{emoji} {color_label}".strip(), inline=True)
-        embed.add_field(name="Tier", value=f"Tier {tier}", inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=False)
+            header_lines.append(f"Your team color: {emoji} {color_label}".strip())
+        header_lines.append(footer)
 
+        team_labels = []
+        world_labels = []
         for team in teams:
-            world_label = self._format_worlds(team.world_ids)
-            is_home = home_world_id in team.world_ids
-            color_name = team.color.capitalize()
-            if is_home:
-                continue
-            name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — {world_label}"
-            alliance_list = alliances.get(world_label, AllianceRoster(alliances=[], solo_guilds=[]))
-            value = self._format_alliance_list(alliance_list)
-            embed.add_field(name=name, value=value, inline=True)
+            color_label = team.color.capitalize()
+            emoji = COLOR_EMOJI.get(team.color, "")
+            home_marker = " (home)" if home_world_id in team.world_ids else ""
+            team_labels.append(f"{emoji} {color_label}{home_marker}".strip())
+            world_labels.append(self._format_worlds(team.world_ids))
 
-        embed.set_footer(text=footer)
-        return embed
+        team_width = max(len("Team"), *(len(label) for label in team_labels)) if team_labels else len("Team")
+        world_width = max(len("Worlds"), *(len(label) for label in world_labels)) if world_labels else len("Worlds")
+        world_width = min(world_width, 40)
+
+        def _truncate(text: str, width: int) -> str:
+            if len(text) <= width:
+                return text
+            if width <= 1:
+                return text[:width]
+            return f"{text[: width - 1]}…"
+
+        table_lines: List[str] = []
+        header = f"{'Team':<{team_width}} | {'Worlds':<{world_width}} | Alliances"
+        separator = f"{'-' * team_width}-+-{'-' * world_width}-+-{'-' * len('Alliances')}"
+        table_lines.extend([header, separator])
+
+        for team, team_label, world_label in zip(teams, team_labels, world_labels):
+            alliance_list = alliances.get(world_label, AllianceRoster(alliances=[], solo_guilds=[]))
+            alliance_lines = self._format_alliance_table_lines(alliance_list)
+            for index, alliance_line in enumerate(alliance_lines):
+                row_team = team_label if index == 0 else ""
+                row_world = _truncate(world_label, world_width) if index == 0 else ""
+                table_lines.append(
+                    f"{row_team:<{team_width}} | {row_world:<{world_width}} | {alliance_line}"
+                )
+
+        message_lines = header_lines + ["```"] + table_lines + ["```"]
+        max_length = 1900
+        if len("\n".join(message_lines)) <= max_length:
+            return "\n".join(message_lines)
+
+        trimmed_lines = header_lines + ["```"]
+        for line in table_lines:
+            candidate = trimmed_lines + [line, "```"]
+            if len("\n".join(candidate)) > max_length:
+                trimmed_lines.append("…")
+                trimmed_lines.append("```")
+                break
+            trimmed_lines.append(line)
+        else:
+            trimmed_lines.append("```")
+        return "\n".join(trimmed_lines)
 
     async def _resolve_channel(self, guild: discord.Guild, channel_id: int) -> Optional[discord.TextChannel]:
         channel = guild.get_channel(channel_id)
@@ -532,7 +527,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             world_label = self._format_worlds(team.world_ids)
             alliances[world_label] = await self._resolve_team_alliances(team.world_ids)
 
-        embed = self._build_embed(
+        message = self._build_matchup_message(
             title=title,
             config=config,
             tier=tier,
@@ -543,7 +538,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         )
 
         try:
-            await channel.send(embed=embed)
+            await channel.send(content=message)
         except discord.HTTPException:
             LOGGER.warning("Failed to send WvW matchup post in guild %s", guild.id, exc_info=True)
             return False
