@@ -345,30 +345,56 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     def _format_alliance_list(self, roster: AllianceRoster) -> str:
         if not roster.alliances and not roster.solo_guilds:
             return "No roster data found."
-        lines: List[str] = []
+        alliances_lines: List[str] = []
         for name, guilds in roster.alliances:
-            lines.append(f"**{name}**")
+            alliances_lines.append(f"**{name}**")
             for guild in guilds:
-                lines.append(f"• {guild}")
-            lines.append("")
+                alliances_lines.append(f"• {guild}")
+            alliances_lines.append("")
+        solo_lines: List[str] = []
         if roster.solo_guilds:
-            if lines and lines[-1] != "":
-                lines.append("")
-            lines.append("**Solo Guilds**")
+            if alliances_lines and alliances_lines[-1] != "":
+                solo_lines.append("")
+            solo_lines.append("**Solo Guilds**")
             for guild in roster.solo_guilds:
-                lines.append(f"• {guild}")
+                solo_lines.append(f"• {guild}")
+        lines = alliances_lines + solo_lines
         while lines and lines[-1] == "":
             lines.pop()
         combined = "\n".join(lines)
         if len(combined) <= 1000:
             return combined
         trimmed: List[str] = []
-        total = 0
-        for line in lines:
-            if total + len(line) + 1 > 980:
-                break
-            trimmed.append(line)
-            total += len(line) + 1
+        max_length = 980
+
+        def _lines_length(items: List[str]) -> int:
+            if not items:
+                return 0
+            return sum(len(item) for item in items) + (len(items) - 1)
+
+        def _trim_lines(items: List[str], limit: int) -> List[str]:
+            kept: List[str] = []
+            total = 0
+            for line in items:
+                next_total = total + len(line) + (1 if kept else 0)
+                if next_total > limit:
+                    break
+                kept.append(line)
+                total = next_total
+            return kept
+
+        if solo_lines:
+            solo_length = _lines_length(solo_lines)
+            if solo_length > max_length:
+                trimmed = _trim_lines(solo_lines, max_length)
+                return "\n".join(trimmed) + "\n…"
+            remaining = max_length - solo_length
+            trimmed = _trim_lines(alliances_lines, remaining)
+            if not trimmed and solo_lines and solo_lines[0] == "":
+                solo_lines = solo_lines[1:]
+            return "\n".join(trimmed + solo_lines) + "\n…"
+
+        trimmed = _trim_lines(lines, max_length)
         return "\n".join(trimmed) + "\n…"
 
     def _build_embed(
@@ -389,19 +415,20 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         embed.add_field(
             name="Alliance guild",
             value=config.alliance_guild_name or "Unknown",
-            inline=False,
+            inline=True,
         )
         embed.add_field(
             name="Home world",
             value=WVW_SERVER_NAMES.get(home_world_id, str(home_world_id)),
-            inline=False,
+            inline=True,
         )
         home_team = next((team for team in teams if home_world_id in team.world_ids), None)
         if home_team:
             color_label = home_team.color.capitalize()
             emoji = COLOR_EMOJI.get(home_team.color, "")
-            embed.add_field(name="Your team color", value=f"{emoji} {color_label}".strip(), inline=False)
-        embed.add_field(name="Tier", value=f"Tier {tier}", inline=False)
+            embed.add_field(name="Your team color", value=f"{emoji} {color_label}".strip(), inline=True)
+        embed.add_field(name="Tier", value=f"Tier {tier}", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         for team in teams:
             world_label = self._format_worlds(team.world_ids)
