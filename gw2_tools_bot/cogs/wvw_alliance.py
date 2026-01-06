@@ -293,12 +293,14 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             second = row[1].strip() if len(row) > 1 and row[1] else ""
             if not first and not second:
                 continue
-            if second and "solo" in second.lower():
+            if (first and "solo" in first.lower()) or (second and "solo" in second.lower()):
                 in_solo = True
                 continue
             if in_solo:
+                if first:
+                    solo_guilds.extend([line.strip() for line in first.splitlines() if line.strip()])
                 if second:
-                    solo_guilds.append(second)
+                    solo_guilds.extend([line.strip() for line in second.splitlines() if line.strip()])
                 continue
             if not first:
                 continue
