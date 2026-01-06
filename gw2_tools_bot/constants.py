@@ -105,6 +105,18 @@ CLASS_CHOICES = sorted(
 
 # Manual Guild Wars 2 WvW server mapping (see reference settings list).
 WVW_SERVER_NAMES: Dict[int, str] = {
+    11001: "Moogooloo",
+    11002: "Rall's Rest",
+    11003: "Domain of Torment",
+    11004: "Yohlon Haven",
+    11005: "Tomb of Drascir",
+    11006: "Hall of Judgment",
+    11007: "Throne of Balthazar",
+    11008: "Dwayna's Temple",
+    11009: "Abaddon's Prison",
+    11010: "Cathedral of Blood",
+    11011: "Lutgardis Conservatory",
+    11012: "Mosswood",
     1001: "Anvil Rock",
     1002: "Borlis Pass",
     1003: "Yak's Bend",
