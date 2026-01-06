@@ -16,7 +16,7 @@ from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
-from ..constants import WVW_SERVER_NAMES
+from ..constants import WVW_ALLIANCE_SHEET_TABS, WVW_SERVER_NAMES
 from ..storage import GuildConfig, normalise_guild_id, utcnow
 
 LOGGER = logging.getLogger(__name__)
@@ -257,13 +257,13 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 predictions.append(TierPrediction(tier=tier, teams=colored))
         return sorted(predictions, key=lambda item: item.tier)
 
-    async def _fetch_alliances(self, server_name: str) -> List[str]:
-        if server_name in self._sheet_cache:
-            return self._sheet_cache[server_name]
+    async def _fetch_alliances(self, sheet_name: str) -> List[str]:
+        if sheet_name in self._sheet_cache:
+            return self._sheet_cache[sheet_name]
         try:
-            text = await self._fetch_text(SHEET_URL, params={"tqx": "out:csv", "sheet": server_name})
+            text = await self._fetch_text(SHEET_URL, params={"tqx": "out:csv", "sheet": sheet_name})
         except ValueError:
-            self._sheet_cache[server_name] = []
+            self._sheet_cache[sheet_name] = []
             return []
 
         reader = csv.reader(io.StringIO(text))
@@ -278,16 +278,16 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 entries.append(cleaned)
                 break
         unique = sorted({entry for entry in entries if entry})
-        self._sheet_cache[server_name] = unique
+        self._sheet_cache[sheet_name] = unique
         return unique
 
     async def _resolve_team_alliances(self, world_ids: Sequence[int]) -> List[str]:
         alliances: List[str] = []
         for world_id in world_ids:
-            server_name = WVW_SERVER_NAMES.get(world_id)
-            if not server_name:
+            sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
+            if not sheet_name:
                 continue
-            entries = await self._fetch_alliances(server_name)
+            entries = await self._fetch_alliances(sheet_name)
             alliances.extend(entries)
         return sorted(set(alliances))
 
