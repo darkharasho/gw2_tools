@@ -246,25 +246,30 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             if len(teams) != 3:
                 continue
             ranked = sorted(teams, key=lambda team: team.victory_points, reverse=True)
-            for index, team in enumerate(ranked, start=1):
-                if index == 1:
-                    target_tier = tier if tier == 1 else tier - 1
-                elif index == 2:
-                    target_tier = tier
-                else:
-                    target_tier = tier if tier == max_tier else tier + 1
-                tiers.setdefault(target_tier, []).append(
-                    MatchTeam(color=team.color, world_ids=team.world_ids, victory_points=team.victory_points)
-                )
+            winner, middle, loser = ranked
+
+            winner_tier = tier if tier == 1 else tier - 1
+            winner_color = "green" if tier == 1 else "red"
+            tiers.setdefault(winner_tier, []).append(
+                MatchTeam(color=winner_color, world_ids=winner.world_ids, victory_points=winner.victory_points)
+            )
+
+            tiers.setdefault(tier, []).append(
+                MatchTeam(color="blue", world_ids=middle.world_ids, victory_points=middle.victory_points)
+            )
+
+            loser_tier = tier if tier == max_tier else tier + 1
+            loser_color = "red" if tier == max_tier else "green"
+            tiers.setdefault(loser_tier, []).append(
+                MatchTeam(color=loser_color, world_ids=loser.world_ids, victory_points=loser.victory_points)
+            )
 
         predictions: List[TierPrediction] = []
+        color_order = {"green": 0, "blue": 1, "red": 2}
         for tier, team_list in tiers.items():
-            ordered = sorted(team_list, key=lambda team: team.victory_points, reverse=True)
-            colored: List[MatchTeam] = []
-            for color, team in zip(("green", "blue", "red"), ordered):
-                colored.append(MatchTeam(color=color, world_ids=team.world_ids, victory_points=team.victory_points))
-            if colored:
-                predictions.append(TierPrediction(tier=tier, teams=colored))
+            ordered = sorted(team_list, key=lambda team: color_order.get(team.color, 99))
+            if ordered:
+                predictions.append(TierPrediction(tier=tier, teams=ordered))
         return sorted(predictions, key=lambda item: item.tier)
 
     async def _fetch_alliances(self, sheet_name: str) -> AllianceRoster:
@@ -469,7 +474,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = tier_match.teams
             tier = tier_match.tier
             title = "WvW Matchup Prediction"
-            footer = "Prediction based on current victory points."
+            footer = "Current matchup after reset."
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
@@ -482,7 +487,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
             title = "WvW Matchup Results"
-            footer = "Current matchup after reset."
+            footer = "Prediction based on current victory points."
 
         alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
