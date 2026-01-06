@@ -118,3 +118,19 @@ WVW_SERVER_NAMES: Dict[int, str] = {
     11011: "Lutgardis Conservatory",
     11012: "Mosswood",
 }
+
+# Alliance roster sheet tab names keyed by WvW world id.
+WVW_ALLIANCE_SHEET_TABS: Dict[int, str] = {
+    11001: "Moogooloo",
+    11002: "RR",
+    11003: "DoT",
+    11004: "YH",
+    11005: "ToD",
+    11006: "HoJ",
+    11007: "ThroB",
+    11008: "DT",
+    11009: "AP",
+    11010: "CoB",
+    11011: "LC",
+    11012: "Mosswood",
+}
