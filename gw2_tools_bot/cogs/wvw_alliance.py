@@ -343,18 +343,21 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             value=WVW_SERVER_NAMES.get(home_world_id, str(home_world_id)),
             inline=False,
         )
+        home_team = next((team for team in teams if home_world_id in team.world_ids), None)
+        if home_team:
+            color_label = home_team.color.capitalize()
+            emoji = COLOR_EMOJI.get(home_team.color, "")
+            embed.add_field(name="Your team color", value=f"{emoji} {color_label}".strip(), inline=False)
         embed.add_field(name="Tier", value=f"Tier {tier}", inline=False)
 
         for team in teams:
             world_label = self._format_worlds(team.world_ids)
             is_home = home_world_id in team.world_ids
             color_name = team.color.capitalize()
-            if is_home:
-                color_name = f"{color_name} (your team)"
             name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — {world_label}"
             alliance_list = alliances.get(world_label, [])
             value = self._format_alliance_list(alliance_list)
-            embed.add_field(name=name, value=value, inline=False)
+            embed.add_field(name=name, value=value, inline=not is_home)
 
         embed.set_footer(text=footer)
         return embed
