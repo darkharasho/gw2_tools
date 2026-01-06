@@ -57,6 +57,12 @@ class TierPrediction:
     teams: Sequence[MatchTeam]
 
 
+@dataclass(frozen=True)
+class AllianceRoster:
+    alliances: List[tuple[str, List[str]]]
+    solo_guilds: List[str]
+
+
 class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     """Configure and post WvW matchup summaries for alliance guilds."""
 
@@ -65,7 +71,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         self._session: Optional[aiohttp.ClientSession] = None
         self._guild_world_cache: Optional[Dict[str, int]] = None
         self._guild_world_cache_at: Optional[datetime] = None
-        self._sheet_cache: Dict[str, List[str]] = {}
+        self._sheet_cache: Dict[str, AllianceRoster] = {}
         self._poster_loop.start()
 
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -261,39 +267,67 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 predictions.append(TierPrediction(tier=tier, teams=colored))
         return sorted(predictions, key=lambda item: item.tier)
 
-    async def _fetch_alliances(self, sheet_name: str) -> List[str]:
+    async def _fetch_alliances(self, sheet_name: str) -> AllianceRoster:
         if sheet_name in self._sheet_cache:
             return self._sheet_cache[sheet_name]
         try:
             text = await self._fetch_text(SHEET_URL, params={"tqx": "out:csv", "sheet": sheet_name})
         except ValueError:
-            self._sheet_cache[sheet_name] = []
-            return []
+            roster = AllianceRoster(alliances=[], solo_guilds=[])
+            self._sheet_cache[sheet_name] = roster
+            return roster
 
         reader = csv.reader(io.StringIO(text))
-        entries: List[str] = []
-        for row in reader:
-            for cell in row:
-                cleaned = cell.strip()
-                if not cleaned:
-                    continue
-                if cleaned.lower() == "teams:":
-                    continue
-                entries.append(cleaned)
-                break
-        unique = sorted({entry for entry in entries if entry})
-        self._sheet_cache[sheet_name] = unique
-        return unique
+        rows = list(reader)
+        alliances: List[tuple[str, List[str]]] = []
+        solo_guilds: List[str] = []
+        in_solo = False
 
-    async def _resolve_team_alliances(self, world_ids: Sequence[int]) -> List[str]:
-        alliances: List[str] = []
+        for row in rows[1:]:
+            first = row[0].strip() if len(row) > 0 and row[0] else ""
+            second = row[1].strip() if len(row) > 1 and row[1] else ""
+            if not first and not second:
+                continue
+            if second and "solo" in second.lower():
+                in_solo = True
+                continue
+            if in_solo:
+                if second:
+                    solo_guilds.append(second)
+                continue
+            if not first:
+                continue
+            guilds: List[str] = []
+            if second:
+                for line in second.splitlines():
+                    cleaned = line.strip()
+                    if cleaned:
+                        guilds.append(cleaned)
+            alliances.append((first, guilds))
+
+        roster = AllianceRoster(alliances=alliances, solo_guilds=solo_guilds)
+        self._sheet_cache[sheet_name] = roster
+        return roster
+
+    async def _resolve_team_alliances(self, world_ids: Sequence[int]) -> AllianceRoster:
+        alliance_map: Dict[str, List[str]] = {}
+        solo_seen: set[str] = set()
+        solo_guilds: List[str] = []
         for world_id in world_ids:
             sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
             if not sheet_name:
                 continue
-            entries = await self._fetch_alliances(sheet_name)
-            alliances.extend(entries)
-        return sorted(set(alliances))
+            roster = await self._fetch_alliances(sheet_name)
+            for name, guilds in roster.alliances:
+                existing = alliance_map.setdefault(name, [])
+                for guild in guilds:
+                    if guild not in existing:
+                        existing.append(guild)
+            for guild in roster.solo_guilds:
+                if guild not in solo_seen:
+                    solo_seen.add(guild)
+                    solo_guilds.append(guild)
+        return AllianceRoster(alliances=list(alliance_map.items()), solo_guilds=solo_guilds)
 
     def _format_worlds(self, world_ids: Sequence[int]) -> str:
         names: List[str] = []
@@ -302,10 +336,18 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             names.append(name)
         return ", ".join(names) if names else "Unknown world"
 
-    def _format_alliance_list(self, entries: Sequence[str]) -> str:
-        if not entries:
+    def _format_alliance_list(self, roster: AllianceRoster) -> str:
+        if not roster.alliances and not roster.solo_guilds:
             return "No roster data found."
-        lines = [f"• {entry}" for entry in entries]
+        lines: List[str] = []
+        for name, guilds in roster.alliances:
+            lines.append(f"**{name}**")
+            for guild in guilds:
+                lines.append(f"• {guild}")
+        if roster.solo_guilds:
+            lines.append("**Solo Guilds**")
+            for guild in roster.solo_guilds:
+                lines.append(f"• {guild}")
         combined = "\n".join(lines)
         if len(combined) <= 1000:
             return combined
@@ -326,7 +368,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         tier: int,
         teams: Sequence[MatchTeam],
         home_world_id: int,
-        alliances: Dict[str, List[str]],
+        alliances: Dict[str, AllianceRoster],
         footer: str,
     ) -> discord.Embed:
         embed = discord.Embed(
@@ -354,10 +396,12 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             world_label = self._format_worlds(team.world_ids)
             is_home = home_world_id in team.world_ids
             color_name = team.color.capitalize()
+            if is_home:
+                continue
             name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — {world_label}"
-            alliance_list = alliances.get(world_label, [])
+            alliance_list = alliances.get(world_label, AllianceRoster(alliances=[], solo_guilds=[]))
             value = self._format_alliance_list(alliance_list)
-            embed.add_field(name=name, value=value, inline=not is_home)
+            embed.add_field(name=name, value=value, inline=True)
 
         embed.set_footer(text=footer)
         return embed
@@ -434,7 +478,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             title = "WvW Matchup Results"
             footer = "Current matchup after reset."
 
-        alliances: Dict[str, List[str]] = {}
+        alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
             world_label = self._format_worlds(team.world_ids)
             alliances[world_label] = await self._resolve_team_alliances(team.world_ids)
