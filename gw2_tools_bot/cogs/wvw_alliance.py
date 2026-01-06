@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from typing import Dict, List, Optional, Sequence
@@ -288,12 +289,20 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         solo_guilds: List[str] = []
         in_solo = False
 
+        def _normalized_text(value: str) -> str:
+            normalized = unicodedata.normalize("NFKD", value)
+            filtered = "".join(char for char in normalized if char.isalpha() or char.isspace())
+            return " ".join(filtered.split()).casefold()
+
+        def _is_solo_header(value: str) -> bool:
+            return "solo" in _normalized_text(value)
+
         for row in rows[1:]:
             first = row[0].strip() if len(row) > 0 and row[0] else ""
             second = row[1].strip() if len(row) > 1 and row[1] else ""
             if not first and not second:
                 continue
-            if (first and "solo" in first.lower()) or (second and "solo" in second.lower()):
+            if (first and _is_solo_header(first)) or (second and _is_solo_header(second)):
                 in_solo = True
                 continue
             if in_solo:
