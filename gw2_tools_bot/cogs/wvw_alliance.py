@@ -6,7 +6,7 @@ import io
 import logging
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -27,9 +27,10 @@ GW2_GUILD_WVW_URLS = (
     "https://api.guildwars2.com/v2/wvw/guilds/na",
     "https://api.guildwars2.com/v2/wvw/guilds/eu",
 )
-GW2MISTS_MATCHES_URL = "https://api.gw2mists.com/wvw/matches/all"
+GW2_MATCHES_URL = "https://api.guildwars2.com/v2/wvw/matches"
 SHEET_ID = "1Txjpcet-9FDVek6uJ0N3OciwgbpE0cfWozUK7ATfWx4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq"
+WVW_MATCHES = ["1-1", "1-2", "1-3", "1-4"]
 
 PST = ZoneInfo("America/Los_Angeles")
 PREDICTION_TIME = time(9, 0)
@@ -176,11 +177,36 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             return None
         return mapped.get(normalized)
 
+    def _resolve_tier(self, match: dict) -> int:
+        tier = match.get("tier")
+        if isinstance(tier, int):
+            return tier
+        match_id = match.get("id")
+        if isinstance(match_id, str) and "-" in match_id:
+            try:
+                return int(match_id.split("-", maxsplit=1)[1])
+            except ValueError:
+                return 0
+        return 0
+
     async def _fetch_matches(self) -> List[dict]:
-        payload = await self._fetch_json(GW2MISTS_MATCHES_URL)
+        payload = await self._fetch_json(GW2_MATCHES_URL, params={"ids": ",".join(WVW_MATCHES)})
         if not isinstance(payload, list):
-            raise ValueError("Unexpected response from GW2Mists matches endpoint")
-        return [match for match in payload if isinstance(match, dict) and match.get("region") == 2]
+            raise ValueError("Unexpected response from GW2 matches endpoint")
+        matches: List[dict] = []
+        for match in payload:
+            if not isinstance(match, dict):
+                continue
+            match["tier"] = self._resolve_tier(match)
+            matches.append(match)
+        return matches
+
+    async def _fetch_match_for_world(self, world_id: int) -> Optional[dict]:
+        payload = await self._fetch_json(GW2_MATCHES_URL, params={"world": str(world_id)})
+        if not isinstance(payload, dict):
+            raise ValueError("Unexpected response from GW2 matches endpoint")
+        payload["tier"] = self._resolve_tier(payload)
+        return payload
 
     def _extract_match_teams(self, match: dict) -> List[MatchTeam]:
         data = match.get("data") if isinstance(match.get("data"), dict) else {}
@@ -197,14 +223,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 vp = 0
             teams.append(MatchTeam(color=color, world_ids=world_ids, victory_points=vp))
         return teams
-
-    def _find_match_for_world(self, matches: Iterable[dict], world_id: int) -> Optional[dict]:
-        for match in matches:
-            teams = self._extract_match_teams(match)
-            for team in teams:
-                if world_id in team.world_ids:
-                    return match
-        return None
 
     def _predict_tiers(self, matches: List[dict]) -> List[TierPrediction]:
         tiers: Dict[int, List[MatchTeam]] = {}
@@ -391,7 +409,11 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             title = "WvW Matchup Prediction"
             footer = "Prediction based on current victory points."
         else:
-            match = self._find_match_for_world(matches, world_id)
+            try:
+                match = await self._fetch_match_for_world(world_id)
+            except ValueError:
+                LOGGER.warning("Failed to fetch WvW match for world %s", world_id, exc_info=True)
+                return False
             if not match:
                 LOGGER.warning("No matchup found for world %s", world_id)
                 return False
