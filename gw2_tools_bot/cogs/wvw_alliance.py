@@ -210,8 +210,12 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
 
     def _extract_match_teams(self, match: dict) -> List[MatchTeam]:
         data = match.get("data") if isinstance(match.get("data"), dict) else {}
-        worlds = data.get("all_worlds") if isinstance(data.get("all_worlds"), dict) else {}
-        victory_points = data.get("victory_points") if isinstance(data.get("victory_points"), dict) else {}
+        worlds = match.get("all_worlds") if isinstance(match.get("all_worlds"), dict) else {}
+        victory_points = match.get("victory_points") if isinstance(match.get("victory_points"), dict) else {}
+        if not worlds:
+            worlds = data.get("all_worlds") if isinstance(data.get("all_worlds"), dict) else {}
+        if not victory_points:
+            victory_points = data.get("victory_points") if isinstance(data.get("victory_points"), dict) else {}
 
         teams: List[MatchTeam] = []
         for color in ("green", "blue", "red"):
@@ -325,14 +329,19 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         alliances: Dict[str, List[str]],
         footer: str,
     ) -> discord.Embed:
-        description_lines = [
-            f"Alliance guild: {config.alliance_guild_name or 'Unknown'}",
-            f"Home world: {WVW_SERVER_NAMES.get(home_world_id, str(home_world_id))}",
-        ]
         embed = discord.Embed(
             title=title,
-            description="\n".join(description_lines),
             color=BRAND_COLOUR,
+        )
+        embed.add_field(
+            name="Alliance guild",
+            value=config.alliance_guild_name or "Unknown",
+            inline=False,
+        )
+        embed.add_field(
+            name="Home world",
+            value=WVW_SERVER_NAMES.get(home_world_id, str(home_world_id)),
+            inline=False,
         )
         embed.add_field(name="Tier", value=f"Tier {tier}", inline=False)
 
@@ -550,7 +559,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         name="postnow",
         description="Post the WvW matchup summary immediately (admin only).",
     )
-    async def post_now(self, interaction: discord.Interaction, prediction: bool = True) -> None:
+    async def post_now(self, interaction: discord.Interaction, prediction: bool = False) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
         assert interaction.guild is not None
