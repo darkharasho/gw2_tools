@@ -332,8 +332,9 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     def _format_worlds(self, world_ids: Sequence[int]) -> str:
         names: List[str] = []
         for world_id in world_ids:
-            name = WVW_SERVER_NAMES.get(world_id, str(world_id))
-            names.append(name)
+            name = WVW_SERVER_NAMES.get(world_id)
+            if name:
+                names.append(name)
         return ", ".join(names) if names else "Unknown world"
 
     def _format_alliance_list(self, roster: AllianceRoster) -> str:
@@ -344,10 +345,15 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             lines.append(f"**{name}**")
             for guild in guilds:
                 lines.append(f"• {guild}")
+            lines.append("")
         if roster.solo_guilds:
+            if lines and lines[-1] != "":
+                lines.append("")
             lines.append("**Solo Guilds**")
             for guild in roster.solo_guilds:
                 lines.append(f"• {guild}")
+        while lines and lines[-1] == "":
+            lines.pop()
         combined = "\n".join(lines)
         if len(combined) <= 1000:
             return combined
