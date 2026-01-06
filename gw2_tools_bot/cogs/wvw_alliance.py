@@ -517,6 +517,33 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         embed.add_field(name="WvW World", value=world_label, inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @app_commands.command(
+        name="postnow",
+        description="Post the WvW matchup summary immediately (admin only).",
+    )
+    async def post_now(self, interaction: discord.Interaction, prediction: bool = True) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        if not config.alliance_channel_id:
+            await interaction.response.send_message(
+                "Alliance matchup channel is not configured yet.", ephemeral=True
+            )
+            return
+        channel = await self._resolve_channel(interaction.guild, config.alliance_channel_id)
+        if not channel:
+            await interaction.response.send_message(
+                "Unable to resolve the configured matchup channel.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self._post_matchup(
+            guild=interaction.guild, channel=channel, config=config, prediction=prediction
+        )
+        mode = "prediction" if prediction else "results"
+        await interaction.followup.send(f"Posted matchup {mode} to {channel.mention}.", ephemeral=True)
+
 
 async def setup(bot: GW2ToolsBot) -> None:
     await bot.add_cog(AllianceMatchupCog(bot))
