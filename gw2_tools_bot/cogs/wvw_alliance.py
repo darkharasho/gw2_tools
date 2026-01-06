@@ -362,19 +362,19 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         channel: discord.TextChannel,
         config: GuildConfig,
         prediction: bool,
-    ) -> None:
+    ) -> bool:
         world_id = config.alliance_server_id
         if not world_id:
             world_id = await self._refresh_guild_world(config)
         if not world_id:
             LOGGER.warning("No WvW world configured for guild %s", guild.id)
-            return
+            return False
 
         try:
             matches = await self._fetch_matches()
         except ValueError:
             LOGGER.warning("Failed to fetch WvW matches", exc_info=True)
-            return
+            return False
 
         if prediction:
             tiers = self._predict_tiers(matches)
@@ -384,7 +384,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                     tier_match = entry
                     break
             if not tier_match:
-                return
+                LOGGER.warning("No predicted matchup found for world %s", world_id)
+                return False
             teams = tier_match.teams
             tier = tier_match.tier
             title = "WvW Matchup Prediction"
@@ -392,7 +393,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         else:
             match = self._find_match_for_world(matches, world_id)
             if not match:
-                return
+                LOGGER.warning("No matchup found for world %s", world_id)
+                return False
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
             title = "WvW Matchup Results"
@@ -417,7 +419,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             await channel.send(embed=embed)
         except discord.HTTPException:
             LOGGER.warning("Failed to send WvW matchup post in guild %s", guild.id, exc_info=True)
-            return
+            return False
 
         now_iso = utcnow()
         if prediction:
@@ -425,6 +427,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         else:
             config.alliance_last_actual_at = now_iso
         self.bot.save_config(guild.id, config)
+        return True
 
     def _already_posted(self, timestamp: Optional[str], now: datetime) -> bool:
         last_post = self._parse_timestamp(timestamp)
@@ -542,11 +545,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             )
             return
         await interaction.response.defer(ephemeral=True)
-        await self._post_matchup(
+        mode = "prediction" if prediction else "results"
+        posted = await self._post_matchup(
             guild=interaction.guild, channel=channel, config=config, prediction=prediction
         )
-        mode = "prediction" if prediction else "results"
-        await interaction.followup.send(f"Posted matchup {mode} to {channel.mention}.", ephemeral=True)
+        if posted:
+            await interaction.followup.send(f"Posted matchup {mode} to {channel.mention}.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                "Unable to post the matchup right now. Check bot permissions and logs for details.",
+                ephemeral=True,
+            )
 
 
 async def setup(bot: GW2ToolsBot) -> None:
