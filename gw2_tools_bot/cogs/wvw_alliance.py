@@ -6,7 +6,7 @@ import io
 import logging
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -16,17 +16,21 @@ from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
-from ..constants import WVW_SERVER_NAMES
+from ..constants import WVW_ALLIANCE_SHEET_TABS, WVW_SERVER_NAMES
 from ..storage import GuildConfig, normalise_guild_id, utcnow
 
 LOGGER = logging.getLogger(__name__)
 
 GW2_GUILD_SEARCH_URL = "https://api.guildwars2.com/v2/guild/search"
 GW2_GUILD_INFO_URL = "https://api.guildwars2.com/v2/guild/{guild_id}"
-GW2_GUILD_WVW_URL = "https://api.guildwars2.com/v2/wvw/guilds/na"
-GW2MISTS_MATCHES_URL = "https://api.gw2mists.com/wvw/matches/all"
+GW2_GUILD_WVW_URLS = (
+    "https://api.guildwars2.com/v2/wvw/guilds/na",
+    "https://api.guildwars2.com/v2/wvw/guilds/eu",
+)
+GW2_MATCHES_URL = "https://api.guildwars2.com/v2/wvw/matches"
 SHEET_ID = "1Txjpcet-9FDVek6uJ0N3OciwgbpE0cfWozUK7ATfWx4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq"
+WVW_MATCHES = ["1-1", "1-2", "1-3", "1-4"]
 
 PST = ZoneInfo("America/Los_Angeles")
 PREDICTION_TIME = time(9, 0)
@@ -53,6 +57,12 @@ class TierPrediction:
     teams: Sequence[MatchTeam]
 
 
+@dataclass(frozen=True)
+class AllianceRoster:
+    alliances: List[tuple[str, List[str]]]
+    solo_guilds: List[str]
+
+
 class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     """Configure and post WvW matchup summaries for alliance guilds."""
 
@@ -61,7 +71,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         self._session: Optional[aiohttp.ClientSession] = None
         self._guild_world_cache: Optional[Dict[str, int]] = None
         self._guild_world_cache_at: Optional[datetime] = None
-        self._sheet_cache: Dict[str, List[str]] = {}
+        self._sheet_cache: Dict[str, AllianceRoster] = {}
         self._poster_loop.start()
 
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -144,20 +154,21 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         if self._guild_world_cache and self._guild_world_cache_at:
             if (now - self._guild_world_cache_at).total_seconds() < 3600:
                 return self._guild_world_cache
-        payload = await self._fetch_json(GW2_GUILD_WVW_URL)
-        if not isinstance(payload, dict):
-            raise ValueError("Unexpected response from GW2 guild WvW endpoint")
         mapped: Dict[str, int] = {}
-        for guild_id, world_id in payload.items():
-            if not isinstance(guild_id, str):
-                continue
-            normalized = normalise_guild_id(guild_id)
-            if not normalized:
-                continue
-            try:
-                mapped[normalized] = int(world_id)
-            except (TypeError, ValueError):
-                continue
+        for url in GW2_GUILD_WVW_URLS:
+            payload = await self._fetch_json(url)
+            if not isinstance(payload, dict):
+                raise ValueError("Unexpected response from GW2 guild WvW endpoint")
+            for guild_id, world_id in payload.items():
+                if not isinstance(guild_id, str):
+                    continue
+                normalized = normalise_guild_id(guild_id)
+                if not normalized:
+                    continue
+                try:
+                    mapped[normalized] = int(world_id)
+                except (TypeError, ValueError):
+                    continue
         self._guild_world_cache = mapped
         self._guild_world_cache_at = now
         return mapped
@@ -172,16 +183,45 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             return None
         return mapped.get(normalized)
 
+    def _resolve_tier(self, match: dict) -> int:
+        tier = match.get("tier")
+        if isinstance(tier, int):
+            return tier
+        match_id = match.get("id")
+        if isinstance(match_id, str) and "-" in match_id:
+            try:
+                return int(match_id.split("-", maxsplit=1)[1])
+            except ValueError:
+                return 0
+        return 0
+
     async def _fetch_matches(self) -> List[dict]:
-        payload = await self._fetch_json(GW2MISTS_MATCHES_URL)
+        payload = await self._fetch_json(GW2_MATCHES_URL, params={"ids": ",".join(WVW_MATCHES)})
         if not isinstance(payload, list):
-            raise ValueError("Unexpected response from GW2Mists matches endpoint")
-        return [match for match in payload if isinstance(match, dict) and match.get("region") == 2]
+            raise ValueError("Unexpected response from GW2 matches endpoint")
+        matches: List[dict] = []
+        for match in payload:
+            if not isinstance(match, dict):
+                continue
+            match["tier"] = self._resolve_tier(match)
+            matches.append(match)
+        return matches
+
+    async def _fetch_match_for_world(self, world_id: int) -> Optional[dict]:
+        payload = await self._fetch_json(GW2_MATCHES_URL, params={"world": str(world_id)})
+        if not isinstance(payload, dict):
+            raise ValueError("Unexpected response from GW2 matches endpoint")
+        payload["tier"] = self._resolve_tier(payload)
+        return payload
 
     def _extract_match_teams(self, match: dict) -> List[MatchTeam]:
         data = match.get("data") if isinstance(match.get("data"), dict) else {}
-        worlds = data.get("all_worlds") if isinstance(data.get("all_worlds"), dict) else {}
-        victory_points = data.get("victory_points") if isinstance(data.get("victory_points"), dict) else {}
+        worlds = match.get("all_worlds") if isinstance(match.get("all_worlds"), dict) else {}
+        victory_points = match.get("victory_points") if isinstance(match.get("victory_points"), dict) else {}
+        if not worlds:
+            worlds = data.get("all_worlds") if isinstance(data.get("all_worlds"), dict) else {}
+        if not victory_points:
+            victory_points = data.get("victory_points") if isinstance(data.get("victory_points"), dict) else {}
 
         teams: List[MatchTeam] = []
         for color in ("green", "blue", "red"):
@@ -193,14 +233,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 vp = 0
             teams.append(MatchTeam(color=color, world_ids=world_ids, victory_points=vp))
         return teams
-
-    def _find_match_for_world(self, matches: Iterable[dict], world_id: int) -> Optional[dict]:
-        for match in matches:
-            teams = self._extract_match_teams(match)
-            for team in teams:
-                if world_id in team.world_ids:
-                    return match
-        return None
 
     def _predict_tiers(self, matches: List[dict]) -> List[TierPrediction]:
         tiers: Dict[int, List[MatchTeam]] = {}
@@ -214,72 +246,119 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             if len(teams) != 3:
                 continue
             ranked = sorted(teams, key=lambda team: team.victory_points, reverse=True)
-            for index, team in enumerate(ranked, start=1):
-                if index == 1:
-                    target_tier = tier if tier == 1 else tier - 1
-                elif index == 2:
-                    target_tier = tier
-                else:
-                    target_tier = tier if tier == max_tier else tier + 1
-                tiers.setdefault(target_tier, []).append(
-                    MatchTeam(color=team.color, world_ids=team.world_ids, victory_points=team.victory_points)
-                )
+            winner, middle, loser = ranked
+
+            winner_tier = tier if tier == 1 else tier - 1
+            winner_color = "green" if tier == 1 else "red"
+            tiers.setdefault(winner_tier, []).append(
+                MatchTeam(color=winner_color, world_ids=winner.world_ids, victory_points=winner.victory_points)
+            )
+
+            tiers.setdefault(tier, []).append(
+                MatchTeam(color="blue", world_ids=middle.world_ids, victory_points=middle.victory_points)
+            )
+
+            loser_tier = tier if tier == max_tier else tier + 1
+            loser_color = "red" if tier == max_tier else "green"
+            tiers.setdefault(loser_tier, []).append(
+                MatchTeam(color=loser_color, world_ids=loser.world_ids, victory_points=loser.victory_points)
+            )
 
         predictions: List[TierPrediction] = []
+        color_order = {"green": 0, "blue": 1, "red": 2}
         for tier, team_list in tiers.items():
-            ordered = sorted(team_list, key=lambda team: team.victory_points, reverse=True)
-            colored: List[MatchTeam] = []
-            for color, team in zip(("green", "blue", "red"), ordered):
-                colored.append(MatchTeam(color=color, world_ids=team.world_ids, victory_points=team.victory_points))
-            if colored:
-                predictions.append(TierPrediction(tier=tier, teams=colored))
+            ordered = sorted(team_list, key=lambda team: color_order.get(team.color, 99))
+            if ordered:
+                predictions.append(TierPrediction(tier=tier, teams=ordered))
         return sorted(predictions, key=lambda item: item.tier)
 
-    async def _fetch_alliances(self, server_name: str) -> List[str]:
-        if server_name in self._sheet_cache:
-            return self._sheet_cache[server_name]
+    async def _fetch_alliances(self, sheet_name: str) -> AllianceRoster:
+        if sheet_name in self._sheet_cache:
+            return self._sheet_cache[sheet_name]
         try:
-            text = await self._fetch_text(SHEET_URL, params={"tqx": "out:csv", "sheet": server_name})
+            text = await self._fetch_text(SHEET_URL, params={"tqx": "out:csv", "sheet": sheet_name})
         except ValueError:
-            self._sheet_cache[server_name] = []
-            return []
+            roster = AllianceRoster(alliances=[], solo_guilds=[])
+            self._sheet_cache[sheet_name] = roster
+            return roster
 
         reader = csv.reader(io.StringIO(text))
-        entries: List[str] = []
-        for row in reader:
-            for cell in row:
-                cleaned = cell.strip()
-                if not cleaned:
-                    continue
-                if cleaned.lower() == "teams:":
-                    continue
-                entries.append(cleaned)
-                break
-        unique = sorted({entry for entry in entries if entry})
-        self._sheet_cache[server_name] = unique
-        return unique
+        rows = list(reader)
+        alliances: List[tuple[str, List[str]]] = []
+        solo_guilds: List[str] = []
+        in_solo = False
 
-    async def _resolve_team_alliances(self, world_ids: Sequence[int]) -> List[str]:
-        alliances: List[str] = []
-        for world_id in world_ids:
-            server_name = WVW_SERVER_NAMES.get(world_id)
-            if not server_name:
+        for row in rows[1:]:
+            first = row[0].strip() if len(row) > 0 and row[0] else ""
+            second = row[1].strip() if len(row) > 1 and row[1] else ""
+            if not first and not second:
                 continue
-            entries = await self._fetch_alliances(server_name)
-            alliances.extend(entries)
-        return sorted(set(alliances))
+            if second and "solo" in second.lower():
+                in_solo = True
+                continue
+            if in_solo:
+                if second:
+                    solo_guilds.append(second)
+                continue
+            if not first:
+                continue
+            guilds: List[str] = []
+            if second:
+                for line in second.splitlines():
+                    cleaned = line.strip()
+                    if cleaned:
+                        guilds.append(cleaned)
+            alliances.append((first, guilds))
+
+        roster = AllianceRoster(alliances=alliances, solo_guilds=solo_guilds)
+        self._sheet_cache[sheet_name] = roster
+        return roster
+
+    async def _resolve_team_alliances(self, world_ids: Sequence[int]) -> AllianceRoster:
+        alliance_map: Dict[str, List[str]] = {}
+        solo_seen: set[str] = set()
+        solo_guilds: List[str] = []
+        for world_id in world_ids:
+            sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
+            if not sheet_name:
+                continue
+            roster = await self._fetch_alliances(sheet_name)
+            for name, guilds in roster.alliances:
+                existing = alliance_map.setdefault(name, [])
+                for guild in guilds:
+                    if guild not in existing:
+                        existing.append(guild)
+            for guild in roster.solo_guilds:
+                if guild not in solo_seen:
+                    solo_seen.add(guild)
+                    solo_guilds.append(guild)
+        return AllianceRoster(alliances=list(alliance_map.items()), solo_guilds=solo_guilds)
 
     def _format_worlds(self, world_ids: Sequence[int]) -> str:
         names: List[str] = []
         for world_id in world_ids:
-            name = WVW_SERVER_NAMES.get(world_id, str(world_id))
-            names.append(name)
+            name = WVW_SERVER_NAMES.get(world_id)
+            if name:
+                names.append(name)
         return ", ".join(names) if names else "Unknown world"
 
-    def _format_alliance_list(self, entries: Sequence[str]) -> str:
-        if not entries:
+    def _format_alliance_list(self, roster: AllianceRoster) -> str:
+        if not roster.alliances and not roster.solo_guilds:
             return "No roster data found."
-        lines = [f"• {entry}" for entry in entries]
+        lines: List[str] = []
+        for name, guilds in roster.alliances:
+            lines.append(f"**{name}**")
+            for guild in guilds:
+                lines.append(f"• {guild}")
+            lines.append("")
+        if roster.solo_guilds:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append("**Solo Guilds**")
+            for guild in roster.solo_guilds:
+                lines.append(f"• {guild}")
+        while lines and lines[-1] == "":
+            lines.pop()
         combined = "\n".join(lines)
         if len(combined) <= 1000:
             return combined
@@ -300,18 +379,28 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         tier: int,
         teams: Sequence[MatchTeam],
         home_world_id: int,
-        alliances: Dict[str, List[str]],
+        alliances: Dict[str, AllianceRoster],
         footer: str,
     ) -> discord.Embed:
-        description_lines = [
-            f"Alliance guild: {config.alliance_guild_name or 'Unknown'}",
-            f"Home world: {WVW_SERVER_NAMES.get(home_world_id, str(home_world_id))}",
-        ]
         embed = discord.Embed(
             title=title,
-            description="\n".join(description_lines),
             color=BRAND_COLOUR,
         )
+        embed.add_field(
+            name="Alliance guild",
+            value=config.alliance_guild_name or "Unknown",
+            inline=False,
+        )
+        embed.add_field(
+            name="Home world",
+            value=WVW_SERVER_NAMES.get(home_world_id, str(home_world_id)),
+            inline=False,
+        )
+        home_team = next((team for team in teams if home_world_id in team.world_ids), None)
+        if home_team:
+            color_label = home_team.color.capitalize()
+            emoji = COLOR_EMOJI.get(home_team.color, "")
+            embed.add_field(name="Your team color", value=f"{emoji} {color_label}".strip(), inline=False)
         embed.add_field(name="Tier", value=f"Tier {tier}", inline=False)
 
         for team in teams:
@@ -319,11 +408,11 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             is_home = home_world_id in team.world_ids
             color_name = team.color.capitalize()
             if is_home:
-                color_name = f"{color_name} (your team)"
+                continue
             name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — {world_label}"
-            alliance_list = alliances.get(world_label, [])
+            alliance_list = alliances.get(world_label, AllianceRoster(alliances=[], solo_guilds=[]))
             value = self._format_alliance_list(alliance_list)
-            embed.add_field(name=name, value=value, inline=False)
+            embed.add_field(name=name, value=value, inline=True)
 
         embed.set_footer(text=footer)
         return embed
@@ -348,7 +437,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         world_id = await self._resolve_guild_world(config.alliance_guild_id)
         if world_id:
             config.alliance_server_id = world_id
-            config.alliance_server_name = WVW_SERVER_NAMES.get(world_id)
+            config.alliance_server_name = WVW_SERVER_NAMES.get(world_id, str(world_id))
         return world_id
 
     async def _post_matchup(
@@ -358,19 +447,19 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         channel: discord.TextChannel,
         config: GuildConfig,
         prediction: bool,
-    ) -> None:
+    ) -> bool:
         world_id = config.alliance_server_id
         if not world_id:
             world_id = await self._refresh_guild_world(config)
         if not world_id:
             LOGGER.warning("No WvW world configured for guild %s", guild.id)
-            return
+            return False
 
         try:
             matches = await self._fetch_matches()
         except ValueError:
             LOGGER.warning("Failed to fetch WvW matches", exc_info=True)
-            return
+            return False
 
         if prediction:
             tiers = self._predict_tiers(matches)
@@ -380,21 +469,27 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                     tier_match = entry
                     break
             if not tier_match:
-                return
+                LOGGER.warning("No predicted matchup found for world %s", world_id)
+                return False
             teams = tier_match.teams
             tier = tier_match.tier
             title = "WvW Matchup Prediction"
-            footer = "Prediction based on current victory points."
+            footer = "Current matchup after reset."
         else:
-            match = self._find_match_for_world(matches, world_id)
+            try:
+                match = await self._fetch_match_for_world(world_id)
+            except ValueError:
+                LOGGER.warning("Failed to fetch WvW match for world %s", world_id, exc_info=True)
+                return False
             if not match:
-                return
+                LOGGER.warning("No matchup found for world %s", world_id)
+                return False
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
             title = "WvW Matchup Results"
-            footer = "Current matchup after reset."
+            footer = "Prediction based on current victory points."
 
-        alliances: Dict[str, List[str]] = {}
+        alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
             world_label = self._format_worlds(team.world_ids)
             alliances[world_label] = await self._resolve_team_alliances(team.world_ids)
@@ -413,7 +508,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             await channel.send(embed=embed)
         except discord.HTTPException:
             LOGGER.warning("Failed to send WvW matchup post in guild %s", guild.id, exc_info=True)
-            return
+            return False
 
         now_iso = utcnow()
         if prediction:
@@ -421,6 +516,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         else:
             config.alliance_last_actual_at = now_iso
         self.bot.save_config(guild.id, config)
+        return True
 
     def _already_posted(self, timestamp: Optional[str], now: datetime) -> bool:
         last_post = self._parse_timestamp(timestamp)
@@ -521,7 +617,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         name="postnow",
         description="Post the WvW matchup summary immediately (admin only).",
     )
-    async def post_now(self, interaction: discord.Interaction, prediction: bool = True) -> None:
+    async def post_now(self, interaction: discord.Interaction, prediction: bool = False) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
         assert interaction.guild is not None
@@ -538,11 +634,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             )
             return
         await interaction.response.defer(ephemeral=True)
-        await self._post_matchup(
+        mode = "prediction" if prediction else "results"
+        posted = await self._post_matchup(
             guild=interaction.guild, channel=channel, config=config, prediction=prediction
         )
-        mode = "prediction" if prediction else "results"
-        await interaction.followup.send(f"Posted matchup {mode} to {channel.mention}.", ephemeral=True)
+        if posted:
+            await interaction.followup.send(f"Posted matchup {mode} to {channel.mention}.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                "Unable to post the matchup right now. Check bot permissions and logs for details.",
+                ephemeral=True,
+            )
 
 
 async def setup(bot: GW2ToolsBot) -> None:
