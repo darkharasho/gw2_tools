@@ -7,7 +7,7 @@ import io
 import logging
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -48,6 +48,9 @@ COLOR_EMOJI = {
     "blue": "🔵",
     "red": "🔴",
 }
+SKIRMISH_FIRST_PLACE_POINTS = (15, 15, 15, 15, 22, 22, 22, 31, 31, 51, 51, 31)
+SKIRMISH_THIRD_PLACE_POINTS = (12, 12, 12, 12, 14, 14, 14, 17, 17, 24, 24, 17)
+SKIRMISH_POINT_SWINGS = tuple(first - third for first, third in zip(SKIRMISH_FIRST_PLACE_POINTS, SKIRMISH_THIRD_PLACE_POINTS))
 
 
 @dataclass(frozen=True)
@@ -279,8 +282,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
-        self._guild_world_cache: Optional[Dict[str, int]] = None
-        self._guild_world_cache_at: Optional[datetime] = None
+        self._guild_world_cache: Dict[str, Dict[str, int]] = {}
+        self._guild_world_cache_at: Dict[str, datetime] = {}
         self._sheet_cache: Dict[str, AllianceRoster] = {}
         self._poster_loop.start()
 
@@ -392,39 +395,44 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 best_match = (guild_id, label)
         return best_match
 
-    async def _fetch_guild_world_map(self) -> Dict[str, int]:
+    async def _fetch_guild_world_map(self, url: str) -> Dict[str, int]:
         now = datetime.now(timezone.utc)
-        if self._guild_world_cache and self._guild_world_cache_at:
-            if (now - self._guild_world_cache_at).total_seconds() < 3600:
-                return self._guild_world_cache
+        cached = self._guild_world_cache.get(url)
+        cached_at = self._guild_world_cache_at.get(url)
+        if cached and cached_at:
+            if (now - cached_at).total_seconds() < 3600:
+                return cached
         mapped: Dict[str, int] = {}
-        for url in GW2_GUILD_WVW_URLS:
-            payload = await self._fetch_json(url)
-            if not isinstance(payload, dict):
-                raise ValueError("Unexpected response from GW2 guild WvW endpoint")
-            for guild_id, world_id in payload.items():
-                if not isinstance(guild_id, str):
-                    continue
-                normalized = normalise_guild_id(guild_id)
-                if not normalized:
-                    continue
-                try:
-                    mapped[normalized] = int(world_id)
-                except (TypeError, ValueError):
-                    continue
-        self._guild_world_cache = mapped
-        self._guild_world_cache_at = now
+        payload = await self._fetch_json(url)
+        if not isinstance(payload, dict):
+            raise ValueError("Unexpected response from GW2 guild WvW endpoint")
+        for guild_id, world_id in payload.items():
+            if not isinstance(guild_id, str):
+                continue
+            normalized = normalise_guild_id(guild_id)
+            if not normalized:
+                continue
+            try:
+                mapped[normalized] = int(world_id)
+            except (TypeError, ValueError):
+                continue
+        self._guild_world_cache[url] = mapped
+        self._guild_world_cache_at[url] = now
         return mapped
 
     async def _resolve_guild_world(self, guild_id: str) -> Optional[int]:
         normalized = normalise_guild_id(guild_id)
         if not normalized:
             return None
-        try:
-            mapped = await self._fetch_guild_world_map()
-        except ValueError:
-            return None
-        return mapped.get(normalized)
+        for url in GW2_GUILD_WVW_URLS:
+            try:
+                mapped = await self._fetch_guild_world_map(url)
+            except ValueError:
+                continue
+            world_id = mapped.get(normalized)
+            if world_id is not None:
+                return world_id
+        return None
 
     def _resolve_tier(self, match: dict) -> int:
         tier = match.get("tier")
@@ -668,6 +676,62 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return f"{SHEET_EDIT_URL}#range={sheet_ref}"
         return None
 
+    def _calculate_team_confidence(
+        self,
+        teams: Sequence[MatchTeam],
+        target_team: MatchTeam,
+        remaining_swing: int,
+    ) -> Optional[int]:
+        if len(teams) < 2:
+            return None
+        ranked = sorted(teams, key=lambda team: team.victory_points, reverse=True)
+        try:
+            target_index = ranked.index(target_team)
+        except ValueError:
+            return None
+        gap = 0
+        if target_index == 0:
+            gap = max(0, target_team.victory_points - ranked[1].victory_points)
+        elif target_index == len(ranked) - 1:
+            gap = max(0, ranked[-2].victory_points - target_team.victory_points)
+        else:
+            gap_to_top = max(0, ranked[target_index - 1].victory_points - target_team.victory_points)
+            gap_to_bottom = max(0, target_team.victory_points - ranked[target_index + 1].victory_points)
+            gap = min(gap_to_top, gap_to_bottom)
+
+        if remaining_swing <= 0:
+            return 100 if gap > 0 else 0
+        ratio = gap / remaining_swing
+        confidence = round(max(0.0, min(ratio, 1.0)) * 100)
+        return confidence
+
+    def _calculate_confidence(self, teams: Sequence[MatchTeam], home_world_id: int) -> Optional[int]:
+        if len(teams) < 2:
+            return None
+        home_team = next((team for team in teams if home_world_id in team.world_ids), None)
+        if not home_team:
+            return None
+        remaining_swing = self._remaining_skirmish_swing()
+        return self._calculate_team_confidence(teams, home_team, remaining_swing)
+
+    def _remaining_skirmish_swing(self, now: Optional[datetime] = None) -> int:
+        current = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
+        days_ahead = (4 - current.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        end_date = current.date() + timedelta(days=days_ahead)
+        end_time = datetime.combine(end_date, time(0, 0), tzinfo=timezone.utc)
+        if current >= end_time:
+            return 0
+        slot_start = current.replace(minute=0, second=0, microsecond=0)
+        slot_start -= timedelta(hours=slot_start.hour % 2)
+        remaining = 0
+        while slot_start < end_time:
+            slot_index = (slot_start.hour // 2) % len(SKIRMISH_POINT_SWINGS)
+            remaining += SKIRMISH_POINT_SWINGS[slot_index]
+            slot_start += timedelta(hours=2)
+        return remaining
+
     def _build_embed(
         self,
         *,
@@ -677,6 +741,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         teams: Sequence[MatchTeam],
         home_world_id: int,
         alliances: Dict[str, AllianceRoster],
+        confidence: Optional[int] = None,
     ) -> discord.Embed:
         embed = discord.Embed(
             title="",
@@ -710,6 +775,19 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 value = f"[source]({sheet_url})\n{value}"
             value = self._trim_field_value(value)
             embed.add_field(name=name, value=value, inline=True)
+
+        if confidence is not None:
+            footer_parts = [f"Home: {confidence}%"]
+            remaining_swing = self._remaining_skirmish_swing()
+            for team in teams:
+                if home_world_id in team.world_ids:
+                    continue
+                opponent_confidence = self._calculate_team_confidence(teams, team, remaining_swing)
+                if opponent_confidence is None:
+                    continue
+                footer_parts.append(f"{team.color.capitalize()}: {opponent_confidence}%")
+            footer = "Prediction confidence — " + " | ".join(footer_parts)
+            embed.set_footer(text=footer)
 
         return embed
 
@@ -770,6 +848,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = tier_match.teams
             tier = tier_match.tier
             title = "Predictive WvW Matchup"
+            confidence = self._calculate_confidence(teams, world_id)
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
@@ -782,6 +861,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
             title = "Current WvW Matchup"
+            confidence = None
 
         alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
@@ -795,6 +875,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams=teams,
             home_world_id=world_id,
             alliances=alliances,
+            confidence=confidence,
         )
 
         try:
