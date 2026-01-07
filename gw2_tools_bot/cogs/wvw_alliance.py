@@ -19,7 +19,7 @@ from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
-from ..constants import WVW_ALLIANCE_SHEET_TABS, WVW_SERVER_NAMES
+from ..constants import WVW_ALLIANCE_SHEET_GIDS, WVW_ALLIANCE_SHEET_TABS, WVW_SERVER_NAMES
 from ..storage import GuildConfig, normalise_guild_id, utcnow
 
 LOGGER = logging.getLogger(__name__)
@@ -659,6 +659,9 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
 
     def _resolve_sheet_url(self, world_ids: Sequence[int]) -> Optional[str]:
         for world_id in world_ids:
+            sheet_gid = WVW_ALLIANCE_SHEET_GIDS.get(world_id)
+            if sheet_gid is not None:
+                return f"{SHEET_EDIT_URL}#gid={sheet_gid}"
             sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
             if sheet_name:
                 sheet_ref = quote(f"{sheet_name}!A1")
@@ -679,11 +682,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             title="",
             description=f"# {title}",
             color=BRAND_COLOUR,
-        )
-        embed.add_field(
-            name="Alliance guild",
-            value=config.alliance_guild_name or "Unknown",
-            inline=True,
         )
         embed.add_field(
             name="Home world",
