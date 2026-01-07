@@ -218,6 +218,8 @@ class GuildConfig:
     alliance_server_name: Optional[str] = None
     alliance_last_prediction_at: Optional[str] = None
     alliance_last_actual_at: Optional[str] = None
+    alliance_prediction_time: Optional[str] = None
+    alliance_current_time: Optional[str] = None
     comp: CompConfig = field(default_factory=CompConfig)
     comp_active_preset: Optional[str] = None
 
@@ -967,6 +969,16 @@ class StorageManager:
             payload["alliance_server_name"] = alliance_server_name.strip() or None
         else:
             payload["alliance_server_name"] = None
+        alliance_prediction_time = payload.get("alliance_prediction_time")
+        if isinstance(alliance_prediction_time, str):
+            payload["alliance_prediction_time"] = alliance_prediction_time.strip() or None
+        else:
+            payload["alliance_prediction_time"] = None
+        alliance_current_time = payload.get("alliance_current_time")
+        if isinstance(alliance_current_time, str):
+            payload["alliance_current_time"] = alliance_current_time.strip() or None
+        else:
+            payload["alliance_current_time"] = None
         return GuildConfig(**payload)
 
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
@@ -1002,6 +1014,12 @@ class StorageManager:
         if config.alliance_server_name:
             cleaned_server = str(config.alliance_server_name).strip()
             config.alliance_server_name = cleaned_server or None
+        if config.alliance_prediction_time:
+            cleaned_time = str(config.alliance_prediction_time).strip()
+            config.alliance_prediction_time = cleaned_time or None
+        if config.alliance_current_time:
+            cleaned_time = str(config.alliance_current_time).strip()
+            config.alliance_current_time = cleaned_time or None
         if config.alliance_channel_id is not None:
             try:
                 config.alliance_channel_id = int(config.alliance_channel_id)
