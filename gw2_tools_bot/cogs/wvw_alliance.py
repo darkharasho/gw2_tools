@@ -7,7 +7,7 @@ import io
 import logging
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -49,7 +49,8 @@ COLOR_EMOJI = {
     "red": "🔴",
 }
 SKIRMISH_FIRST_PLACE_POINTS = (15, 15, 15, 15, 22, 22, 22, 31, 31, 51, 51, 31)
-SKIRMISH_POINTS_PER_WEEK = sum(SKIRMISH_FIRST_PLACE_POINTS) * 7
+SKIRMISH_THIRD_PLACE_POINTS = (12, 12, 12, 12, 14, 14, 14, 17, 17, 24, 24, 17)
+SKIRMISH_POINT_SWINGS = tuple(first - third for first, third in zip(SKIRMISH_FIRST_PLACE_POINTS, SKIRMISH_THIRD_PLACE_POINTS))
 
 
 @dataclass(frozen=True)
@@ -675,17 +676,51 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return f"{SHEET_EDIT_URL}#range={sheet_ref}"
         return None
 
-    def _calculate_confidence(self, teams: Sequence[MatchTeam]) -> Optional[int]:
+    def _calculate_confidence(self, teams: Sequence[MatchTeam], home_world_id: int) -> Optional[int]:
         if len(teams) < 2:
             return None
-        victory_points = [team.victory_points for team in teams]
-        max_points = max(victory_points, default=0)
-        min_points = min(victory_points, default=0)
-        if SKIRMISH_POINTS_PER_WEEK <= 0:
-            return 0
-        ratio = (max_points - min_points) / SKIRMISH_POINTS_PER_WEEK
+        home_team = next((team for team in teams if home_world_id in team.world_ids), None)
+        if not home_team:
+            return None
+        ranked = sorted(teams, key=lambda team: team.victory_points, reverse=True)
+        try:
+            home_index = ranked.index(home_team)
+        except ValueError:
+            return None
+        gap = 0
+        if home_index == 0:
+            gap = max(0, home_team.victory_points - ranked[1].victory_points)
+        elif home_index == len(ranked) - 1:
+            gap = max(0, ranked[-2].victory_points - home_team.victory_points)
+        else:
+            gap_to_top = max(0, ranked[home_index - 1].victory_points - home_team.victory_points)
+            gap_to_bottom = max(0, home_team.victory_points - ranked[home_index + 1].victory_points)
+            gap = min(gap_to_top, gap_to_bottom)
+
+        remaining_swing = self._remaining_skirmish_swing()
+        if remaining_swing <= 0:
+            return 100 if gap > 0 else 0
+        ratio = gap / remaining_swing
         confidence = round(max(0.0, min(ratio, 1.0)) * 100)
         return confidence
+
+    def _remaining_skirmish_swing(self, now: Optional[datetime] = None) -> int:
+        current = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
+        days_ahead = (4 - current.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        end_date = current.date() + timedelta(days=days_ahead)
+        end_time = datetime.combine(end_date, time(0, 0), tzinfo=timezone.utc)
+        if current >= end_time:
+            return 0
+        slot_start = current.replace(minute=0, second=0, microsecond=0)
+        slot_start -= timedelta(hours=slot_start.hour % 2)
+        remaining = 0
+        while slot_start < end_time:
+            slot_index = (slot_start.hour // 2) % len(SKIRMISH_POINT_SWINGS)
+            remaining += SKIRMISH_POINT_SWINGS[slot_index]
+            slot_start += timedelta(hours=2)
+        return remaining
 
     def _build_embed(
         self,
@@ -732,7 +767,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             embed.add_field(name=name, value=value, inline=True)
 
         if confidence is not None:
-            embed.set_footer(text=f"Prediction confidence: {confidence}%")
+            embed.set_footer(text=f"Home team prediction confidence: {confidence}%")
 
         return embed
 
@@ -793,7 +828,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = tier_match.teams
             tier = tier_match.tier
             title = "Predictive WvW Matchup"
-            confidence = self._calculate_confidence(teams)
+            confidence = self._calculate_confidence(teams, world_id)
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
