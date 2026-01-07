@@ -72,10 +72,12 @@ class AllianceScheduleView(discord.ui.View):
         self.cog = cog
         self.guild = guild
         self.config = config
-        self.add_item(_AllianceDaySelect(self, label="Prediction", target="prediction", row=0))
-        self.add_item(_AllianceHourSelect(self, label="Prediction", target="prediction", row=1))
-        self.add_item(_AllianceDaySelect(self, label="Current", target="current", row=2))
-        self.add_item(_AllianceHourSelect(self, label="Current", target="current", row=3))
+        self.add_item(_AllianceLabelButton(label="Prediction", row=0))
+        self.add_item(_AllianceDaySelect(self, target="prediction", row=0))
+        self.add_item(_AllianceHourSelect(self, target="prediction", row=1))
+        self.add_item(_AllianceLabelButton(label="Current", row=2))
+        self.add_item(_AllianceDaySelect(self, target="current", row=2))
+        self.add_item(_AllianceHourSelect(self, target="current", row=3))
         self.add_item(_AllianceCloseButton())
 
     def persist(self) -> None:
@@ -99,8 +101,16 @@ class AllianceScheduleView(discord.ui.View):
             item.disabled = True
 
 
+class _AllianceLabelButton(discord.ui.Button[AllianceScheduleView]):
+    def __init__(self, *, label: str, row: int) -> None:
+        super().__init__(style=discord.ButtonStyle.secondary, label=label, disabled=True, row=row)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+
+
 class _AllianceDaySelect(discord.ui.Select):
-    def __init__(self, view: AllianceScheduleView, *, label: str, target: str, row: int) -> None:
+    def __init__(self, view: AllianceScheduleView, *, target: str, row: int) -> None:
         self.schedule_view = view
         self.target = target
         current_day = view.cog._resolve_post_day(
@@ -112,7 +122,7 @@ class _AllianceDaySelect(discord.ui.Select):
             for index in range(7)
         ]
         super().__init__(
-            placeholder=f"{label} day",
+            placeholder="Day",
             min_values=1,
             max_values=1,
             options=options,
@@ -133,7 +143,7 @@ class _AllianceDaySelect(discord.ui.Select):
 
 
 class _AllianceHourSelect(discord.ui.Select):
-    def __init__(self, view: AllianceScheduleView, *, label: str, target: str, row: int) -> None:
+    def __init__(self, view: AllianceScheduleView, *, target: str, row: int) -> None:
         self.schedule_view = view
         self.target = target
         fallback = PREDICTION_TIME if target == "prediction" else RESET_TIME
@@ -150,7 +160,7 @@ class _AllianceHourSelect(discord.ui.Select):
             for hour in range(24)
         ]
         super().__init__(
-            placeholder=f"{label} hour",
+            placeholder="Hour",
             min_values=1,
             max_values=1,
             options=options,
