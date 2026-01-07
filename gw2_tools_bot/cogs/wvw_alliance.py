@@ -48,6 +48,8 @@ COLOR_EMOJI = {
     "blue": "🔵",
     "red": "🔴",
 }
+SKIRMISH_FIRST_PLACE_POINTS = (15, 15, 15, 15, 22, 22, 22, 31, 31, 51, 51, 31)
+SKIRMISH_POINTS_PER_WEEK = sum(SKIRMISH_FIRST_PLACE_POINTS) * 7
 
 
 @dataclass(frozen=True)
@@ -679,9 +681,9 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         victory_points = [team.victory_points for team in teams]
         max_points = max(victory_points, default=0)
         min_points = min(victory_points, default=0)
-        if max_points <= 0:
+        if SKIRMISH_POINTS_PER_WEEK <= 0:
             return 0
-        ratio = (max_points - min_points) / max_points
+        ratio = (max_points - min_points) / SKIRMISH_POINTS_PER_WEEK
         confidence = round(max(0.0, min(ratio, 1.0)) * 100)
         return confidence
 
@@ -712,8 +714,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             emoji = COLOR_EMOJI.get(home_team.color, "")
             embed.add_field(name="Your team color", value=f"{emoji} {color_label}".strip(), inline=True)
         embed.add_field(name="Tier", value=f"Tier {tier}", inline=True)
-        if confidence is not None:
-            embed.add_field(name="Confidence", value=f"{confidence}%", inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         for team in teams:
@@ -730,6 +730,9 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 value = f"[source]({sheet_url})\n{value}"
             value = self._trim_field_value(value)
             embed.add_field(name=name, value=value, inline=True)
+
+        if confidence is not None:
+            embed.set_footer(text=f"Prediction confidence: {confidence}%")
 
         return embed
 
