@@ -668,6 +668,18 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return f"{SHEET_EDIT_URL}#range={sheet_ref}"
         return None
 
+    def _calculate_confidence(self, teams: Sequence[MatchTeam]) -> Optional[int]:
+        if len(teams) < 2:
+            return None
+        victory_points = [team.victory_points for team in teams]
+        max_points = max(victory_points, default=0)
+        min_points = min(victory_points, default=0)
+        if max_points <= 0:
+            return 0
+        ratio = (max_points - min_points) / max_points
+        confidence = round(max(0.0, min(ratio, 1.0)) * 100)
+        return confidence
+
     def _build_embed(
         self,
         *,
@@ -677,6 +689,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         teams: Sequence[MatchTeam],
         home_world_id: int,
         alliances: Dict[str, AllianceRoster],
+        confidence: Optional[int] = None,
     ) -> discord.Embed:
         embed = discord.Embed(
             title="",
@@ -694,6 +707,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             emoji = COLOR_EMOJI.get(home_team.color, "")
             embed.add_field(name="Your team color", value=f"{emoji} {color_label}".strip(), inline=True)
         embed.add_field(name="Tier", value=f"Tier {tier}", inline=True)
+        if confidence is not None:
+            embed.add_field(name="Confidence", value=f"{confidence}%", inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         for team in teams:
@@ -770,6 +785,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = tier_match.teams
             tier = tier_match.tier
             title = "Predictive WvW Matchup"
+            confidence = self._calculate_confidence(teams)
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
@@ -782,6 +798,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
             title = "Current WvW Matchup"
+            confidence = None
 
         alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
@@ -795,6 +812,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams=teams,
             home_world_id=world_id,
             alliances=alliances,
+            confidence=confidence,
         )
 
         try:
