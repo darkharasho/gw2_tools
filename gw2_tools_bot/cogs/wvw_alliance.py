@@ -1,6 +1,7 @@
 """Alliance guild WvW matchup reporting."""
 from __future__ import annotations
 
+import calendar
 import csv
 import io
 import logging
@@ -8,6 +9,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from typing import Dict, List, Optional, Sequence
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -17,7 +19,7 @@ from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
-from ..constants import WVW_ALLIANCE_SHEET_TABS, WVW_SERVER_NAMES
+from ..constants import WVW_ALLIANCE_SHEET_GIDS, WVW_ALLIANCE_SHEET_TABS, WVW_SERVER_NAMES
 from ..storage import GuildConfig, normalise_guild_id, utcnow
 
 LOGGER = logging.getLogger(__name__)
@@ -31,12 +33,15 @@ GW2_GUILD_WVW_URLS = (
 GW2_MATCHES_URL = "https://api.guildwars2.com/v2/wvw/matches"
 SHEET_ID = "1Txjpcet-9FDVek6uJ0N3OciwgbpE0cfWozUK7ATfWx4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq"
+SHEET_EDIT_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
 WVW_MATCHES = ["1-1", "1-2", "1-3", "1-4"]
 
 PST = ZoneInfo("America/Los_Angeles")
 PREDICTION_TIME = time(9, 0)
 RESET_TIME = time(19, 30)
-CHECK_INTERVAL_MINUTES = 15
+CHECK_INTERVAL_MINUTES = 5
+DEFAULT_POST_DAY = 4
+TIME_OPTION_MINUTES = tuple(range(0, 60, 5))
 
 COLOR_EMOJI = {
     "green": "🟢",
@@ -62,6 +67,210 @@ class TierPrediction:
 class AllianceRoster:
     alliances: List[tuple[str, List[str]]]
     solo_guilds: List[str]
+
+
+class AllianceScheduleView(discord.ui.View):
+    def __init__(self, cog: "AllianceMatchupCog", guild: discord.Guild, config: GuildConfig) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.config = config
+        self.active_target = "prediction"
+        self.target_select = _AllianceTargetSelect(self, row=0)
+        self.day_select = _AllianceDaySelect(self, row=1)
+        self.hour_select = _AllianceHourSelect(self, row=2)
+        self.minute_select = _AllianceMinuteSelect(self, row=3)
+        self.close_button = _AllianceCloseButton()
+        self.add_item(self.target_select)
+        self.add_item(self.day_select)
+        self.add_item(self.hour_select)
+        self.add_item(self.minute_select)
+        self.add_item(self.close_button)
+        self.sync_selects()
+
+    def persist(self) -> None:
+        self.cog.bot.save_config(self.guild.id, self.config)
+
+    def _current_time(self) -> time:
+        fallback = PREDICTION_TIME if self.active_target == "prediction" else RESET_TIME
+        return self.cog._resolve_post_time(
+            getattr(self.config, f"alliance_{self.active_target}_time"),
+            fallback,
+        )
+
+    def sync_selects(self) -> None:
+        current_day = self.cog._resolve_post_day(
+            getattr(self.config, f"alliance_{self.active_target}_day"),
+            DEFAULT_POST_DAY,
+        )
+        current_time = self._current_time()
+        self.target_select.sync(current=self.active_target)
+        self.day_select.sync(current_day=current_day)
+        self.hour_select.sync(current_hour=current_time.hour)
+        self.minute_select.sync(current_minute=current_time.minute)
+
+    def reset_last_post(self, *, target: str) -> None:
+        if target == "prediction":
+            self.config.alliance_last_prediction_at = None
+        else:
+            self.config.alliance_last_actual_at = None
+
+    def build_message(self) -> str:
+        prediction_day = self.cog._resolve_post_day(self.config.alliance_prediction_day, DEFAULT_POST_DAY)
+        current_day = self.cog._resolve_post_day(self.config.alliance_current_day, DEFAULT_POST_DAY)
+        prediction_time = self.cog._resolve_post_time(self.config.alliance_prediction_time, PREDICTION_TIME)
+        current_time = self.cog._resolve_post_time(self.config.alliance_current_time, RESET_TIME)
+        return (
+            "Use the dropdowns below to configure when alliance matchup posts are sent.\n"
+            f"**Prediction:** {self.cog._format_day(prediction_day)} at "
+            f"**{self.cog._format_time(prediction_time)}** PST\n\n"
+            f"**Current:** {self.cog._format_day(current_day)} at "
+            f"**{self.cog._format_time(current_time)}** PST"
+        )
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+
+class _AllianceTargetSelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
+        self.schedule_view = view
+        options = [
+            discord.SelectOption(label="Prediction schedule", value="prediction"),
+            discord.SelectOption(label="Current schedule", value="current"),
+        ]
+        super().__init__(
+            placeholder="Select schedule",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=row,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        selected = self.values[0] if self.values else "prediction"
+        if selected not in {"prediction", "current"}:
+            selected = "prediction"
+        self.schedule_view.active_target = selected
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
+
+    def sync(self, *, current: str) -> None:
+        for option in self.options:
+            option.default = option.value == current
+        self.placeholder = "Prediction schedule" if current == "prediction" else "Current schedule"
+
+
+class _AllianceDaySelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
+        self.schedule_view = view
+        options = [discord.SelectOption(label=calendar.day_name[index], value=str(index)) for index in range(7)]
+        super().__init__(
+            placeholder="Select day",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=row,
+        )
+
+    def sync(self, *, current_day: int) -> None:
+        self.placeholder = calendar.day_name[current_day]
+        for option in self.options:
+            option.default = option.value == str(current_day)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        try:
+            day_value = int(self.values[0])
+        except (TypeError, ValueError, IndexError):
+            day_value = DEFAULT_POST_DAY
+        setattr(self.schedule_view.config, f"alliance_{self.schedule_view.active_target}_day", day_value)
+        self.schedule_view.reset_last_post(target=self.schedule_view.active_target)
+        self.schedule_view.persist()
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
+
+
+class _AllianceHourSelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
+        self.schedule_view = view
+        options = [discord.SelectOption(label=f"{hour:02d}", value=str(hour)) for hour in range(24)]
+        super().__init__(
+            placeholder="Select hour",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=row,
+        )
+
+    def sync(self, *, current_hour: int) -> None:
+        self.placeholder = f"{current_hour:02d}"
+        for option in self.options:
+            option.default = option.value == str(current_hour)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        try:
+            hour_value = int(self.values[0])
+        except (TypeError, ValueError, IndexError):
+            hour_value = 0
+        base_time = self.schedule_view._current_time()
+        new_time = time(hour_value, base_time.minute)
+        setattr(
+            self.schedule_view.config,
+            f"alliance_{self.schedule_view.active_target}_time",
+            self.schedule_view.cog._format_time(new_time),
+        )
+        self.schedule_view.reset_last_post(target=self.schedule_view.active_target)
+        self.schedule_view.persist()
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
+
+
+class _AllianceMinuteSelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
+        self.schedule_view = view
+        options = [
+            discord.SelectOption(label=f"{minute:02d}", value=str(minute))
+            for minute in TIME_OPTION_MINUTES
+        ]
+        super().__init__(
+            placeholder="Select minute",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=row,
+        )
+
+    def sync(self, *, current_minute: int) -> None:
+        self.placeholder = f"{current_minute:02d}"
+        for option in self.options:
+            option.default = option.value == str(current_minute)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        try:
+            minute_value = int(self.values[0])
+        except (TypeError, ValueError, IndexError):
+            minute_value = 0
+        base_time = self.schedule_view._current_time()
+        new_time = time(base_time.hour, minute_value)
+        setattr(
+            self.schedule_view.config,
+            f"alliance_{self.schedule_view.active_target}_time",
+            self.schedule_view.cog._format_time(new_time),
+        )
+        self.schedule_view.reset_last_post(target=self.schedule_view.active_target)
+        self.schedule_view.persist()
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
+
+
+class _AllianceCloseButton(discord.ui.Button[AllianceScheduleView]):
+    def __init__(self) -> None:
+        super().__init__(style=discord.ButtonStyle.secondary, label="Close", row=4)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Alliance matchup schedule configuration closed.", view=None)
+        self.view.stop()
 
 
 class AllianceMatchupCog(commands.GroupCog, name="alliance"):
@@ -118,6 +327,39 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             return parsed.astimezone(timezone.utc)
         except ValueError:
             return None
+
+    def _parse_hhmm(self, value: Optional[str]) -> Optional[time]:
+        if not value:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        parts = cleaned.split(":")
+        if len(parts) != 2:
+            return None
+        try:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+        except ValueError:
+            return None
+        if not (0 <= hours <= 23 and 0 <= minutes <= 59):
+            return None
+        return time(hours, minutes)
+
+    def _resolve_post_time(self, value: Optional[str], fallback: time) -> time:
+        parsed = self._parse_hhmm(value)
+        return parsed if parsed else fallback
+
+    def _format_time(self, value: time) -> str:
+        return value.strftime("%H:%M")
+
+    def _resolve_post_day(self, value: Optional[int], fallback: int) -> int:
+        if isinstance(value, int) and 0 <= value <= 6:
+            return value
+        return fallback
+
+    def _format_day(self, value: int) -> str:
+        return calendar.day_name[value] if 0 <= value <= 6 else "Unknown"
 
     async def _lookup_guild(self, name: str) -> Optional[tuple[str, str]]:
         try:
@@ -408,6 +650,24 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         trimmed = _trim_lines(lines, max_length)
         return "\n".join(trimmed) + "\n…"
 
+    def _trim_field_value(self, value: str, max_length: int = 1024) -> str:
+        if len(value) <= max_length:
+            return value
+        if max_length <= 1:
+            return value[:max_length]
+        return value[: max_length - 1].rstrip() + "…"
+
+    def _resolve_sheet_url(self, world_ids: Sequence[int]) -> Optional[str]:
+        for world_id in world_ids:
+            sheet_gid = WVW_ALLIANCE_SHEET_GIDS.get(world_id)
+            if sheet_gid is not None:
+                return f"{SHEET_EDIT_URL}#gid={sheet_gid}"
+            sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
+            if sheet_name:
+                sheet_ref = quote(f"{sheet_name}!A1")
+                return f"{SHEET_EDIT_URL}#range={sheet_ref}"
+        return None
+
     def _build_embed(
         self,
         *,
@@ -419,13 +679,9 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         alliances: Dict[str, AllianceRoster],
     ) -> discord.Embed:
         embed = discord.Embed(
-            title=title,
+            title="",
+            description=f"# {title}",
             color=BRAND_COLOUR,
-        )
-        embed.add_field(
-            name="Alliance guild",
-            value=config.alliance_guild_name or "Unknown",
-            inline=True,
         )
         embed.add_field(
             name="Home world",
@@ -446,9 +702,13 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             color_name = team.color.capitalize()
             if is_home:
                 continue
+            sheet_url = self._resolve_sheet_url(team.world_ids)
             name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — {world_label}"
             alliance_list = alliances.get(world_label, AllianceRoster(alliances=[], solo_guilds=[]))
             value = self._format_alliance_list(alliance_list)
+            if sheet_url:
+                value = f"[source]({sheet_url})\n{value}"
+            value = self._trim_field_value(value)
             embed.add_field(name=name, value=value, inline=True)
 
         return embed
@@ -562,8 +822,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         if not self.bot.guilds:
             return
         now = datetime.now(PST)
-        if now.weekday() != 4:
-            return
+        now_time = now.time().replace(second=0, microsecond=0)
         for guild in self.bot.guilds:
             config = self.bot.get_config(guild.id)
             if not config.alliance_channel_id or not config.alliance_guild_id:
@@ -571,11 +830,18 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             channel = await self._resolve_channel(guild, config.alliance_channel_id)
             if not channel:
                 continue
-            if now.time() >= PREDICTION_TIME and now.time() < RESET_TIME:
-                if not self._already_posted(config.alliance_last_prediction_at, now):
-                    await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
-            if now.time() >= RESET_TIME:
+            prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
+            current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
+            prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
+            current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
+            if now.weekday() == prediction_day:
+                if now_time >= prediction_time:
+                    if not self._already_posted(config.alliance_last_prediction_at, now):
+                        LOGGER.info("Posting alliance prediction matchup for guild %s", guild.id)
+                        await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
+            if now.weekday() == current_day and now_time >= current_time:
                 if not self._already_posted(config.alliance_last_actual_at, now):
+                    LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
                     await self._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
 
     @_poster_loop.before_loop
@@ -626,6 +892,22 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             f"Alliance matchup posts will be sent to {channel.mention}.", ephemeral=True
         )
 
+    @app_commands.command(
+        name="settime",
+        description="Configure when the predictive and current matchup posts are sent.",
+    )
+    async def set_times(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        view = AllianceScheduleView(self, interaction.guild, config)
+        await interaction.response.send_message(
+            view.build_message(),
+            view=view,
+            ephemeral=True,
+        )
+
     @app_commands.command(name="status", description="Show alliance matchup configuration.")
     async def status(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -640,10 +922,28 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         )
         channel_label = channel_obj.mention if channel_obj else "Not set"
         world_label = config.alliance_server_name or "Unknown"
+        prediction_time = self._format_time(
+            self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
+        )
+        current_time = self._format_time(self._resolve_post_time(config.alliance_current_time, RESET_TIME))
+        prediction_day = self._format_day(
+            self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
+        )
+        current_day = self._format_day(
+            self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
+        )
         embed = discord.Embed(title="Alliance matchup settings", color=BRAND_COLOUR)
         embed.add_field(name="Guild", value=guild_label, inline=False)
         embed.add_field(name="Channel", value=channel_label, inline=False)
         embed.add_field(name="WvW World", value=world_label, inline=False)
+        embed.add_field(
+            name="Post Times (PST)",
+            value=(
+                f"Prediction: **{prediction_day}** at **{prediction_time}**\n"
+                f"Current: **{current_day}** at **{current_time}**"
+            ),
+            inline=False,
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(

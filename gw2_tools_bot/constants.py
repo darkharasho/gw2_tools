@@ -134,3 +134,18 @@ WVW_ALLIANCE_SHEET_TABS: Dict[int, str] = {
     11011: "LC",
     11012: "Mosswood",
 }
+
+WVW_ALLIANCE_SHEET_GIDS: Dict[int, int] = {
+    11001: 658801507,  # Moogooloo
+    11002: 1974546691,  # Rall's Rest
+    11003: 1287523523,  # Domain of Torment
+    11004: 537207900,  # Yohlon Haven
+    11005: 1760357507,  # Tombs of Drascir
+    11006: 1872696628,  # Hall of Judgement
+    11007: 1770658789,  # Throne of Balthazar
+    11008: 990248232,  # Dwayna's Temple
+    11009: 0,  # Abbadon's Prison
+    11010: 950272983,  # Cathedral of Blood
+    11011: 2072324186,  # Lutgardis Conservatory
+    11012: 92543690,  # Mosswood
+}
