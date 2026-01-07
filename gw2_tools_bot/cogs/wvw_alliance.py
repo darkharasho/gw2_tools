@@ -279,8 +279,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
-        self._guild_world_cache: Optional[Dict[str, int]] = None
-        self._guild_world_cache_at: Optional[datetime] = None
+        self._guild_world_cache: Dict[str, Dict[str, int]] = {}
+        self._guild_world_cache_at: Dict[str, datetime] = {}
         self._sheet_cache: Dict[str, AllianceRoster] = {}
         self._poster_loop.start()
 
@@ -392,39 +392,44 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 best_match = (guild_id, label)
         return best_match
 
-    async def _fetch_guild_world_map(self) -> Dict[str, int]:
+    async def _fetch_guild_world_map(self, url: str) -> Dict[str, int]:
         now = datetime.now(timezone.utc)
-        if self._guild_world_cache and self._guild_world_cache_at:
-            if (now - self._guild_world_cache_at).total_seconds() < 3600:
-                return self._guild_world_cache
+        cached = self._guild_world_cache.get(url)
+        cached_at = self._guild_world_cache_at.get(url)
+        if cached and cached_at:
+            if (now - cached_at).total_seconds() < 3600:
+                return cached
         mapped: Dict[str, int] = {}
-        for url in GW2_GUILD_WVW_URLS:
-            payload = await self._fetch_json(url)
-            if not isinstance(payload, dict):
-                raise ValueError("Unexpected response from GW2 guild WvW endpoint")
-            for guild_id, world_id in payload.items():
-                if not isinstance(guild_id, str):
-                    continue
-                normalized = normalise_guild_id(guild_id)
-                if not normalized:
-                    continue
-                try:
-                    mapped[normalized] = int(world_id)
-                except (TypeError, ValueError):
-                    continue
-        self._guild_world_cache = mapped
-        self._guild_world_cache_at = now
+        payload = await self._fetch_json(url)
+        if not isinstance(payload, dict):
+            raise ValueError("Unexpected response from GW2 guild WvW endpoint")
+        for guild_id, world_id in payload.items():
+            if not isinstance(guild_id, str):
+                continue
+            normalized = normalise_guild_id(guild_id)
+            if not normalized:
+                continue
+            try:
+                mapped[normalized] = int(world_id)
+            except (TypeError, ValueError):
+                continue
+        self._guild_world_cache[url] = mapped
+        self._guild_world_cache_at[url] = now
         return mapped
 
     async def _resolve_guild_world(self, guild_id: str) -> Optional[int]:
         normalized = normalise_guild_id(guild_id)
         if not normalized:
             return None
-        try:
-            mapped = await self._fetch_guild_world_map()
-        except ValueError:
-            return None
-        return mapped.get(normalized)
+        for url in GW2_GUILD_WVW_URLS:
+            try:
+                mapped = await self._fetch_guild_world_map(url)
+            except ValueError:
+                continue
+            world_id = mapped.get(normalized)
+            if world_id is not None:
+                return world_id
+        return None
 
     def _resolve_tier(self, match: dict) -> int:
         tier = match.get("tier")
