@@ -107,6 +107,12 @@ class AllianceScheduleView(discord.ui.View):
         self.hour_select.sync(current_hour=current_time.hour)
         self.minute_select.sync(current_minute=current_time.minute)
 
+    def reset_last_post(self, *, target: str) -> None:
+        if target == "prediction":
+            self.config.alliance_last_prediction_at = None
+        else:
+            self.config.alliance_last_actual_at = None
+
     def build_message(self) -> str:
         prediction_day = self.cog._resolve_post_day(self.config.alliance_prediction_day, DEFAULT_POST_DAY)
         current_day = self.cog._resolve_post_day(self.config.alliance_current_day, DEFAULT_POST_DAY)
@@ -177,6 +183,7 @@ class _AllianceDaySelect(discord.ui.Select):
         except (TypeError, ValueError, IndexError):
             day_value = DEFAULT_POST_DAY
         setattr(self.schedule_view.config, f"alliance_{self.schedule_view.active_target}_day", day_value)
+        self.schedule_view.reset_last_post(target=self.schedule_view.active_target)
         self.schedule_view.persist()
         self.schedule_view.sync_selects()
         await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
@@ -211,6 +218,7 @@ class _AllianceHourSelect(discord.ui.Select):
             f"alliance_{self.schedule_view.active_target}_time",
             self.schedule_view.cog._format_time(new_time),
         )
+        self.schedule_view.reset_last_post(target=self.schedule_view.active_target)
         self.schedule_view.persist()
         self.schedule_view.sync_selects()
         await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
@@ -248,6 +256,7 @@ class _AllianceMinuteSelect(discord.ui.Select):
             f"alliance_{self.schedule_view.active_target}_time",
             self.schedule_view.cog._format_time(new_time),
         )
+        self.schedule_view.reset_last_post(target=self.schedule_view.active_target)
         self.schedule_view.persist()
         self.schedule_view.sync_selects()
         await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
@@ -814,6 +823,12 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
             prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
             current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
+            LOGGER.info(
+                "Alliance schedule last post guild=%s pred_last=%s curr_last=%s",
+                guild.id,
+                config.alliance_last_prediction_at,
+                config.alliance_last_actual_at,
+            )
             LOGGER.info(
                 "Alliance schedule check guild=%s now=%s pred_day=%s pred_time=%s curr_day=%s curr_time=%s",
                 guild.id,
