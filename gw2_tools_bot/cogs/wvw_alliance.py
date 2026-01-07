@@ -659,7 +659,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         alliances: Dict[str, AllianceRoster],
     ) -> discord.Embed:
         embed = discord.Embed(
-            title=title,
+            title="",
+            description=f"# {title}",
             color=BRAND_COLOUR,
         )
         embed.add_field(
@@ -749,7 +750,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return False
             teams = tier_match.teams
             tier = tier_match.tier
-            title = "🔮 PREDICTIVE WVW MATCHUP"
+            title = "Predictive WvW Matchup"
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
@@ -761,7 +762,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return False
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
-            title = "🏁 FINAL WVW MATCHUP"
+            title = "Current WvW Matchup"
 
         alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
