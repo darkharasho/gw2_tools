@@ -37,7 +37,7 @@ WVW_MATCHES = ["1-1", "1-2", "1-3", "1-4"]
 PST = ZoneInfo("America/Los_Angeles")
 PREDICTION_TIME = time(9, 0)
 RESET_TIME = time(19, 30)
-CHECK_INTERVAL_MINUTES = 15
+CHECK_INTERVAL_MINUTES = 5
 DEFAULT_POST_DAY = 4
 TIME_OPTION_MINUTES = tuple(range(0, 60, 5))
 
