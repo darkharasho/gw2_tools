@@ -749,7 +749,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return False
             teams = tier_match.teams
             tier = tier_match.tier
-            title = "Predictive WvW Matchup"
+            title = "🔮 PREDICTIVE WVW MATCHUP"
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
@@ -761,7 +761,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return False
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
-            title = "Current WvW Matchup"
+            title = "🏁 FINAL WVW MATCHUP"
 
         alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
@@ -800,64 +800,29 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poster_loop(self) -> None:  # pragma: no cover - requires Discord
         if not self.bot.guilds:
-            LOGGER.info("Alliance schedule loop skipped: bot is not in any guilds.")
             return
         now = datetime.now(PST)
         now_time = now.time().replace(second=0, microsecond=0)
-        LOGGER.info("Alliance schedule loop tick at %s PST", now.isoformat())
         for guild in self.bot.guilds:
             config = self.bot.get_config(guild.id)
             if not config.alliance_channel_id or not config.alliance_guild_id:
-                LOGGER.info(
-                    "Skipping alliance schedule for guild %s (channel_id=%s, guild_id=%s)",
-                    guild.id,
-                    config.alliance_channel_id,
-                    config.alliance_guild_id,
-                )
                 continue
             channel = await self._resolve_channel(guild, config.alliance_channel_id)
             if not channel:
-                LOGGER.info("Skipping alliance schedule for guild %s (channel not found)", guild.id)
                 continue
             prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
             current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
             prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
             current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
-            LOGGER.info(
-                "Alliance schedule last post guild=%s pred_last=%s curr_last=%s",
-                guild.id,
-                config.alliance_last_prediction_at,
-                config.alliance_last_actual_at,
-            )
-            LOGGER.info(
-                "Alliance schedule check guild=%s now=%s pred_day=%s pred_time=%s curr_day=%s curr_time=%s",
-                guild.id,
-                now.isoformat(),
-                prediction_day,
-                prediction_time,
-                current_day,
-                current_time,
-            )
             if now.weekday() == prediction_day:
                 if now_time >= prediction_time:
                     if not self._already_posted(config.alliance_last_prediction_at, now):
                         LOGGER.info("Posting alliance prediction matchup for guild %s", guild.id)
                         await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
-                    else:
-                        LOGGER.info("Prediction matchup already posted today for guild %s", guild.id)
-                else:
-                    LOGGER.info(
-                        "Prediction matchup not due yet for guild %s (now=%s, target=%s)",
-                        guild.id,
-                        now_time,
-                        prediction_time,
-                    )
             if now.weekday() == current_day and now_time >= current_time:
                 if not self._already_posted(config.alliance_last_actual_at, now):
                     LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
                     await self._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
-                else:
-                    LOGGER.info("Current matchup already posted today for guild %s", guild.id)
 
     @_poster_loop.before_loop
     async def _before_loop(self) -> None:  # pragma: no cover - discord.py lifecycle
