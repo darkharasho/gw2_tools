@@ -9,6 +9,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from typing import Dict, List, Optional, Sequence
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -660,7 +661,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         for world_id in world_ids:
             sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
             if sheet_name:
-                return f"{SHEET_EDIT_URL}?sheet={sheet_name}"
+                sheet_ref = quote(f"{sheet_name}!A1")
+                return f"{SHEET_EDIT_URL}#gid=0&range={sheet_ref}"
         return None
 
     def _build_embed(
