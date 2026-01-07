@@ -112,7 +112,7 @@ class _AllianceDaySelect(discord.ui.Select):
             for index in range(7)
         ]
         super().__init__(
-            placeholder="Day",
+            placeholder=calendar.day_name[current_day],
             min_values=1,
             max_values=1,
             options=options,
@@ -124,6 +124,9 @@ class _AllianceDaySelect(discord.ui.Select):
             day_value = int(self.values[0])
         except (TypeError, ValueError, IndexError):
             day_value = DEFAULT_POST_DAY
+        self.placeholder = calendar.day_name[day_value]
+        for option in self.options:
+            option.default = option.value == str(day_value)
         setattr(self.schedule_view.config, f"alliance_{self.target}_day", day_value)
         self.schedule_view.persist()
         await interaction.response.edit_message(
@@ -141,6 +144,7 @@ class _AllianceHourSelect(discord.ui.Select):
             getattr(view.config, f"alliance_{target}_time"),
             fallback,
         )
+        placeholder = f"{current_time.hour:02d}:00"
         options = [
             discord.SelectOption(
                 label=f"{hour:02d}:00",
@@ -150,7 +154,7 @@ class _AllianceHourSelect(discord.ui.Select):
             for hour in range(24)
         ]
         super().__init__(
-            placeholder="Hour",
+            placeholder=placeholder,
             min_values=1,
             max_values=1,
             options=options,
@@ -162,6 +166,9 @@ class _AllianceHourSelect(discord.ui.Select):
             hour_value = int(self.values[0])
         except (TypeError, ValueError, IndexError):
             hour_value = 0
+        self.placeholder = f"{hour_value:02d}:00"
+        for option in self.options:
+            option.default = option.value == str(hour_value)
         fallback = PREDICTION_TIME if self.target == "prediction" else RESET_TIME
         base_time = self.schedule_view.cog._resolve_post_time(
             getattr(self.schedule_view.config, f"alliance_{self.target}_time"),
