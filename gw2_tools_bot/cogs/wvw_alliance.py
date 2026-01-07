@@ -417,7 +417,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         teams: Sequence[MatchTeam],
         home_world_id: int,
         alliances: Dict[str, AllianceRoster],
-        footer: str,
     ) -> discord.Embed:
         embed = discord.Embed(
             title=title,
@@ -452,7 +451,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             value = self._format_alliance_list(alliance_list)
             embed.add_field(name=name, value=value, inline=True)
 
-        embed.set_footer(text=footer)
         return embed
 
     async def _resolve_channel(self, guild: discord.Guild, channel_id: int) -> Optional[discord.TextChannel]:
@@ -511,8 +509,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return False
             teams = tier_match.teams
             tier = tier_match.tier
-            title = "WvW Matchup Prediction"
-            footer = "Current matchup after reset."
+            title = "Predictive WvW Matchup"
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
@@ -524,8 +521,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return False
             teams = self._extract_match_teams(match)
             tier = match.get("tier", 0)
-            title = "WvW Matchup Results"
-            footer = "Prediction based on current victory points."
+            title = "Current WvW Matchup"
 
         alliances: Dict[str, AllianceRoster] = {}
         for team in teams:
@@ -539,7 +535,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams=teams,
             home_world_id=world_id,
             alliances=alliances,
-            footer=footer,
         )
 
         try:
