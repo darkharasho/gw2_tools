@@ -39,6 +39,7 @@ PREDICTION_TIME = time(9, 0)
 RESET_TIME = time(19, 30)
 CHECK_INTERVAL_MINUTES = 15
 DEFAULT_POST_DAY = 4
+TIME_OPTION_MINUTES = (0, 15, 30, 45)
 
 COLOR_EMOJI = {
     "green": "🟢",
@@ -73,9 +74,9 @@ class AllianceScheduleView(discord.ui.View):
         self.guild = guild
         self.config = config
         self.add_item(_AllianceDaySelect(self, target="prediction", row=0))
-        self.add_item(_AllianceHourSelect(self, target="prediction", row=1))
+        self.add_item(_AllianceTimeSelect(self, target="prediction", row=1))
         self.add_item(_AllianceDaySelect(self, target="current", row=2))
-        self.add_item(_AllianceHourSelect(self, target="current", row=3))
+        self.add_item(_AllianceTimeSelect(self, target="current", row=3))
         self.add_item(_AllianceCloseButton())
 
     def persist(self) -> None:
@@ -135,7 +136,7 @@ class _AllianceDaySelect(discord.ui.Select):
         )
 
 
-class _AllianceHourSelect(discord.ui.Select):
+class _AllianceTimeSelect(discord.ui.Select):
     def __init__(self, view: AllianceScheduleView, *, target: str, row: int) -> None:
         self.schedule_view = view
         self.target = target
@@ -144,15 +145,17 @@ class _AllianceHourSelect(discord.ui.Select):
             getattr(view.config, f"alliance_{target}_time"),
             fallback,
         )
-        placeholder = f"{current_time.hour:02d}:00"
-        options = [
-            discord.SelectOption(
-                label=f"{hour:02d}:00",
-                value=str(hour),
-                default=hour == current_time.hour,
-            )
-            for hour in range(24)
-        ]
+        placeholder = f"{current_time.hour:02d}:{current_time.minute:02d}"
+        options: list[discord.SelectOption] = []
+        for hour in range(24):
+            for minute in TIME_OPTION_MINUTES:
+                options.append(
+                    discord.SelectOption(
+                        label=f"{hour:02d}:{minute:02d}",
+                        value=f"{hour:02d}:{minute:02d}",
+                        default=hour == current_time.hour and minute == current_time.minute,
+                    )
+                )
         super().__init__(
             placeholder=placeholder,
             min_values=1,
@@ -163,18 +166,17 @@ class _AllianceHourSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         try:
-            hour_value = int(self.values[0])
+            selected = self.values[0]
+            hour_text, minute_text = selected.split(":", maxsplit=1)
+            hour_value = int(hour_text)
+            minute_value = int(minute_text)
         except (TypeError, ValueError, IndexError):
             hour_value = 0
-        self.placeholder = f"{hour_value:02d}:00"
+            minute_value = 0
+        self.placeholder = f"{hour_value:02d}:{minute_value:02d}"
         for option in self.options:
-            option.default = option.value == str(hour_value)
-        fallback = PREDICTION_TIME if self.target == "prediction" else RESET_TIME
-        base_time = self.schedule_view.cog._resolve_post_time(
-            getattr(self.schedule_view.config, f"alliance_{self.target}_time"),
-            fallback,
-        )
-        new_time = time(hour_value, 0)
+            option.default = option.value == f"{hour_value:02d}:{minute_value:02d}"
+        new_time = time(hour_value, minute_value)
         setattr(
             self.schedule_view.config,
             f"alliance_{self.target}_time",
