@@ -72,10 +72,8 @@ class AllianceScheduleView(discord.ui.View):
         self.cog = cog
         self.guild = guild
         self.config = config
-        self.add_item(_AllianceLabelButton(label="Prediction", row=0))
         self.add_item(_AllianceDaySelect(self, target="prediction", row=0))
         self.add_item(_AllianceHourSelect(self, target="prediction", row=1))
-        self.add_item(_AllianceLabelButton(label="Current", row=2))
         self.add_item(_AllianceDaySelect(self, target="current", row=2))
         self.add_item(_AllianceHourSelect(self, target="current", row=3))
         self.add_item(_AllianceCloseButton())
@@ -101,14 +99,6 @@ class AllianceScheduleView(discord.ui.View):
             item.disabled = True
 
 
-class _AllianceLabelButton(discord.ui.Button[AllianceScheduleView]):
-    def __init__(self, *, label: str, row: int) -> None:
-        super().__init__(style=discord.ButtonStyle.secondary, label=label, disabled=True, row=row)
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
-
-
 class _AllianceDaySelect(discord.ui.Select):
     def __init__(self, view: AllianceScheduleView, *, target: str, row: int) -> None:
         self.schedule_view = view
@@ -122,7 +112,7 @@ class _AllianceDaySelect(discord.ui.Select):
             for index in range(7)
         ]
         super().__init__(
-            placeholder="Day",
+            placeholder=f"{target.capitalize()} day",
             min_values=1,
             max_values=1,
             options=options,
@@ -160,7 +150,7 @@ class _AllianceHourSelect(discord.ui.Select):
             for hour in range(24)
         ]
         super().__init__(
-            placeholder="Hour",
+            placeholder=f"{target.capitalize()} hour",
             min_values=1,
             max_values=1,
             options=options,
