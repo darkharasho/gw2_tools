@@ -89,7 +89,7 @@ class AllianceScheduleView(discord.ui.View):
         return (
             "Use the dropdowns below to configure when alliance matchup posts are sent.\n"
             f"**Prediction:** {self.cog._format_day(prediction_day)} at "
-            f"**{self.cog._format_time(prediction_time)}** PST\n"
+            f"**{self.cog._format_time(prediction_time)}** PST\n\n"
             f"**Current:** {self.cog._format_day(current_day)} at "
             f"**{self.cog._format_time(current_time)}** PST"
         )
@@ -112,7 +112,7 @@ class _AllianceDaySelect(discord.ui.Select):
             for index in range(7)
         ]
         super().__init__(
-            placeholder=f"{target.capitalize()} day",
+            placeholder="Day",
             min_values=1,
             max_values=1,
             options=options,
@@ -150,7 +150,7 @@ class _AllianceHourSelect(discord.ui.Select):
             for hour in range(24)
         ]
         super().__init__(
-            placeholder=f"{target.capitalize()} hour",
+            placeholder="Hour",
             min_values=1,
             max_values=1,
             options=options,
