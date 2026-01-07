@@ -73,14 +73,39 @@ class AllianceScheduleView(discord.ui.View):
         self.cog = cog
         self.guild = guild
         self.config = config
-        self.add_item(_AllianceDaySelect(self, target="prediction", row=0))
-        self.add_item(_AllianceTimeSelect(self, target="prediction", row=1))
-        self.add_item(_AllianceDaySelect(self, target="current", row=2))
-        self.add_item(_AllianceTimeSelect(self, target="current", row=3))
-        self.add_item(_AllianceCloseButton())
+        self.active_target = "prediction"
+        self.target_select = _AllianceTargetSelect(self, row=0)
+        self.day_select = _AllianceDaySelect(self, row=1)
+        self.hour_select = _AllianceHourSelect(self, row=2)
+        self.minute_select = _AllianceMinuteSelect(self, row=3)
+        self.close_button = _AllianceCloseButton()
+        self.add_item(self.target_select)
+        self.add_item(self.day_select)
+        self.add_item(self.hour_select)
+        self.add_item(self.minute_select)
+        self.add_item(self.close_button)
+        self.sync_selects()
 
     def persist(self) -> None:
         self.cog.bot.save_config(self.guild.id, self.config)
+
+    def _current_time(self) -> time:
+        fallback = PREDICTION_TIME if self.active_target == "prediction" else RESET_TIME
+        return self.cog._resolve_post_time(
+            getattr(self.config, f"alliance_{self.active_target}_time"),
+            fallback,
+        )
+
+    def sync_selects(self) -> None:
+        current_day = self.cog._resolve_post_day(
+            getattr(self.config, f"alliance_{self.active_target}_day"),
+            DEFAULT_POST_DAY,
+        )
+        current_time = self._current_time()
+        self.target_select.sync(current=self.active_target)
+        self.day_select.sync(current_day=current_day)
+        self.hour_select.sync(current_hour=current_time.hour)
+        self.minute_select.sync(current_minute=current_time.minute)
 
     def build_message(self) -> str:
         prediction_day = self.cog._resolve_post_day(self.config.alliance_prediction_day, DEFAULT_POST_DAY)
@@ -100,93 +125,132 @@ class AllianceScheduleView(discord.ui.View):
             item.disabled = True
 
 
-class _AllianceDaySelect(discord.ui.Select):
-    def __init__(self, view: AllianceScheduleView, *, target: str, row: int) -> None:
+class _AllianceTargetSelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
         self.schedule_view = view
-        self.target = target
-        current_day = view.cog._resolve_post_day(
-            getattr(view.config, f"alliance_{target}_day"),
-            DEFAULT_POST_DAY,
-        )
         options = [
-            discord.SelectOption(label=calendar.day_name[index], value=str(index), default=index == current_day)
-            for index in range(7)
+            discord.SelectOption(label="Prediction schedule", value="prediction"),
+            discord.SelectOption(label="Current schedule", value="current"),
         ]
         super().__init__(
-            placeholder=calendar.day_name[current_day],
+            placeholder="Select schedule",
             min_values=1,
             max_values=1,
             options=options,
             row=row,
         )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        selected = self.values[0] if self.values else "prediction"
+        if selected not in {"prediction", "current"}:
+            selected = "prediction"
+        self.schedule_view.active_target = selected
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
+
+    def sync(self, *, current: str) -> None:
+        for option in self.options:
+            option.default = option.value == current
+        self.placeholder = "Prediction schedule" if current == "prediction" else "Current schedule"
+
+
+class _AllianceDaySelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
+        self.schedule_view = view
+        options = [discord.SelectOption(label=calendar.day_name[index], value=str(index)) for index in range(7)]
+        super().__init__(
+            placeholder="Select day",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=row,
+        )
+
+    def sync(self, *, current_day: int) -> None:
+        self.placeholder = calendar.day_name[current_day]
+        for option in self.options:
+            option.default = option.value == str(current_day)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         try:
             day_value = int(self.values[0])
         except (TypeError, ValueError, IndexError):
             day_value = DEFAULT_POST_DAY
-        self.placeholder = calendar.day_name[day_value]
-        for option in self.options:
-            option.default = option.value == str(day_value)
-        setattr(self.schedule_view.config, f"alliance_{self.target}_day", day_value)
+        setattr(self.schedule_view.config, f"alliance_{self.schedule_view.active_target}_day", day_value)
         self.schedule_view.persist()
-        await interaction.response.edit_message(
-            content=self.schedule_view.build_message(),
-            view=self.schedule_view,
-        )
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
 
 
-class _AllianceTimeSelect(discord.ui.Select):
-    def __init__(self, view: AllianceScheduleView, *, target: str, row: int) -> None:
+class _AllianceHourSelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
         self.schedule_view = view
-        self.target = target
-        fallback = PREDICTION_TIME if target == "prediction" else RESET_TIME
-        current_time = view.cog._resolve_post_time(
-            getattr(view.config, f"alliance_{target}_time"),
-            fallback,
-        )
-        placeholder = f"{current_time.hour:02d}:{current_time.minute:02d}"
-        options: list[discord.SelectOption] = []
-        for hour in range(24):
-            for minute in TIME_OPTION_MINUTES:
-                options.append(
-                    discord.SelectOption(
-                        label=f"{hour:02d}:{minute:02d}",
-                        value=f"{hour:02d}:{minute:02d}",
-                        default=hour == current_time.hour and minute == current_time.minute,
-                    )
-                )
+        options = [discord.SelectOption(label=f"{hour:02d}", value=str(hour)) for hour in range(24)]
         super().__init__(
-            placeholder=placeholder,
+            placeholder="Select hour",
             min_values=1,
             max_values=1,
             options=options,
             row=row,
         )
 
+    def sync(self, *, current_hour: int) -> None:
+        self.placeholder = f"{current_hour:02d}"
+        for option in self.options:
+            option.default = option.value == str(current_hour)
+
     async def callback(self, interaction: discord.Interaction) -> None:
         try:
-            selected = self.values[0]
-            hour_text, minute_text = selected.split(":", maxsplit=1)
-            hour_value = int(hour_text)
-            minute_value = int(minute_text)
+            hour_value = int(self.values[0])
         except (TypeError, ValueError, IndexError):
             hour_value = 0
-            minute_value = 0
-        self.placeholder = f"{hour_value:02d}:{minute_value:02d}"
-        for option in self.options:
-            option.default = option.value == f"{hour_value:02d}:{minute_value:02d}"
-        new_time = time(hour_value, minute_value)
+        base_time = self.schedule_view._current_time()
+        new_time = time(hour_value, base_time.minute)
         setattr(
             self.schedule_view.config,
-            f"alliance_{self.target}_time",
+            f"alliance_{self.schedule_view.active_target}_time",
             self.schedule_view.cog._format_time(new_time),
         )
         self.schedule_view.persist()
-        await interaction.response.edit_message(
-            content=self.schedule_view.build_message(),
-            view=self.schedule_view,
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
+
+
+class _AllianceMinuteSelect(discord.ui.Select):
+    def __init__(self, view: AllianceScheduleView, *, row: int) -> None:
+        self.schedule_view = view
+        options = [
+            discord.SelectOption(label=f"{minute:02d}", value=str(minute))
+            for minute in TIME_OPTION_MINUTES
+        ]
+        super().__init__(
+            placeholder="Select minute",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=row,
         )
+
+    def sync(self, *, current_minute: int) -> None:
+        self.placeholder = f"{current_minute:02d}"
+        for option in self.options:
+            option.default = option.value == str(current_minute)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        try:
+            minute_value = int(self.values[0])
+        except (TypeError, ValueError, IndexError):
+            minute_value = 0
+        base_time = self.schedule_view._current_time()
+        new_time = time(base_time.hour, minute_value)
+        setattr(
+            self.schedule_view.config,
+            f"alliance_{self.schedule_view.active_target}_time",
+            self.schedule_view.cog._format_time(new_time),
+        )
+        self.schedule_view.persist()
+        self.schedule_view.sync_selects()
+        await interaction.response.edit_message(content=self.schedule_view.build_message(), view=self.schedule_view)
 
 
 class _AllianceCloseButton(discord.ui.Button[AllianceScheduleView]):
