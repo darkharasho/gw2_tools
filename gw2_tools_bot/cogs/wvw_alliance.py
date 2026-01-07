@@ -174,7 +174,7 @@ class _AllianceHourSelect(discord.ui.Select):
             getattr(self.schedule_view.config, f"alliance_{self.target}_time"),
             fallback,
         )
-        new_time = time(hour_value, base_time.minute)
+        new_time = time(hour_value, 0)
         setattr(
             self.schedule_view.config,
             f"alliance_{self.target}_time",
