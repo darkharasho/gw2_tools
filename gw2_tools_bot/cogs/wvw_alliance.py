@@ -662,7 +662,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
             if sheet_name:
                 sheet_ref = quote(f"{sheet_name}!A1")
-                return f"{SHEET_EDIT_URL}#gid=0&range={sheet_ref}"
+                return f"{SHEET_EDIT_URL}#range={sheet_ref}"
         return None
 
     def _build_embed(
