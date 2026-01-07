@@ -791,13 +791,15 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poster_loop(self) -> None:  # pragma: no cover - requires Discord
         if not self.bot.guilds:
+            LOGGER.info("Alliance schedule loop skipped: bot is not in any guilds.")
             return
         now = datetime.now(PST)
         now_time = now.time().replace(second=0, microsecond=0)
+        LOGGER.info("Alliance schedule loop tick at %s PST", now.isoformat())
         for guild in self.bot.guilds:
             config = self.bot.get_config(guild.id)
             if not config.alliance_channel_id or not config.alliance_guild_id:
-                LOGGER.debug(
+                LOGGER.info(
                     "Skipping alliance schedule for guild %s (channel_id=%s, guild_id=%s)",
                     guild.id,
                     config.alliance_channel_id,
@@ -806,13 +808,13 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 continue
             channel = await self._resolve_channel(guild, config.alliance_channel_id)
             if not channel:
-                LOGGER.debug("Skipping alliance schedule for guild %s (channel not found)", guild.id)
+                LOGGER.info("Skipping alliance schedule for guild %s (channel not found)", guild.id)
                 continue
             prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
             current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
             prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
             current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
-            LOGGER.debug(
+            LOGGER.info(
                 "Alliance schedule check guild=%s now=%s pred_day=%s pred_time=%s curr_day=%s curr_time=%s",
                 guild.id,
                 now.isoformat(),
@@ -827,9 +829,9 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                         LOGGER.info("Posting alliance prediction matchup for guild %s", guild.id)
                         await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
                     else:
-                        LOGGER.debug("Prediction matchup already posted today for guild %s", guild.id)
+                        LOGGER.info("Prediction matchup already posted today for guild %s", guild.id)
                 else:
-                    LOGGER.debug(
+                    LOGGER.info(
                         "Prediction matchup not due yet for guild %s (now=%s, target=%s)",
                         guild.id,
                         now_time,
@@ -840,7 +842,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                     LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
                     await self._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
                 else:
-                    LOGGER.debug("Current matchup already posted today for guild %s", guild.id)
+                    LOGGER.info("Current matchup already posted today for guild %s", guild.id)
 
     @_poster_loop.before_loop
     async def _before_loop(self) -> None:  # pragma: no cover - discord.py lifecycle
