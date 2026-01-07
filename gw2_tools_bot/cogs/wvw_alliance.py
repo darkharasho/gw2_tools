@@ -119,6 +119,31 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         except ValueError:
             return None
 
+    def _parse_hhmm(self, value: Optional[str]) -> Optional[time]:
+        if not value:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        parts = cleaned.split(":")
+        if len(parts) != 2:
+            return None
+        try:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+        except ValueError:
+            return None
+        if not (0 <= hours <= 23 and 0 <= minutes <= 59):
+            return None
+        return time(hours, minutes)
+
+    def _resolve_post_time(self, value: Optional[str], fallback: time) -> time:
+        parsed = self._parse_hhmm(value)
+        return parsed if parsed else fallback
+
+    def _format_time(self, value: time) -> str:
+        return value.strftime("%H:%M")
+
     async def _lookup_guild(self, name: str) -> Optional[tuple[str, str]]:
         try:
             results = await self._fetch_json(GW2_GUILD_SEARCH_URL, params={"name": name})
@@ -571,10 +596,12 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             channel = await self._resolve_channel(guild, config.alliance_channel_id)
             if not channel:
                 continue
-            if now.time() >= PREDICTION_TIME and now.time() < RESET_TIME:
+            prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
+            current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
+            if now.time() >= prediction_time and now.time() < current_time:
                 if not self._already_posted(config.alliance_last_prediction_at, now):
                     await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
-            if now.time() >= RESET_TIME:
+            if now.time() >= current_time:
                 if not self._already_posted(config.alliance_last_actual_at, now):
                     await self._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
 
@@ -626,6 +653,32 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             f"Alliance matchup posts will be sent to {channel.mention}.", ephemeral=True
         )
 
+    @app_commands.command(
+        name="settimes",
+        description="Set the predictive and current matchup post times (PST).",
+    )
+    async def set_times(self, interaction: discord.Interaction, prediction_time: str, current_time: str) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        prediction = self._parse_hhmm(prediction_time)
+        current = self._parse_hhmm(current_time)
+        if not prediction or not current:
+            await interaction.response.send_message(
+                "Please provide both times in 24h HH:MM format (for example, 09:00 19:30).",
+                ephemeral=True,
+            )
+            return
+        config = self.bot.get_config(interaction.guild.id)
+        config.alliance_prediction_time = self._format_time(prediction)
+        config.alliance_current_time = self._format_time(current)
+        self.bot.save_config(interaction.guild.id, config)
+        await interaction.response.send_message(
+            f"Alliance matchup posts scheduled for **{config.alliance_prediction_time}** and "
+            f"**{config.alliance_current_time}** PST.",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="status", description="Show alliance matchup configuration.")
     async def status(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -640,10 +693,19 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         )
         channel_label = channel_obj.mention if channel_obj else "Not set"
         world_label = config.alliance_server_name or "Unknown"
+        prediction_time = self._format_time(
+            self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
+        )
+        current_time = self._format_time(self._resolve_post_time(config.alliance_current_time, RESET_TIME))
         embed = discord.Embed(title="Alliance matchup settings", color=BRAND_COLOUR)
         embed.add_field(name="Guild", value=guild_label, inline=False)
         embed.add_field(name="Channel", value=channel_label, inline=False)
         embed.add_field(name="WvW World", value=world_label, inline=False)
+        embed.add_field(
+            name="Post Times (PST)",
+            value=f"Prediction: **{prediction_time}**\nCurrent: **{current_time}**",
+            inline=False,
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
