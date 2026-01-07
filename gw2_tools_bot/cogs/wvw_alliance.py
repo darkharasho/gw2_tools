@@ -32,6 +32,7 @@ GW2_GUILD_WVW_URLS = (
 GW2_MATCHES_URL = "https://api.guildwars2.com/v2/wvw/matches"
 SHEET_ID = "1Txjpcet-9FDVek6uJ0N3OciwgbpE0cfWozUK7ATfWx4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq"
+SHEET_EDIT_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
 WVW_MATCHES = ["1-1", "1-2", "1-3", "1-4"]
 
 PST = ZoneInfo("America/Los_Angeles")
@@ -659,7 +660,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         for world_id in world_ids:
             sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
             if sheet_name:
-                return f"{SHEET_URL}?sheet={sheet_name}"
+                return f"{SHEET_EDIT_URL}?sheet={sheet_name}"
         return None
 
     def _build_embed(
