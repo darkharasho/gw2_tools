@@ -805,14 +805,9 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
             current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
             if now.weekday() == prediction_day:
-                if prediction_day == current_day:
-                    if now.time() >= prediction_time and now.time() < current_time:
-                        if not self._already_posted(config.alliance_last_prediction_at, now):
-                            await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
-                else:
-                    if now.time() >= prediction_time:
-                        if not self._already_posted(config.alliance_last_prediction_at, now):
-                            await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
+                if now.time() >= prediction_time:
+                    if not self._already_posted(config.alliance_last_prediction_at, now):
+                        await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
             if now.weekday() == current_day and now.time() >= current_time:
                 if not self._already_posted(config.alliance_last_actual_at, now):
                     await self._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
