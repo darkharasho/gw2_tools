@@ -648,6 +648,13 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         trimmed = _trim_lines(lines, max_length)
         return "\n".join(trimmed) + "\n…"
 
+    def _trim_field_value(self, value: str, max_length: int = 1024) -> str:
+        if len(value) <= max_length:
+            return value
+        if max_length <= 1:
+            return value[:max_length]
+        return value[: max_length - 1].rstrip() + "…"
+
     def _resolve_sheet_url(self, world_ids: Sequence[int]) -> Optional[str]:
         for world_id in world_ids:
             sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
@@ -700,6 +707,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             value = self._format_alliance_list(alliance_list)
             if sheet_url:
                 value = f"[source]({sheet_url})\n{value}"
+            value = self._trim_field_value(value)
             embed.add_field(name=name, value=value, inline=True)
 
         return embed
