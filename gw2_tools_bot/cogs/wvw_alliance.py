@@ -648,6 +648,13 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         trimmed = _trim_lines(lines, max_length)
         return "\n".join(trimmed) + "\n…"
 
+    def _resolve_sheet_url(self, world_ids: Sequence[int]) -> Optional[str]:
+        for world_id in world_ids:
+            sheet_name = WVW_ALLIANCE_SHEET_TABS.get(world_id)
+            if sheet_name:
+                return f"{SHEET_URL}?sheet={sheet_name}"
+        return None
+
     def _build_embed(
         self,
         *,
@@ -687,7 +694,11 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             color_name = team.color.capitalize()
             if is_home:
                 continue
-            name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — {world_label}"
+            sheet_url = self._resolve_sheet_url(team.world_ids)
+            if sheet_url:
+                name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — [{world_label}]({sheet_url})"
+            else:
+                name = f"{COLOR_EMOJI.get(team.color, '')} {color_name} — {world_label}"
             alliance_list = alliances.get(world_label, AllianceRoster(alliances=[], solo_guilds=[]))
             value = self._format_alliance_list(alliance_list)
             embed.add_field(name=name, value=value, inline=True)
