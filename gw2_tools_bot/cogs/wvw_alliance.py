@@ -676,33 +676,43 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return f"{SHEET_EDIT_URL}#range={sheet_ref}"
         return None
 
+    def _calculate_team_confidence(
+        self,
+        teams: Sequence[MatchTeam],
+        target_team: MatchTeam,
+        remaining_swing: int,
+    ) -> Optional[int]:
+        if len(teams) < 2:
+            return None
+        ranked = sorted(teams, key=lambda team: team.victory_points, reverse=True)
+        try:
+            target_index = ranked.index(target_team)
+        except ValueError:
+            return None
+        gap = 0
+        if target_index == 0:
+            gap = max(0, target_team.victory_points - ranked[1].victory_points)
+        elif target_index == len(ranked) - 1:
+            gap = max(0, ranked[-2].victory_points - target_team.victory_points)
+        else:
+            gap_to_top = max(0, ranked[target_index - 1].victory_points - target_team.victory_points)
+            gap_to_bottom = max(0, target_team.victory_points - ranked[target_index + 1].victory_points)
+            gap = min(gap_to_top, gap_to_bottom)
+
+        if remaining_swing <= 0:
+            return 100 if gap > 0 else 0
+        ratio = gap / remaining_swing
+        confidence = round(max(0.0, min(ratio, 1.0)) * 100)
+        return confidence
+
     def _calculate_confidence(self, teams: Sequence[MatchTeam], home_world_id: int) -> Optional[int]:
         if len(teams) < 2:
             return None
         home_team = next((team for team in teams if home_world_id in team.world_ids), None)
         if not home_team:
             return None
-        ranked = sorted(teams, key=lambda team: team.victory_points, reverse=True)
-        try:
-            home_index = ranked.index(home_team)
-        except ValueError:
-            return None
-        gap = 0
-        if home_index == 0:
-            gap = max(0, home_team.victory_points - ranked[1].victory_points)
-        elif home_index == len(ranked) - 1:
-            gap = max(0, ranked[-2].victory_points - home_team.victory_points)
-        else:
-            gap_to_top = max(0, ranked[home_index - 1].victory_points - home_team.victory_points)
-            gap_to_bottom = max(0, home_team.victory_points - ranked[home_index + 1].victory_points)
-            gap = min(gap_to_top, gap_to_bottom)
-
         remaining_swing = self._remaining_skirmish_swing()
-        if remaining_swing <= 0:
-            return 100 if gap > 0 else 0
-        ratio = gap / remaining_swing
-        confidence = round(max(0.0, min(ratio, 1.0)) * 100)
-        return confidence
+        return self._calculate_team_confidence(teams, home_team, remaining_swing)
 
     def _remaining_skirmish_swing(self, now: Optional[datetime] = None) -> int:
         current = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
@@ -767,7 +777,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             embed.add_field(name=name, value=value, inline=True)
 
         if confidence is not None:
-            embed.set_footer(text=f"Home team prediction confidence: {confidence}%")
+            footer_parts = [f"Home: {confidence}%"]
+            remaining_swing = self._remaining_skirmish_swing()
+            for team in teams:
+                if home_world_id in team.world_ids:
+                    continue
+                opponent_confidence = self._calculate_team_confidence(teams, team, remaining_swing)
+                if opponent_confidence is None:
+                    continue
+                footer_parts.append(f"{team.color.capitalize()}: {opponent_confidence}%")
+            footer = "Prediction confidence — " + " | ".join(footer_parts)
+            embed.set_footer(text=footer)
 
         return embed
 
