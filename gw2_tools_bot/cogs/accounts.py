@@ -432,21 +432,6 @@ class AccountsCog(commands.Cog):
     def _has_guild_permission(self, record: ApiKeyRecord) -> bool:
         return "guilds" in {value.lower() for value in record.permissions}
 
-    def _find_leader_record(
-        self, records: Sequence[ApiKeyRecord], members: Sequence[Dict[str, object]]
-    ) -> Optional[ApiKeyRecord]:
-        leader_names = {
-            self._normalise_account_name(entry["name"])
-            for entry in members
-            if entry.get("rank")
-            and isinstance(entry.get("rank"), str)
-            and "leader" in str(entry.get("rank")).casefold()
-        }
-        for record in records:
-            if record.account_name and self._normalise_account_name(record.account_name) in leader_names:
-                return record
-        return None
-
     async def _fetch_guild_members_for_audit(
         self, guild: discord.Guild, guild_id: str
     ) -> List[Dict[str, object]]:
@@ -466,27 +451,10 @@ class AccountsCog(commands.Cog):
         last_error: Optional[ValueError] = None
         for record in candidates:
             try:
-                members = await self._fetch_guild_members(guild_id, api_key=record.key)
+                return await self._fetch_guild_members(guild_id, api_key=record.key)
             except ValueError as exc:
                 last_error = exc
                 continue
-
-            leader_record = self._find_leader_record(candidates, members)
-            if not leader_record:
-                raise ValueError(
-                    "No stored API key belonging to a guild leader was found for that guild. "
-                    "Ask a guild leader to add their API key with /apikey add."
-                )
-
-            if leader_record is record:
-                return members
-
-            try:
-                members = await self._fetch_guild_members(guild_id, api_key=leader_record.key)
-            except ValueError as exc:
-                last_error = exc
-            else:
-                return members
 
         if last_error:
             raise ValueError(
@@ -494,7 +462,7 @@ class AccountsCog(commands.Cog):
                 "Ask a guild leader to add their API key with /apikey add."
             ) from last_error
         raise ValueError(
-            "No stored API key belonging to a guild leader was found for that guild. "
+            "Stored API keys could not access the guild roster. "
             "Ask a guild leader to add their API key with /apikey add."
         )
 
@@ -1039,7 +1007,7 @@ class AccountsCog(commands.Cog):
 
         summary_lines = [
             "**Guild membership audit**",
-            "Compared live Guild Wars 2 guild membership against current Discord role assignments using stored guild leader API keys to avoid stale data.",
+            "Compared live Guild Wars 2 guild membership against current Discord role assignments using stored API keys to avoid stale data.",
             "",
             f"Guild: {guild_label}",
             f"Guild ID: `{guild_id}`",
