@@ -853,7 +853,6 @@ class AccountsCog(commands.Cog):
 
         discrepancy_rows: List[Sequence[str]] = []
         csv_rows: List[Sequence[str]] = []
-        processed_accounts: set[str] = set()
 
         account_records: Dict[str, List[Tuple[int, ApiKeyRecord]]] = defaultdict(list)
         user_records: Dict[int, List[ApiKeyRecord]] = defaultdict(list)
@@ -866,6 +865,88 @@ class AccountsCog(commands.Cog):
                     (user_id, record)
                 )
 
+        target_guild_tag = guild_tag_for_id(guild_id)
+        missing_role_label = self._strip_emoji(role.name) or "role"
+        alliance_member_lookup = (
+            {self._normalise_account_name(str(entry["name"])) for entry in wvw_members_source}
+            if alliance_guild_id
+            else set()
+        )
+
+        for normalized_name, original_name in guild_member_lookup.items():
+            records = account_records.get(normalized_name, [])
+            selected_member: Optional[discord.Member] = None
+            selected_record: Optional[ApiKeyRecord] = None
+            if records:
+                for user_id, record in records:
+                    member = interaction.guild.get_member(user_id)
+                    if member:
+                        selected_member = member
+                        selected_record = record
+                        break
+                if not selected_record:
+                    selected_record = records[0][1]
+                    selected_member = (
+                        interaction.guild.get_member(records[0][0])
+                        if records
+                        else None
+                    )
+
+            display_name = (
+                self._strip_emoji(selected_member.display_name)
+                if selected_member
+                else "—"
+            )
+            roles = (
+                ", ".join(
+                    sorted(
+                        self._strip_emoji(role.name)
+                        for role in selected_member.roles
+                        if role.name and not role.is_default()
+                    )
+                )
+                if selected_member
+                else "—"
+            )
+            guild_tags = (
+                ", ".join(guild_tags_for_member(selected_member)) or target_guild_tag
+                if selected_member
+                else target_guild_tag
+            )
+            account_label = self._strip_emoji(
+                selected_record.account_name if selected_record and selected_record.account_name else original_name
+            )
+
+            issues: List[str] = []
+            if not records:
+                issues.append("No API key")
+            else:
+                has_role = selected_member is not None and role in selected_member.roles
+                if not has_role:
+                    issues.append(
+                        f"Missing {missing_role_label} role for {guild_labels.get(guild_id, guild_id)}"
+                    )
+
+            if alliance_guild_id:
+                if normalized_name not in alliance_member_lookup:
+                    issues.append("Not in alliance guild")
+                elif not member_wvw_lookup.get(normalized_name, False):
+                    issues.append("Not WvW member")
+            elif not member_wvw_lookup.get(normalized_name, False):
+                issues.append("Not WvW member")
+
+            combined_issues = "; ".join(issues) if issues else "None"
+            discrepancy_rows.append((display_name, account_label, guild_tags, combined_issues))
+            csv_rows.append(
+                (
+                    self._strip_emoji(selected_member.name) if selected_member else "—",
+                    account_label,
+                    guild_tags,
+                    combined_issues,
+                    roles,
+                )
+            )
+
         for member in role.members:
             records = [
                 record
@@ -877,10 +958,6 @@ class AccountsCog(commands.Cog):
             account_names = {
                 record.account_name for record in records if record.account_name
             }
-            normalized_accounts = {
-                self._normalise_account_name(name) for name in account_names if name
-            }
-            processed_accounts.update(normalized_accounts)
 
             display_name = self._strip_emoji(member.display_name)
             roles = ", ".join(
@@ -907,101 +984,21 @@ class AccountsCog(commands.Cog):
 
             for account_name in sorted(account_names):
                 normalised = self._normalise_account_name(account_name)
-                in_guild = normalised in guild_member_lookup
-                is_wvw = normalised in wvw_members
+                if normalised in guild_member_lookup:
+                    continue
                 clean_account = self._strip_emoji(account_name)
-
-                issues: List[str] = []
-                if not in_guild:
-                    issues.append("Not in guild")
-                if in_guild and not is_wvw:
-                    issues.append("Not WvW member")
-
-                if issues:
-                    combined_issues = "; ".join(issues)
-                    discrepancy_rows.append(
-                        (display_name, clean_account, guild_tags, combined_issues)
-                    )
-                    csv_rows.append(
-                        (
-                            self._strip_emoji(member.name),
-                            clean_account,
-                            guild_tags,
-                            combined_issues,
-                            roles,
-                        )
-                    )
-
-        target_guild_tag = guild_tag_for_id(guild_id)
-        missing_role_label = self._strip_emoji(role.name) or "role"
-        for normalized_name, original_name in guild_member_lookup.items():
-            if normalized_name in processed_accounts:
-                continue
-
-            records = account_records.get(normalized_name)
-            if not records:
                 discrepancy_rows.append(
-                    ("—", self._strip_emoji(original_name), target_guild_tag, "No API key")
+                    (display_name, clean_account, guild_tags, "Not in guild")
                 )
                 csv_rows.append(
                     (
-                        "—",
-                        self._strip_emoji(original_name),
-                        target_guild_tag,
-                        "No API key",
-                        "—",
+                        self._strip_emoji(member.name),
+                        clean_account,
+                        guild_tags,
+                        "Not in guild",
+                        roles,
                     )
                 )
-                continue
-
-            for user_id, record in records:
-                member = interaction.guild.get_member(user_id)
-                display_name = (
-                    self._strip_emoji(member.display_name) if member else "—"
-                )
-                roles = (
-                    ", ".join(
-                        sorted(
-                            self._strip_emoji(role.name)
-                            for role in member.roles
-                            if role.name and not role.is_default()
-                        )
-                    )
-                    if member
-                    else "—"
-                )
-                guild_tags = (
-                    ", ".join(guild_tags_for_member(member)) or target_guild_tag
-                    if member
-                    else target_guild_tag
-                )
-
-                issues: List[str] = []
-                has_role = member is not None and role in member.roles
-                if not has_role:
-                    issues.append(f"Not in {missing_role_label}")
-                if not member_wvw_lookup.get(normalized_name, False):
-                    issues.append("Not WvW member")
-
-                if issues:
-                    combined_issues = "; ".join(issues)
-                    discrepancy_rows.append(
-                        (
-                            display_name,
-                            self._strip_emoji(record.account_name or original_name),
-                            guild_tags,
-                            combined_issues,
-                        )
-                    )
-                    csv_rows.append(
-                        (
-                            self._strip_emoji(member.name) if member else "—",
-                            self._strip_emoji(record.account_name or original_name),
-                            guild_tags,
-                            combined_issues,
-                            roles,
-                        )
-                    )
 
         guild_label = guild_labels.get(guild_id, guild_id)
 
