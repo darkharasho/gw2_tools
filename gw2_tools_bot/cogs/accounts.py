@@ -400,10 +400,12 @@ class AccountsCog(commands.Cog):
             name = entry.get("name")
             if not isinstance(name, str) or not name.strip():
                 continue
+            rank = entry.get("rank")
             members.append(
                 {
                     "name": name.strip(),
                     "wvw_member": bool(entry.get("wvw_member")),
+                    "rank": rank.strip() if isinstance(rank, str) else "",
                 }
             )
 
@@ -426,6 +428,75 @@ class AccountsCog(commands.Cog):
             if target in guild_memberships and "guilds" in permissions:
                 return record
         return None
+
+    def _has_guild_permission(self, record: ApiKeyRecord) -> bool:
+        return "guilds" in {value.lower() for value in record.permissions}
+
+    def _find_leader_record(
+        self, records: Sequence[ApiKeyRecord], members: Sequence[Dict[str, object]]
+    ) -> Optional[ApiKeyRecord]:
+        leader_names = {
+            self._normalise_account_name(entry["name"])
+            for entry in members
+            if entry.get("rank")
+            and isinstance(entry.get("rank"), str)
+            and "leader" in str(entry.get("rank")).casefold()
+        }
+        for record in records:
+            if record.account_name and self._normalise_account_name(record.account_name) in leader_names:
+                return record
+        return None
+
+    async def _fetch_guild_members_for_audit(
+        self, guild: discord.Guild, guild_id: str
+    ) -> List[Dict[str, object]]:
+        candidates = [
+            record
+            for _, _, record in self.bot.storage.query_api_keys(
+                guild_id=guild.id, gw2_guild_id=guild_id
+            )
+            if self._has_guild_permission(record)
+        ]
+        if not candidates:
+            raise ValueError(
+                "No stored API keys with the guilds permission were found for that guild. "
+                "Ask a guild leader to add their API key with /apikey add."
+            )
+
+        last_error: Optional[ValueError] = None
+        for record in candidates:
+            try:
+                members = await self._fetch_guild_members(guild_id, api_key=record.key)
+            except ValueError as exc:
+                last_error = exc
+                continue
+
+            leader_record = self._find_leader_record(candidates, members)
+            if not leader_record:
+                raise ValueError(
+                    "No stored API key belonging to a guild leader was found for that guild. "
+                    "Ask a guild leader to add their API key with /apikey add."
+                )
+
+            if leader_record is record:
+                return members
+
+            try:
+                members = await self._fetch_guild_members(guild_id, api_key=leader_record.key)
+            except ValueError as exc:
+                last_error = exc
+            else:
+                return members
+
+        if last_error:
+            raise ValueError(
+                "Stored API keys could not access the guild roster. "
+                "Ask a guild leader to add their API key with /apikey add."
+            ) from last_error
+        raise ValueError(
+            "No stored API key belonging to a guild leader was found for that guild. "
+            "Ask a guild leader to add their API key with /apikey add."
+        )
 
     @tasks.loop(hours=24 * 7)
     async def _member_cache_refresher(self) -> None:
@@ -731,19 +802,11 @@ class AccountsCog(commands.Cog):
                 ephemeral=ephemeral,
             )
             return
-
-        caller_key = self._find_user_guild_key(interaction.guild, interaction.user.id, guild_id)
-        if not caller_key:
-            await self._send_embed(
-                interaction,
-                title="Guild membership audit",
-                description=(
-                    "You need a stored API key with access to that guild. Use /apikey add with a key that"
-                    " belongs to the guild and includes the guilds permission, then try again."
-                ),
-                ephemeral=ephemeral,
-            )
-            return
+        alliance_guild_id = (
+            self._normalise_guild_id(config.alliance_guild_id)
+            if config.alliance_guild_id
+            else None
+        )
 
         await interaction.response.defer(ephemeral=ephemeral, thinking=True)
 
@@ -752,7 +815,14 @@ class AccountsCog(commands.Cog):
             chunk_task = asyncio.create_task(interaction.guild.chunk(cache=True))
 
         try:
-            members = await self._fetch_guild_members(guild_id, api_key=caller_key.key)
+            members = await self._fetch_guild_members_for_audit(
+                interaction.guild, guild_id
+            )
+            wvw_members_source = members
+            if alliance_guild_id and alliance_guild_id != guild_id:
+                wvw_members_source = await self._fetch_guild_members_for_audit(
+                    interaction.guild, alliance_guild_id
+                )
         except ValueError as exc:
             if chunk_task:
                 try:
@@ -771,6 +841,10 @@ class AccountsCog(commands.Cog):
 
         role_to_guild = {role_id: gid for gid, role_id in config.guild_role_ids.items()}
         guild_labels = self.bot.storage.get_guild_labels(role_to_guild.values())
+        alliance_label = None
+        if alliance_guild_id:
+            alliance_lookup = await self._cached_guild_labels([alliance_guild_id])
+            alliance_label = alliance_lookup.get(alliance_guild_id, alliance_guild_id)
 
         if chunk_task:
             try:
@@ -801,6 +875,9 @@ class AccountsCog(commands.Cog):
             name = str(entry["name"])
             normalized_name = self._normalise_account_name(name)
             guild_member_lookup[normalized_name] = name
+        for entry in wvw_members_source:
+            name = str(entry["name"])
+            normalized_name = self._normalise_account_name(name)
             is_wvw_member = bool(entry.get("wvw_member"))
             member_wvw_lookup[normalized_name] = is_wvw_member
             if is_wvw_member:
@@ -962,12 +1039,14 @@ class AccountsCog(commands.Cog):
 
         summary_lines = [
             "**Guild membership audit**",
-            "Compared live Guild Wars 2 guild membership against current Discord role assignments using your API key to avoid stale data.",
+            "Compared live Guild Wars 2 guild membership against current Discord role assignments using stored guild leader API keys to avoid stale data.",
             "",
             f"Guild: {guild_label}",
             f"Guild ID: `{guild_id}`",
             f"Role: {role.mention}",
         ]
+        if alliance_label:
+            summary_lines.append(f"Alliance WvW guild: {alliance_label}")
 
         report_table = self._format_table(
             ["Discord", "GW2 account", "Guilds", "Issue"],
@@ -1069,6 +1148,55 @@ class AccountsCog(commands.Cog):
             description=(
                 f"Members of `{cleaned_guild_id}` will receive the {role.mention} role when their API key is verified."
             ),
+        )
+
+    @guild_roles.command(
+        name="setalliance",
+        description="Set the alliance guild used for WvW membership checks in role audits.",
+    )
+    @app_commands.describe(guild_id="Guild Wars 2 guild ID to use for alliance WvW checks")
+    async def set_alliance_guild(
+        self, interaction: discord.Interaction, guild_id: str
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        cleaned_guild_id = self._normalise_guild_id(guild_id)
+        if not cleaned_guild_id:
+            await self._send_embed(
+                interaction,
+                title="Alliance guild",
+                description="Please provide a valid guild ID.",
+                colour=BRAND_COLOUR,
+            )
+            return
+
+        config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
+        config.alliance_guild_id = cleaned_guild_id
+        details = await self._cached_guild_labels([cleaned_guild_id])
+        alliance_label = details.get(cleaned_guild_id, cleaned_guild_id)
+        config.alliance_guild_name = alliance_label
+        self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
+        await self._send_embed(
+            interaction,
+            title="Alliance guild saved",
+            description=f"WvW membership checks will use **{alliance_label}**.",
+        )
+
+    @guild_roles.command(
+        name="clearalliance",
+        description="Clear the alliance guild used for WvW membership checks in role audits.",
+    )
+    async def clear_alliance_guild(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
+        config.alliance_guild_id = None
+        config.alliance_guild_name = None
+        self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
+        await self._send_embed(
+            interaction,
+            title="Alliance guild cleared",
+            description="WvW membership checks will use the audited guild roster.",
         )
 
     @guild_roles.command(name="remove", description="Remove a guild to role mapping.")
@@ -1868,4 +1996,3 @@ class AccountsCog(commands.Cog):
 
 async def setup(bot: GW2ToolsBot) -> None:
     await bot.add_cog(AccountsCog(bot))
-
