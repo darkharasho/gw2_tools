@@ -211,6 +211,9 @@ class GuildConfig:
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
     update_notes_channel_id: Optional[int] = None
+    audit_channel_id: Optional[int] = None
+    audit_gw2_admin_api_key: Optional[str] = None
+    audit_gw2_guild_id: Optional[str] = None
     alliance_channel_id: Optional[int] = None
     alliance_guild_id: Optional[str] = None
     alliance_guild_name: Optional[str] = None
@@ -869,6 +872,214 @@ class ApiKeyStore:
             connection.execute("DELETE FROM guild_details")
 
 
+class AuditStore:
+    """SQLite-backed audit log storage per Discord guild."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.path = root / "audit.sqlite"
+        self._ensure_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _ensure_schema(self) -> None:
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS discord_audit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    actor_id INTEGER,
+                    actor_name TEXT,
+                    actor_name_normalized TEXT,
+                    target_id INTEGER,
+                    target_name TEXT,
+                    target_name_normalized TEXT,
+                    details TEXT
+                );
+                CREATE TABLE IF NOT EXISTS gw2_audit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    log_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    user TEXT,
+                    user_normalized TEXT,
+                    details TEXT
+                );
+                CREATE TABLE IF NOT EXISTS gw2_sync_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    last_log_id INTEGER,
+                    last_checked_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_discord_audit_actor_id ON discord_audit_events(actor_id);
+                CREATE INDEX IF NOT EXISTS idx_discord_audit_target_id ON discord_audit_events(target_id);
+                CREATE INDEX IF NOT EXISTS idx_discord_audit_actor_name ON discord_audit_events(actor_name_normalized);
+                CREATE INDEX IF NOT EXISTS idx_discord_audit_target_name ON discord_audit_events(target_name_normalized);
+                CREATE INDEX IF NOT EXISTS idx_gw2_audit_user ON gw2_audit_events(user_normalized);
+                CREATE INDEX IF NOT EXISTS idx_gw2_audit_log_id ON gw2_audit_events(log_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_gw2_audit_log_unique ON gw2_audit_events(log_id);
+                """
+            )
+
+    @staticmethod
+    def _normalise_name(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        return str(value).strip().casefold()
+
+    def add_discord_event(
+        self,
+        *,
+        created_at: str,
+        event_type: str,
+        actor_id: Optional[int],
+        actor_name: Optional[str],
+        target_id: Optional[int],
+        target_name: Optional[str],
+        details: Optional[str],
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO discord_audit_events (
+                    created_at,
+                    event_type,
+                    actor_id,
+                    actor_name,
+                    actor_name_normalized,
+                    target_id,
+                    target_name,
+                    target_name_normalized,
+                    details
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    created_at,
+                    event_type,
+                    actor_id,
+                    actor_name,
+                    self._normalise_name(actor_name),
+                    target_id,
+                    target_name,
+                    self._normalise_name(target_name),
+                    details,
+                ),
+            )
+
+    def query_discord_events(
+        self,
+        *,
+        user_id: Optional[int] = None,
+        user_query: Optional[str] = None,
+        limit: int = 25,
+    ) -> List[sqlite3.Row]:
+        limit = max(1, min(limit, 100))
+        with self._connect() as connection:
+            if user_id is not None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM discord_audit_events
+                    WHERE actor_id = ? OR target_id = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (user_id, user_id, limit),
+                ).fetchall()
+            else:
+                query = self._normalise_name(user_query) or ""
+                like = f"%{query}%"
+                rows = connection.execute(
+                    """
+                    SELECT * FROM discord_audit_events
+                    WHERE actor_name_normalized LIKE ? OR target_name_normalized LIKE ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (like, like, limit),
+                ).fetchall()
+        return rows
+
+    def add_gw2_event(
+        self,
+        *,
+        created_at: str,
+        event_type: str,
+        user: Optional[str],
+        details: Optional[str],
+        log_id: Optional[int],
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO gw2_audit_events (
+                    log_id,
+                    created_at,
+                    event_type,
+                    user,
+                    user_normalized,
+                    details
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    log_id,
+                    created_at,
+                    event_type,
+                    user,
+                    self._normalise_name(user),
+                    details,
+                ),
+            )
+
+    def query_gw2_events(
+        self,
+        *,
+        user_query: Optional[str] = None,
+        limit: int = 25,
+    ) -> List[sqlite3.Row]:
+        limit = max(1, min(limit, 100))
+        query = self._normalise_name(user_query) or ""
+        like = f"%{query}%"
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM gw2_audit_events
+                WHERE user_normalized LIKE ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (like, limit),
+            ).fetchall()
+        return rows
+
+    def get_gw2_last_log_id(self) -> Optional[int]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT last_log_id FROM gw2_sync_state WHERE id = 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return row["last_log_id"]
+
+    def set_gw2_last_log_id(self, log_id: Optional[int], checked_at: Optional[str]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO gw2_sync_state (id, last_log_id, last_checked_at)
+                VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    last_log_id = excluded.last_log_id,
+                    last_checked_at = excluded.last_checked_at
+                """,
+                (log_id, checked_at),
+            )
+
+
 class StorageManager:
     """Handle isolated storage per guild to respect data privacy."""
 
@@ -876,6 +1087,7 @@ class StorageManager:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.api_key_store = ApiKeyStore(self.root)
+        self._audit_stores: Dict[int, AuditStore] = {}
 
     # ------------------------------------------------------------------
     # Generic helpers
@@ -884,6 +1096,13 @@ class StorageManager:
         guild_path = self.root / f"guild_{guild_id}"
         guild_path.mkdir(exist_ok=True)
         return guild_path
+
+    def get_audit_store(self, guild_id: int) -> AuditStore:
+        store = self._audit_stores.get(guild_id)
+        if store is None:
+            store = AuditStore(self._guild_path(guild_id))
+            self._audit_stores[guild_id] = store
+        return store
 
     def _read_json(self, path: Path, default: Any) -> Any:
         if not path.exists():
@@ -935,6 +1154,28 @@ class StorageManager:
             payload["comp_active_preset"] = active_preset.strip() or None
         else:
             payload["comp_active_preset"] = None
+        audit_channel_id = payload.get("audit_channel_id")
+        if isinstance(audit_channel_id, int):
+            payload["audit_channel_id"] = audit_channel_id
+        elif isinstance(audit_channel_id, str):
+            try:
+                payload["audit_channel_id"] = int(audit_channel_id)
+            except ValueError:
+                payload["audit_channel_id"] = None
+        else:
+            payload["audit_channel_id"] = None
+        audit_gw2_admin_api_key = payload.get("audit_gw2_admin_api_key")
+        if isinstance(audit_gw2_admin_api_key, str):
+            cleaned = audit_gw2_admin_api_key.strip()
+            payload["audit_gw2_admin_api_key"] = cleaned or None
+        else:
+            payload["audit_gw2_admin_api_key"] = None
+        audit_gw2_guild_id = payload.get("audit_gw2_guild_id")
+        if isinstance(audit_gw2_guild_id, str):
+            cleaned = normalise_guild_id(audit_gw2_guild_id)
+            payload["audit_gw2_guild_id"] = cleaned or None
+        else:
+            payload["audit_gw2_guild_id"] = None
         alliance_channel_id = payload.get("alliance_channel_id")
         if isinstance(alliance_channel_id, int):
             payload["alliance_channel_id"] = alliance_channel_id
@@ -1056,6 +1297,17 @@ class StorageManager:
                 config.alliance_current_day = int(config.alliance_current_day)
             else:
                 config.alliance_current_day = None
+        if config.audit_channel_id is not None:
+            try:
+                config.audit_channel_id = int(config.audit_channel_id)
+            except (TypeError, ValueError):
+                config.audit_channel_id = None
+        if config.audit_gw2_admin_api_key is not None:
+            cleaned = str(config.audit_gw2_admin_api_key).strip()
+            config.audit_gw2_admin_api_key = cleaned or None
+        if config.audit_gw2_guild_id is not None:
+            cleaned = normalise_guild_id(str(config.audit_gw2_guild_id))
+            config.audit_gw2_guild_id = cleaned or None
         if config.alliance_channel_id is not None:
             try:
                 config.alliance_channel_id = int(config.alliance_channel_id)
