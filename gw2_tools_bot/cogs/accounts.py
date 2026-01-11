@@ -923,9 +923,7 @@ class AccountsCog(commands.Cog):
             else:
                 has_role = selected_member is not None and role in selected_member.roles
                 if not has_role:
-                    issues.append(
-                        f"Missing {missing_role_label} role for {guild_labels.get(guild_id, guild_id)}"
-                    )
+                    issues.append(f"Missing {missing_role_label} role")
 
             if alliance_guild_id:
                 if normalized_name not in alliance_member_lookup:
