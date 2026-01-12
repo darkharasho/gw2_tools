@@ -75,8 +75,6 @@ def _format_channel_label(channel: discord.abc.GuildChannel | discord.Thread) ->
     name = getattr(channel, "name", "unknown")
     if isinstance(channel, discord.CategoryChannel):
         return name
-    if isinstance(channel, discord.CategoryChannel):
-        return name
     return getattr(channel, "mention", f"#{name}")
 
 
@@ -994,7 +992,7 @@ class AuditCog(commands.Cog):
             if guild is not None:
                 channel = guild.get_channel(channel_id)
                 if channel is not None:
-                    return _format_channel_label(channel)
+                    return f"#{channel.name}"
             return "#deleted-channel"
 
         return re.sub(r"<#(\d+)>", replace, str(value))
