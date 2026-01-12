@@ -7,7 +7,7 @@ import logging
 import re
 from collections import defaultdict
 from io import StringIO
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import aiohttp
 import discord
@@ -41,6 +41,8 @@ class AccountsCog(commands.Cog):
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._refresh_task: Optional[asyncio.Task] = None
+        self._audit_key_cache: Dict[Tuple[int, str], str] = {}
+        self._audit_key_cache_loaded: Set[int] = set()
 
     async def cog_load(self) -> None:
         self._member_cache_refresher.start()
@@ -400,10 +402,12 @@ class AccountsCog(commands.Cog):
             name = entry.get("name")
             if not isinstance(name, str) or not name.strip():
                 continue
+            rank = entry.get("rank")
             members.append(
                 {
                     "name": name.strip(),
                     "wvw_member": bool(entry.get("wvw_member")),
+                    "rank": rank.strip() if isinstance(rank, str) else "",
                 }
             )
 
@@ -426,6 +430,85 @@ class AccountsCog(commands.Cog):
             if target in guild_memberships and "guilds" in permissions:
                 return record
         return None
+
+    def _has_guild_permission(self, record: ApiKeyRecord) -> bool:
+        return "guilds" in {value.lower() for value in record.permissions}
+
+    def _ensure_audit_key_cache_loaded(self, guild_id: int) -> None:
+        if guild_id in self._audit_key_cache_loaded:
+            return
+        cached_entries = self.bot.storage.get_audit_key_cache(guild_id)
+        for gw2_guild_id, api_key in cached_entries.items():
+            self._audit_key_cache[(guild_id, gw2_guild_id)] = api_key
+        self._audit_key_cache_loaded.add(guild_id)
+
+    def _persist_audit_key_cache(self, guild_id: int) -> None:
+        entries = {
+            gw2_guild_id: api_key
+            for (cache_guild_id, gw2_guild_id), api_key in self._audit_key_cache.items()
+            if cache_guild_id == guild_id
+        }
+        self.bot.storage.save_audit_key_cache(guild_id, entries)
+
+    async def _fetch_guild_members_for_audit(
+        self, guild: discord.Guild, guild_id: str
+    ) -> List[Dict[str, object]]:
+        self._ensure_audit_key_cache_loaded(guild.id)
+        candidates = [
+            record
+            for _, _, record in self.bot.storage.query_api_keys(
+                guild_id=guild.id, gw2_guild_id=guild_id
+            )
+            if self._has_guild_permission(record)
+        ]
+        if not candidates:
+            raise ValueError(
+                "No stored API keys with the guilds permission were found for that guild. "
+                "Ask a guild leader to add their API key with /apikey add."
+            )
+
+        cache_key = (guild.id, self._normalise_guild_id(guild_id))
+        cached_key = self._audit_key_cache.get(cache_key)
+        last_error: Optional[ValueError] = None
+        if cached_key:
+            cached_record = next(
+                (record for record in candidates if record.key == cached_key),
+                None,
+            )
+            if cached_record:
+                try:
+                    return await self._fetch_guild_members(
+                        guild_id, api_key=cached_record.key
+                    )
+                except ValueError as exc:
+                    last_error = exc
+                    self._audit_key_cache.pop(cache_key, None)
+                    self._persist_audit_key_cache(guild.id)
+            else:
+                self._audit_key_cache.pop(cache_key, None)
+                self._persist_audit_key_cache(guild.id)
+
+        for record in candidates:
+            if record.key == cached_key:
+                continue
+            try:
+                members = await self._fetch_guild_members(guild_id, api_key=record.key)
+                self._audit_key_cache[cache_key] = record.key
+                self._persist_audit_key_cache(guild.id)
+                return members
+            except ValueError as exc:
+                last_error = exc
+                continue
+
+        if last_error:
+            raise ValueError(
+                "Stored API keys could not access the guild roster. "
+                "Ask a guild leader to add their API key with /apikey add."
+            ) from last_error
+        raise ValueError(
+            "Stored API keys could not access the guild roster. "
+            "Ask a guild leader to add their API key with /apikey add."
+        )
 
     @tasks.loop(hours=24 * 7)
     async def _member_cache_refresher(self) -> None:
@@ -697,6 +780,7 @@ class AccountsCog(commands.Cog):
     @app_commands.describe(
         role="Discord role mapped to a Guild Wars 2 guild",
         csv_output="Attach a CSV export",
+        full_roster="Include the full guild roster in the output",
         ephemeral="Send the audit response privately",
     )
     async def audit_guild_role(
@@ -704,6 +788,7 @@ class AccountsCog(commands.Cog):
         interaction: discord.Interaction,
         role: discord.Role,
         csv_output: bool = False,
+        full_roster: bool = False,
         ephemeral: bool = True,
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
@@ -731,19 +816,12 @@ class AccountsCog(commands.Cog):
                 ephemeral=ephemeral,
             )
             return
-
-        caller_key = self._find_user_guild_key(interaction.guild, interaction.user.id, guild_id)
-        if not caller_key:
-            await self._send_embed(
-                interaction,
-                title="Guild membership audit",
-                description=(
-                    "You need a stored API key with access to that guild. Use /apikey add with a key that"
-                    " belongs to the guild and includes the guilds permission, then try again."
-                ),
-                ephemeral=ephemeral,
-            )
-            return
+        alliance_guild_id = (
+            self._normalise_guild_id(config.alliance_guild_id)
+            if config.alliance_guild_id
+            else None
+        )
+        show_full_roster = full_roster
 
         await interaction.response.defer(ephemeral=ephemeral, thinking=True)
 
@@ -752,7 +830,14 @@ class AccountsCog(commands.Cog):
             chunk_task = asyncio.create_task(interaction.guild.chunk(cache=True))
 
         try:
-            members = await self._fetch_guild_members(guild_id, api_key=caller_key.key)
+            members = await self._fetch_guild_members_for_audit(
+                interaction.guild, guild_id
+            )
+            wvw_members_source = members
+            if alliance_guild_id and alliance_guild_id != guild_id:
+                wvw_members_source = await self._fetch_guild_members_for_audit(
+                    interaction.guild, alliance_guild_id
+                )
         except ValueError as exc:
             if chunk_task:
                 try:
@@ -771,6 +856,10 @@ class AccountsCog(commands.Cog):
 
         role_to_guild = {role_id: gid for gid, role_id in config.guild_role_ids.items()}
         guild_labels = self.bot.storage.get_guild_labels(role_to_guild.values())
+        alliance_label = None
+        if alliance_guild_id:
+            alliance_lookup = await self._cached_guild_labels([alliance_guild_id])
+            alliance_label = alliance_lookup.get(alliance_guild_id, alliance_guild_id)
 
         if chunk_task:
             try:
@@ -801,6 +890,9 @@ class AccountsCog(commands.Cog):
             name = str(entry["name"])
             normalized_name = self._normalise_account_name(name)
             guild_member_lookup[normalized_name] = name
+        for entry in wvw_members_source:
+            name = str(entry["name"])
+            normalized_name = self._normalise_account_name(name)
             is_wvw_member = bool(entry.get("wvw_member"))
             member_wvw_lookup[normalized_name] = is_wvw_member
             if is_wvw_member:
@@ -808,7 +900,6 @@ class AccountsCog(commands.Cog):
 
         discrepancy_rows: List[Sequence[str]] = []
         csv_rows: List[Sequence[str]] = []
-        processed_accounts: set[str] = set()
 
         account_records: Dict[str, List[Tuple[int, ApiKeyRecord]]] = defaultdict(list)
         user_records: Dict[int, List[ApiKeyRecord]] = defaultdict(list)
@@ -819,6 +910,89 @@ class AccountsCog(commands.Cog):
             if record.account_name:
                 account_records[self._normalise_account_name(record.account_name)].append(
                     (user_id, record)
+                )
+
+        target_guild_tag = guild_tag_for_id(guild_id)
+        missing_role_label = self._strip_emoji(role.name) or "role"
+        alliance_member_lookup = (
+            {self._normalise_account_name(str(entry["name"])) for entry in wvw_members_source}
+            if alliance_guild_id
+            else set()
+        )
+
+        for normalized_name, original_name in guild_member_lookup.items():
+            records = account_records.get(normalized_name, [])
+            selected_member: Optional[discord.Member] = None
+            selected_record: Optional[ApiKeyRecord] = None
+            if records:
+                for user_id, record in records:
+                    member = interaction.guild.get_member(user_id)
+                    if member:
+                        selected_member = member
+                        selected_record = record
+                        break
+                if not selected_record:
+                    selected_record = records[0][1]
+                    selected_member = (
+                        interaction.guild.get_member(records[0][0])
+                        if records
+                        else None
+                    )
+
+            display_name = (
+                self._strip_emoji(selected_member.display_name)
+                if selected_member
+                else "--"
+            )
+            roles = (
+                ", ".join(
+                    sorted(
+                        self._strip_emoji(role.name)
+                        for role in selected_member.roles
+                        if role.name and not role.is_default()
+                    )
+                )
+                if selected_member
+                else "--"
+            )
+            guild_tags = (
+                ", ".join(guild_tags_for_member(selected_member)) or target_guild_tag
+                if selected_member
+                else target_guild_tag
+            )
+            account_label = self._strip_emoji(
+                selected_record.account_name if selected_record and selected_record.account_name else original_name
+            )
+
+            issues: List[str] = []
+            if not records:
+                issues.append("No API key")
+            else:
+                has_role = selected_member is not None and role in selected_member.roles
+                if not has_role:
+                    issues.append(f"Missing {missing_role_label} role")
+
+            if alliance_guild_id:
+                if normalized_name not in alliance_member_lookup:
+                    issues.append("Not in alliance guild")
+                elif not member_wvw_lookup.get(normalized_name, False):
+                    issues.append("Not WvW member")
+            elif not member_wvw_lookup.get(normalized_name, False):
+                issues.append("Not WvW member")
+
+            if issues or show_full_roster:
+                combined_issues = "; ".join(issues) if issues else "None"
+                discrepancy_rows.append(
+                    (display_name, account_label, guild_tags, combined_issues)
+                )
+                csv_rows.append(
+                    (
+                        self._strip_emoji(selected_member.name) if selected_member else "--",
+                        account_label,
+                        guild_tags,
+                        combined_issues,
+                        roles,
+                    )
                 )
 
         for member in role.members:
@@ -832,10 +1006,6 @@ class AccountsCog(commands.Cog):
             account_names = {
                 record.account_name for record in records if record.account_name
             }
-            normalized_accounts = {
-                self._normalise_account_name(name) for name in account_names if name
-            }
-            processed_accounts.update(normalized_accounts)
 
             display_name = self._strip_emoji(member.display_name)
             roles = ", ".join(
@@ -845,14 +1015,14 @@ class AccountsCog(commands.Cog):
                     if role.name and not role.is_default()
                 )
             )
-            guild_tags = ", ".join(guild_tags_for_member(member)) or "—"
+            guild_tags = ", ".join(guild_tags_for_member(member)) or "--"
 
             if not account_names:
-                discrepancy_rows.append((display_name, "—", guild_tags, "No API key"))
+                discrepancy_rows.append((display_name, "--", guild_tags, "No API key"))
                 csv_rows.append(
                     (
                         self._strip_emoji(member.name),
-                        "—",
+                        "--",
                         guild_tags,
                         "No API key",
                         roles,
@@ -862,112 +1032,32 @@ class AccountsCog(commands.Cog):
 
             for account_name in sorted(account_names):
                 normalised = self._normalise_account_name(account_name)
-                in_guild = normalised in guild_member_lookup
-                is_wvw = normalised in wvw_members
+                if normalised in guild_member_lookup:
+                    continue
                 clean_account = self._strip_emoji(account_name)
-
-                issues: List[str] = []
-                if not in_guild:
-                    issues.append("Not in guild")
-                if in_guild and not is_wvw:
-                    issues.append("Not WvW member")
-
-                if issues:
-                    combined_issues = "; ".join(issues)
-                    discrepancy_rows.append(
-                        (display_name, clean_account, guild_tags, combined_issues)
-                    )
-                    csv_rows.append(
-                        (
-                            self._strip_emoji(member.name),
-                            clean_account,
-                            guild_tags,
-                            combined_issues,
-                            roles,
-                        )
-                    )
-
-        target_guild_tag = guild_tag_for_id(guild_id)
-        missing_role_label = self._strip_emoji(role.name) or "role"
-        for normalized_name, original_name in guild_member_lookup.items():
-            if normalized_name in processed_accounts:
-                continue
-
-            records = account_records.get(normalized_name)
-            if not records:
                 discrepancy_rows.append(
-                    ("—", self._strip_emoji(original_name), target_guild_tag, "No API key")
+                    (display_name, clean_account, guild_tags, "Not in guild")
                 )
                 csv_rows.append(
                     (
-                        "—",
-                        self._strip_emoji(original_name),
-                        target_guild_tag,
-                        "No API key",
-                        "—",
+                        self._strip_emoji(member.name),
+                        clean_account,
+                        guild_tags,
+                        "Not in guild",
+                        roles,
                     )
                 )
-                continue
-
-            for user_id, record in records:
-                member = interaction.guild.get_member(user_id)
-                display_name = (
-                    self._strip_emoji(member.display_name) if member else "—"
-                )
-                roles = (
-                    ", ".join(
-                        sorted(
-                            self._strip_emoji(role.name)
-                            for role in member.roles
-                            if role.name and not role.is_default()
-                        )
-                    )
-                    if member
-                    else "—"
-                )
-                guild_tags = (
-                    ", ".join(guild_tags_for_member(member)) or target_guild_tag
-                    if member
-                    else target_guild_tag
-                )
-
-                issues: List[str] = []
-                has_role = member is not None and role in member.roles
-                if not has_role:
-                    issues.append(f"Not in {missing_role_label}")
-                if not member_wvw_lookup.get(normalized_name, False):
-                    issues.append("Not WvW member")
-
-                if issues:
-                    combined_issues = "; ".join(issues)
-                    discrepancy_rows.append(
-                        (
-                            display_name,
-                            self._strip_emoji(record.account_name or original_name),
-                            guild_tags,
-                            combined_issues,
-                        )
-                    )
-                    csv_rows.append(
-                        (
-                            self._strip_emoji(member.name) if member else "—",
-                            self._strip_emoji(record.account_name or original_name),
-                            guild_tags,
-                            combined_issues,
-                            roles,
-                        )
-                    )
 
         guild_label = guild_labels.get(guild_id, guild_id)
 
         summary_lines = [
             "**Guild membership audit**",
-            "Compared live Guild Wars 2 guild membership against current Discord role assignments using your API key to avoid stale data.",
-            "",
             f"Guild: {guild_label}",
             f"Guild ID: `{guild_id}`",
             f"Role: {role.mention}",
         ]
+        if alliance_label:
+            summary_lines.append(f"Alliance WvW guild: {alliance_label}")
 
         report_table = self._format_table(
             ["Discord", "GW2 account", "Guilds", "Issue"],
@@ -988,7 +1078,7 @@ class AccountsCog(commands.Cog):
             writer.writerows(csv_rows)
             files.append(discord.File(fp=StringIO(buffer.getvalue()), filename="guild_audit.csv"))
 
-        content = "\n".join(summary_lines + ["", "Attached guild_audit.txt with audit results."])
+        content = "\n".join(summary_lines)
         await interaction.followup.send(content=content, files=files, ephemeral=ephemeral)
 
     # ------------------------------------------------------------------
@@ -1069,6 +1159,55 @@ class AccountsCog(commands.Cog):
             description=(
                 f"Members of `{cleaned_guild_id}` will receive the {role.mention} role when their API key is verified."
             ),
+        )
+
+    @guild_roles.command(
+        name="setalliance",
+        description="Set the alliance guild used for WvW membership checks in role audits.",
+    )
+    @app_commands.describe(guild_id="Guild Wars 2 guild ID to use for alliance WvW checks")
+    async def set_alliance_guild(
+        self, interaction: discord.Interaction, guild_id: str
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        cleaned_guild_id = self._normalise_guild_id(guild_id)
+        if not cleaned_guild_id:
+            await self._send_embed(
+                interaction,
+                title="Alliance guild",
+                description="Please provide a valid guild ID.",
+                colour=BRAND_COLOUR,
+            )
+            return
+
+        config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
+        config.alliance_guild_id = cleaned_guild_id
+        details = await self._cached_guild_labels([cleaned_guild_id])
+        alliance_label = details.get(cleaned_guild_id, cleaned_guild_id)
+        config.alliance_guild_name = alliance_label
+        self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
+        await self._send_embed(
+            interaction,
+            title="Alliance guild saved",
+            description=f"WvW membership checks will use **{alliance_label}**.",
+        )
+
+    @guild_roles.command(
+        name="clearalliance",
+        description="Clear the alliance guild used for WvW membership checks in role audits.",
+    )
+    async def clear_alliance_guild(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
+        config.alliance_guild_id = None
+        config.alliance_guild_name = None
+        self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
+        await self._send_embed(
+            interaction,
+            title="Alliance guild cleared",
+            description="WvW membership checks will use the audited guild roster.",
         )
 
     @guild_roles.command(name="remove", description="Remove a guild to role mapping.")
@@ -1868,4 +2007,3 @@ class AccountsCog(commands.Cog):
 
 async def setup(bot: GW2ToolsBot) -> None:
     await bot.add_cog(AccountsCog(bot))
-
