@@ -60,16 +60,14 @@ def _display_user(user: Optional[discord.abc.User]) -> Optional[str]:
     if user is None:
         return None
     mention = getattr(user, "mention", str(user))
-    if isinstance(user, discord.Member):
-        if user.display_name and user.display_name != user.name:
-            return f"{mention} ({user.display_name} ({user}))"
-    return f"{mention} ({user})"
+    username = getattr(user, "name", str(user))
+    return f"{mention} ({username})"
 
 
 def _format_user_field(user: Optional[discord.abc.User], *, fallback: str) -> str:
     if user is None:
         return fallback
-    return f"{_display_user(user)}\nID: {user.id}"
+    return _display_user(user) or fallback
 
 
 class AuditCog(commands.Cog):
@@ -322,6 +320,12 @@ class AuditCog(commands.Cog):
             details_parts.append(
                 f"Content: `{_truncate(_escape_text(message.content))}`"
             )
+        else:
+            details_parts.append(
+                "Content: Unavailable (message content intent missing or not cached)."
+            )
+        if message.attachments:
+            details_parts.append(f"Attachments: {len(message.attachments)}")
         details = "\n".join(part for part in details_parts if part)
         await self._log_discord_event(
             message.guild,
@@ -340,7 +344,12 @@ class AuditCog(commands.Cog):
         content_changed = before.content != after.content
         attachments_changed = len(before.attachments) != len(after.attachments)
         embeds_changed = len(before.embeds) != len(after.embeds)
-        if not content_changed and not attachments_changed and not embeds_changed:
+        if (
+            not content_changed
+            and not attachments_changed
+            and not embeds_changed
+            and self.bot.intents.message_content
+        ):
             return
         author = after.author if isinstance(after.author, discord.abc.User) else None
         details_parts = []
@@ -352,6 +361,15 @@ class AuditCog(commands.Cog):
         if content_changed and after.content:
             details_parts.append(
                 f"After: `{_truncate(_escape_text(after.content))}`"
+            )
+        if (
+            not content_changed
+            and not attachments_changed
+            and not embeds_changed
+            and not self.bot.intents.message_content
+        ):
+            details_parts.append(
+                "Content: Unavailable (message content intent missing)."
             )
         if attachments_changed:
             details_parts.append(
