@@ -1031,8 +1031,6 @@ class AccountsCog(commands.Cog):
 
         summary_lines = [
             "**Guild membership audit**",
-            "Compared live Guild Wars 2 guild membership against current Discord role assignments using stored API keys to avoid stale data.",
-            "",
             f"Guild: {guild_label}",
             f"Guild ID: `{guild_id}`",
             f"Role: {role.mention}",
