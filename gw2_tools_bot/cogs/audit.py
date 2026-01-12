@@ -185,19 +185,19 @@ class AuditCog(commands.Cog):
         name="query",
         description="Query Discord audit entries for a user.",
     )
-    @app_commands.describe(user="Discord username, mention, or ID to search for.")
+    @app_commands.describe(user="Discord user to search for.")
     async def audit_query_command(
-        self, interaction: discord.Interaction, user: str
+        self, interaction: discord.Interaction, user: discord.User
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
         if interaction.guild is None:
             return
 
-        user_id = self._parse_user_id(user)
+        user_id = user.id
         store = self.bot.storage.get_audit_store(interaction.guild.id)
         rows = store.query_discord_events(
-            user_id=user_id, user_query=user, limit=AUDIT_QUERY_LIMIT
+            user_id=user_id, user_query=str(user), limit=AUDIT_QUERY_LIMIT
         )
         if not rows:
             await interaction.response.send_message(
@@ -276,19 +276,28 @@ class AuditCog(commands.Cog):
         guild = member.guild
         actor = None
         event_type = "member_leave"
+        reason = None
         entry = await self._find_audit_entry(
             guild, discord.AuditLogAction.kick, member.id
         )
         if entry:
             actor = entry.user
             event_type = "member_kick"
-        details = "Member left the server." if event_type == "member_leave" else "Member was kicked."
+            reason = entry.reason
+        if event_type == "member_leave":
+            details_map = {"Details": "Member left the server."}
+        else:
+            details_map = {"Details": "Member was kicked."}
+            if reason:
+                details_map["Reason"] = _format_multiline_value(
+                    _truncate(_escape_text(reason))
+                )
         await self._log_discord_event(
             guild,
             event_type=event_type,
             actor=actor,
             target=member,
-            details={"Details": details},
+            details=details_map,
         )
 
     @commands.Cog.listener()
