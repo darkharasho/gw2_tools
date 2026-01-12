@@ -1322,6 +1322,42 @@ class StorageManager:
         self._write_json(path, asdict(config))
 
     # ------------------------------------------------------------------
+    # Guild audit cache
+    # ------------------------------------------------------------------
+    def get_audit_key_cache(self, guild_id: int) -> Dict[str, str]:
+        path = self._guild_path(guild_id) / "audit_key_cache.json"
+        payload = self._read_json(path, {})
+        if not isinstance(payload, dict):
+            return {}
+        cleaned: Dict[str, str] = {}
+        for raw_guild_id, raw_key in payload.items():
+            if not isinstance(raw_guild_id, str) or not isinstance(raw_key, str):
+                continue
+            guild_key = normalise_guild_id(raw_guild_id)
+            if not guild_key:
+                continue
+            key_value = raw_key.strip()
+            if not key_value:
+                continue
+            cleaned[guild_key] = key_value
+        return cleaned
+
+    def save_audit_key_cache(self, guild_id: int, cache: Mapping[str, str]) -> None:
+        path = self._guild_path(guild_id) / "audit_key_cache.json"
+        payload: Dict[str, str] = {}
+        for raw_guild_id, raw_key in cache.items():
+            if not isinstance(raw_guild_id, str) or not isinstance(raw_key, str):
+                continue
+            guild_key = normalise_guild_id(raw_guild_id)
+            if not guild_key:
+                continue
+            key_value = raw_key.strip()
+            if not key_value:
+                continue
+            payload[guild_key] = key_value
+        self._write_json(path, payload)
+
+    # ------------------------------------------------------------------
     # Composition presets
     # ------------------------------------------------------------------
     def get_comp_presets(self, guild_id: int) -> List[CompPreset]:
