@@ -58,6 +58,19 @@ def _escape_text(value: Optional[str]) -> str:
     return cleaned
 
 
+def _format_channel_label(channel: discord.abc.GuildChannel | discord.Thread) -> str:
+    name = getattr(channel, "name", "unknown")
+    if isinstance(channel, discord.CategoryChannel):
+        return name
+    return f"#{name}"
+
+
+def _format_multiline_value(value: str) -> str:
+    if not value:
+        return "None"
+    return f"```\n{value}\n```"
+
+
 def _display_user(user: Optional[discord.abc.User]) -> Optional[str]:
     if user is None:
         return None
@@ -322,10 +335,12 @@ class AuditCog(commands.Cog):
                 author.id,
             )
         details: dict[str, str] = {
-            "Channel": message.channel.mention,
+            "Channel": _format_channel_label(message.channel),
         }
         if message.content:
-            details["Content"] = f"`{_truncate(_escape_text(message.content))}`"
+            details["Content"] = _format_multiline_value(
+                _truncate(_escape_text(message.content))
+            )
         else:
             details["Content"] = "Unavailable (message content intent missing or not cached)."
         if message.attachments:
@@ -356,12 +371,16 @@ class AuditCog(commands.Cog):
             return
         author = after.author if isinstance(after.author, discord.abc.User) else None
         details: dict[str, str] = {
-            "Channel": after.channel.mention,
+            "Channel": _format_channel_label(after.channel),
         }
         if content_changed and before.content:
-            details["Before"] = f"`{_truncate(_escape_text(before.content))}`"
+            details["Before"] = _format_multiline_value(
+                _truncate(_escape_text(before.content))
+            )
         if content_changed and after.content:
-            details["After"] = f"`{_truncate(_escape_text(after.content))}`"
+            details["After"] = _format_multiline_value(
+                _truncate(_escape_text(after.content))
+            )
         if (
             not content_changed
             and not attachments_changed
