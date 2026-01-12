@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from typing import Any, Iterable, Mapping, Optional
 
 import aiohttp
@@ -191,16 +192,18 @@ class AuditCog(commands.Cog):
             )
             return
 
-        lines = []
-        for row in rows:
-            formatted = self._format_discord_row(row)
-            if formatted:
-                lines.append(formatted)
-        await self._send_chunked(
-            interaction,
-            lines,
-            header="**Discord audit results**",
+        table = self._format_table(
+            headers=["Timestamp", "Event", "Actor", "Target", "Details"],
+            rows=[self._format_discord_table_row(row) for row in rows],
+            max_widths=[26, 20, 30, 30, 80],
         )
+        buffer = StringIO()
+        buffer.write("Discord audit results\n")
+        buffer.write(table)
+        buffer.write("\n")
+        buffer.seek(0)
+        file = discord.File(fp=buffer, filename="discord_audit.txt")
+        await interaction.response.send_message(file=file, ephemeral=True)
 
     @audit.command(
         name="gw2_query",
@@ -224,16 +227,18 @@ class AuditCog(commands.Cog):
             )
             return
 
-        lines = []
-        for row in rows:
-            formatted = self._format_gw2_row(row)
-            if formatted:
-                lines.append(formatted)
-        await self._send_chunked(
-            interaction,
-            lines,
-            header="**Guild Wars 2 audit results**",
+        table = self._format_table(
+            headers=["Timestamp", "Event", "User", "Summary"],
+            rows=[self._format_gw2_table_row(row) for row in rows],
+            max_widths=[26, 20, 30, 90],
         )
+        buffer = StringIO()
+        buffer.write("Guild Wars 2 audit results\n")
+        buffer.write(table)
+        buffer.write("\n")
+        buffer.seek(0)
+        file = discord.File(fp=buffer, filename="gw2_audit.txt")
+        await interaction.response.send_message(file=file, ephemeral=True)
 
     # ------------------------------------------------------------------
     # Event listeners
@@ -614,34 +619,66 @@ class AuditCog(commands.Cog):
         return None
 
     @staticmethod
-    def _format_discord_row(row: Mapping[str, Any]) -> str:
-        created_at = row["created_at"]
+    def _format_discord_table_row(row: Mapping[str, Any]) -> list[str]:
+        created_at = str(row["created_at"])
         event_type = row["event_type"]
         actor = row["actor_name"] or "Unknown"
         target = row["target_name"] or "Unknown"
         details = row["details"] or ""
-        return _truncate(
-            f"{created_at} | {event_type} | actor: {actor} | target: {target} | {details}",
-            1000,
-        )
+        return [created_at, event_type, actor, target, details]
 
     @staticmethod
-    def _format_gw2_row(row: Mapping[str, Any]) -> str:
-        created_at = row["created_at"]
+    def _format_gw2_table_row(row: Mapping[str, Any]) -> list[str]:
+        created_at = str(row["created_at"])
         event_type = row["event_type"]
         user = row["user"] or "Unknown"
         details = row["details"] or "{}"
-        summary = ""
         try:
             payload = json.loads(details)
         except json.JSONDecodeError:
             summary = details
         else:
             summary = AuditCog._summarise_gw2_payload(payload)
-        return _truncate(
-            f"{created_at} | {event_type} | user: {user} | {summary}",
-            1000,
-        )
+        return [created_at, event_type, user, summary]
+
+    @staticmethod
+    def _truncate_cell(value: str, max_length: int) -> str:
+        if len(value) <= max_length:
+            return value
+        if max_length <= 1:
+            return value[:max_length]
+        return value[: max_length - 1] + "…"
+
+    @staticmethod
+    def _format_table(
+        headers: list[str],
+        rows: Iterable[list[str]],
+        *,
+        max_widths: Optional[list[int]] = None,
+    ) -> str:
+        normalised_rows = [
+            ["" if cell is None else str(cell) for cell in row] for row in rows
+        ]
+        widths = [len(header) for header in headers]
+        for row in normalised_rows:
+            for index, cell in enumerate(row):
+                widths[index] = max(widths[index], len(cell))
+        if max_widths:
+            widths = [min(width, max_widths[idx]) for idx, width in enumerate(widths)]
+
+        def format_row(row: list[str]) -> str:
+            cells = [
+                AuditCog._truncate_cell(cell, widths[idx]).ljust(widths[idx])
+                for idx, cell in enumerate(row)
+            ]
+            return "| " + " | ".join(cells) + " |"
+
+        divider = "+-" + "-+-".join("-" * width for width in widths) + "-+"
+        lines = [divider, format_row(headers), divider]
+        for row in normalised_rows:
+            lines.append(format_row(row))
+        lines.append(divider)
+        return "\n".join(lines)
 
     @staticmethod
     def _summarise_gw2_payload(payload: dict[str, Any]) -> str:
@@ -657,27 +694,6 @@ class AuditCog(commands.Cog):
             parts.append(f"{key}={formatted}")
         return ", ".join(parts) if parts else "No extra details"
 
-    async def _send_chunked(
-        self, interaction: discord.Interaction, lines: Iterable[str], *, header: str
-    ) -> None:
-        chunks = []
-        current = [header]
-        for line in lines:
-            if len("\n".join(current + [line])) > 1800:
-                chunks.append("\n".join(current))
-                current = [header]
-            current.append(line)
-        if current:
-            chunks.append("\n".join(current))
-
-        if not interaction.response.is_done():
-            await interaction.response.send_message(chunks[0], ephemeral=True)
-            for chunk in chunks[1:]:
-                await interaction.followup.send(chunk, ephemeral=True)
-            return
-
-        for chunk in chunks:
-            await interaction.followup.send(chunk, ephemeral=True)
 
 
 async def setup(bot: GW2ToolsBot) -> None:
