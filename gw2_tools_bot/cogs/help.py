@@ -19,6 +19,7 @@ PUBLIC_COMMANDS = {
     "apikey help",
     "apikey list",
     "gw2guild search",
+    "help",
 }
 
 
@@ -57,8 +58,12 @@ class HelpCog(commands.Cog):
 
         for command in command_entries:
             qualified_name = command.qualified_name
-            if not is_authorised and qualified_name not in PUBLIC_COMMANDS:
+            # Case-insensitive check for public commands
+            is_public = qualified_name.lower() in {cmd.lower() for cmd in PUBLIC_COMMANDS}
+            
+            if not is_authorised and not is_public:
                 continue
+
             group_name = qualified_name.split(" ", 1)[0]
             lines_by_group[group_name].append(
                 f"/{qualified_name} — {command.description or 'No description provided.'}"
