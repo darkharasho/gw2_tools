@@ -7,7 +7,7 @@ import logging
 import re
 from collections import defaultdict
 from io import StringIO
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import aiohttp
 import discord
@@ -41,6 +41,8 @@ class AccountsCog(commands.Cog):
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._refresh_task: Optional[asyncio.Task] = None
+        self._audit_key_cache: Dict[Tuple[int, str], str] = {}
+        self._audit_key_cache_loaded: Set[int] = set()
 
     async def cog_load(self) -> None:
         self._member_cache_refresher.start()
@@ -432,9 +434,26 @@ class AccountsCog(commands.Cog):
     def _has_guild_permission(self, record: ApiKeyRecord) -> bool:
         return "guilds" in {value.lower() for value in record.permissions}
 
+    def _ensure_audit_key_cache_loaded(self, guild_id: int) -> None:
+        if guild_id in self._audit_key_cache_loaded:
+            return
+        cached_entries = self.bot.storage.get_audit_key_cache(guild_id)
+        for gw2_guild_id, api_key in cached_entries.items():
+            self._audit_key_cache[(guild_id, gw2_guild_id)] = api_key
+        self._audit_key_cache_loaded.add(guild_id)
+
+    def _persist_audit_key_cache(self, guild_id: int) -> None:
+        entries = {
+            gw2_guild_id: api_key
+            for (cache_guild_id, gw2_guild_id), api_key in self._audit_key_cache.items()
+            if cache_guild_id == guild_id
+        }
+        self.bot.storage.save_audit_key_cache(guild_id, entries)
+
     async def _fetch_guild_members_for_audit(
         self, guild: discord.Guild, guild_id: str
     ) -> List[Dict[str, object]]:
+        self._ensure_audit_key_cache_loaded(guild.id)
         candidates = [
             record
             for _, _, record in self.bot.storage.query_api_keys(
@@ -448,10 +467,35 @@ class AccountsCog(commands.Cog):
                 "Ask a guild leader to add their API key with /apikey add."
             )
 
+        cache_key = (guild.id, self._normalise_guild_id(guild_id))
+        cached_key = self._audit_key_cache.get(cache_key)
         last_error: Optional[ValueError] = None
+        if cached_key:
+            cached_record = next(
+                (record for record in candidates if record.key == cached_key),
+                None,
+            )
+            if cached_record:
+                try:
+                    return await self._fetch_guild_members(
+                        guild_id, api_key=cached_record.key
+                    )
+                except ValueError as exc:
+                    last_error = exc
+                    self._audit_key_cache.pop(cache_key, None)
+                    self._persist_audit_key_cache(guild.id)
+            else:
+                self._audit_key_cache.pop(cache_key, None)
+                self._persist_audit_key_cache(guild.id)
+
         for record in candidates:
+            if record.key == cached_key:
+                continue
             try:
-                return await self._fetch_guild_members(guild_id, api_key=record.key)
+                members = await self._fetch_guild_members(guild_id, api_key=record.key)
+                self._audit_key_cache[cache_key] = record.key
+                self._persist_audit_key_cache(guild.id)
+                return members
             except ValueError as exc:
                 last_error = exc
                 continue
@@ -1008,8 +1052,6 @@ class AccountsCog(commands.Cog):
 
         summary_lines = [
             "**Guild membership audit**",
-            "Compared live Guild Wars 2 guild membership against current Discord role assignments using stored API keys to avoid stale data.",
-            "",
             f"Guild: {guild_label}",
             f"Guild ID: `{guild_id}`",
             f"Role: {role.mention}",
@@ -1036,7 +1078,7 @@ class AccountsCog(commands.Cog):
             writer.writerows(csv_rows)
             files.append(discord.File(fp=StringIO(buffer.getvalue()), filename="guild_audit.csv"))
 
-        content = "\n".join(summary_lines + ["", "Attached guild_audit.txt with audit results."])
+        content = "\n".join(summary_lines)
         await interaction.followup.send(content=content, files=files, ephemeral=ephemeral)
 
     # ------------------------------------------------------------------
