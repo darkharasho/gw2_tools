@@ -362,12 +362,32 @@ class AccountsCog(commands.Cog):
                     record.key, allow_missing_permissions=True
                 )
             except ValueError as exc:
-                LOGGER.warning(
-                    "Failed to refresh API key for guild %s user %s: %s",
-                    guild_id,
-                    user_id,
-                    exc,
-                )
+                if "invalid key" in str(exc).lower():
+                    guild_obj = self.bot.get_guild(guild_id)
+                    guild_name = guild_obj.name if guild_obj else "Unknown Guild"
+                    user_obj = self.bot.get_user(user_id)
+                    user_str = f"{user_obj} ({user_obj.display_name})" if user_obj else "Unknown User"
+
+                    LOGGER.warning(
+                        "Invalid API key detected!\n"
+                        "Guild: %s (%s)\n"
+                        "User: %s (%s)\n"
+                        "Key Name: %s\n"
+                        "Error: %s",
+                        guild_name,
+                        guild_id,
+                        user_str,
+                        user_id,
+                        record.name,
+                        exc,
+                    )
+                else:
+                    LOGGER.warning(
+                        "Failed to refresh API key for guild %s user %s: %s",
+                        guild_id,
+                        user_id,
+                        exc,
+                    )
                 continue
 
             refreshed = ApiKeyRecord(
