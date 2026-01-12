@@ -75,7 +75,9 @@ def _format_channel_label(channel: discord.abc.GuildChannel | discord.Thread) ->
     name = getattr(channel, "name", "unknown")
     if isinstance(channel, discord.CategoryChannel):
         return name
-    return f"#{name}"
+    if isinstance(channel, discord.CategoryChannel):
+        return name
+    return getattr(channel, "mention", f"#{name}")
 
 
 def _format_multiline_value(value: str) -> str:
@@ -631,7 +633,7 @@ class AuditCog(commands.Cog):
             event_type="channel_delete",
             actor=actor,
             target=None,
-            details={"Channel": _format_channel_label(channel)},
+            details={"Channel": f"#{channel.name}"},
         )
 
     @commands.Cog.listener()
