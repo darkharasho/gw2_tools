@@ -245,7 +245,7 @@ class AuditCog(commands.Cog):
             event_type="member_join",
             actor=None,
             target=member,
-            details="Member joined the server.",
+            details={"Details": "Member joined the server."},
         )
 
     @commands.Cog.listener()
@@ -265,7 +265,7 @@ class AuditCog(commands.Cog):
             event_type=event_type,
             actor=actor,
             target=member,
-            details=details,
+            details={"Details": details},
         )
 
     @commands.Cog.listener()
@@ -282,7 +282,7 @@ class AuditCog(commands.Cog):
             event_type="member_ban",
             actor=actor,
             target=user,
-            details=details,
+            details={"Details": details},
         )
 
     @commands.Cog.listener()
@@ -299,7 +299,7 @@ class AuditCog(commands.Cog):
             event_type="member_unban",
             actor=actor,
             target=user,
-            details=details,
+            details={"Details": details},
         )
 
     @commands.Cog.listener()
@@ -314,19 +314,15 @@ class AuditCog(commands.Cog):
                 discord.AuditLogAction.message_delete,
                 author.id,
             )
-        details_parts = []
-        details_parts.append(f"Channel: {message.channel.mention}")
+        details: dict[str, str] = {
+            "Channel": message.channel.mention,
+        }
         if message.content:
-            details_parts.append(
-                f"Content: `{_truncate(_escape_text(message.content))}`"
-            )
+            details["Content"] = f"`{_truncate(_escape_text(message.content))}`"
         else:
-            details_parts.append(
-                "Content: Unavailable (message content intent missing or not cached)."
-            )
+            details["Content"] = "Unavailable (message content intent missing or not cached)."
         if message.attachments:
-            details_parts.append(f"Attachments: {len(message.attachments)}")
-        details = "\n".join(part for part in details_parts if part)
+            details["Attachments"] = str(len(message.attachments))
         await self._log_discord_event(
             message.guild,
             event_type="message_delete",
@@ -352,34 +348,26 @@ class AuditCog(commands.Cog):
         ):
             return
         author = after.author if isinstance(after.author, discord.abc.User) else None
-        details_parts = []
-        details_parts.append(f"Channel: {after.channel.mention}")
+        details: dict[str, str] = {
+            "Channel": after.channel.mention,
+        }
         if content_changed and before.content:
-            details_parts.append(
-                f"Before: `{_truncate(_escape_text(before.content))}`"
-            )
+            details["Before"] = f"`{_truncate(_escape_text(before.content))}`"
         if content_changed and after.content:
-            details_parts.append(
-                f"After: `{_truncate(_escape_text(after.content))}`"
-            )
+            details["After"] = f"`{_truncate(_escape_text(after.content))}`"
         if (
             not content_changed
             and not attachments_changed
             and not embeds_changed
             and not self.bot.intents.message_content
         ):
-            details_parts.append(
-                "Content: Unavailable (message content intent missing)."
-            )
+            details["Content"] = "Unavailable (message content intent missing)."
         if attachments_changed:
-            details_parts.append(
-                f"Attachments: {len(before.attachments)} -> {len(after.attachments)}"
+            details["Attachments"] = (
+                f"{len(before.attachments)} -> {len(after.attachments)}"
             )
         if embeds_changed:
-            details_parts.append(
-                f"Embeds: {len(before.embeds)} -> {len(after.embeds)}"
-            )
-        details = "\n".join(part for part in details_parts if part)
+            details["Embeds"] = f"{len(before.embeds)} -> {len(after.embeds)}"
         await self._log_discord_event(
             after.guild,
             event_type="message_edit",
@@ -405,16 +393,11 @@ class AuditCog(commands.Cog):
             discord.AuditLogAction.member_role_update,
             after.id,
         )
-        details_parts = []
+        details: dict[str, str] = {}
         if added:
-            details_parts.append(
-                "Added: " + ", ".join(role.mention for role in added)
-            )
+            details["Added"] = ", ".join(role.mention for role in added)
         if removed:
-            details_parts.append(
-                "Removed: " + ", ".join(role.mention for role in removed)
-            )
-        details = "\n".join(details_parts)
+            details["Removed"] = ", ".join(role.mention for role in removed)
         await self._log_discord_event(
             after.guild,
             event_type="member_role_update",
@@ -513,7 +496,7 @@ class AuditCog(commands.Cog):
         event_type: str,
         actor: Optional[discord.abc.User],
         target: Optional[discord.abc.User],
-        details: str,
+        details: Mapping[str, str],
     ) -> None:
         channel_id = self._audit_channel_id(guild)
         if not channel_id:
@@ -521,6 +504,7 @@ class AuditCog(commands.Cog):
 
         created_at = utcnow()
         store = self.bot.storage.get_audit_store(guild.id)
+        details_text = "\n".join(f"{key}: {value}" for key, value in details.items())
         store.add_discord_event(
             created_at=created_at,
             event_type=event_type,
@@ -528,7 +512,7 @@ class AuditCog(commands.Cog):
             actor_name=_display_user(actor),
             target_id=target.id if target else None,
             target_name=_display_user(target),
-            details=details,
+            details=details_text,
         )
 
         title = DISCORD_EVENT_TITLES.get(event_type, event_type.replace("_", " ").title())
@@ -543,11 +527,15 @@ class AuditCog(commands.Cog):
             value=_format_user_field(target, fallback="Unknown"),
             inline=True,
         )
-        embed.add_field(
-            name="Details",
-            value=details or "No additional details.",
-            inline=False,
-        )
+        if details:
+            for key, value in details.items():
+                embed.add_field(name=key, value=value or "None", inline=False)
+        else:
+            embed.add_field(
+                name="Details",
+                value="No additional details.",
+                inline=False,
+            )
         embed.set_footer(text="Guild Wars 2 Tools")
         await self._send_audit_message(guild, channel_id, embed)
 
