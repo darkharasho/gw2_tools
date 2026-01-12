@@ -197,6 +197,7 @@ class AuditCog(commands.Cog):
             headers=["Timestamp", "Event", "Actor", "Target", "Details"],
             rows=[self._format_discord_table_row(row) for row in rows],
             max_widths=[26, 20, 30, 30, 80],
+            row_divider=True,
         )
         buffer = StringIO()
         buffer.write("Discord audit results\n")
@@ -621,22 +622,22 @@ class AuditCog(commands.Cog):
 
     @staticmethod
     def _format_discord_table_row(row: Mapping[str, Any]) -> list[str]:
-        created_at = str(row["created_at"])
+        created_at = AuditCog._format_timestamp(row["created_at"])
         event_type = row["event_type"]
-        actor = row["actor_name"] or "Unknown"
-        target = row["target_name"] or "Unknown"
+        actor = AuditCog._format_user_label(row["actor_name"])
+        target = AuditCog._format_user_label(row["target_name"])
         details = AuditCog._normalise_table_cell(row["details"] or "")
         return [
             created_at,
             event_type,
-            AuditCog._normalise_table_cell(actor),
-            AuditCog._normalise_table_cell(target),
+            actor,
+            target,
             details,
         ]
 
     @staticmethod
     def _format_gw2_table_row(row: Mapping[str, Any]) -> list[str]:
-        created_at = str(row["created_at"])
+        created_at = AuditCog._format_timestamp(row["created_at"])
         event_type = row["event_type"]
         user = AuditCog._normalise_table_cell(row["user"] or "Unknown")
         details = row["details"] or "{}"
@@ -665,8 +666,36 @@ class AuditCog(commands.Cog):
     def _normalise_table_cell(value: str) -> str:
         cleaned = re.sub(r"\s+", " ", str(value)).strip()
         cleaned = re.sub(r"\(\d{5,}\)", "", cleaned).strip()
+        cleaned = re.sub(r"<@!?\d+>", "@user", cleaned)
         cleaned = cleaned.replace(" ,", ",").replace("  ", " ")
         return cleaned
+
+    @staticmethod
+    def _format_user_label(value: Optional[str]) -> str:
+        if not value:
+            return "Unknown"
+        match = re.search(r"<@!?\d+>\s*\(([^)]+)\)", value)
+        if match:
+            username = match.group(1)
+            return AuditCog._normalise_table_cell(f"@{username} ({username})")
+        cleaned = AuditCog._normalise_table_cell(value)
+        if cleaned.startswith("<@") and cleaned.endswith(">"):
+            return "Unknown"
+        return cleaned
+
+    @staticmethod
+    def _format_timestamp(value: Any) -> str:
+        if isinstance(value, datetime):
+            timestamp = value
+        else:
+            text = str(value)
+            try:
+                timestamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return text
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     @staticmethod
     def _format_table(
@@ -674,6 +703,7 @@ class AuditCog(commands.Cog):
         rows: Iterable[list[str]],
         *,
         max_widths: Optional[list[int]] = None,
+        row_divider: bool = False,
     ) -> str:
         normalised_rows = [
             ["" if cell is None else str(cell) for cell in row] for row in rows
@@ -718,7 +748,10 @@ class AuditCog(commands.Cog):
         lines = [divider, format_row(header_row)[0], divider]
         for row in normalised_rows:
             lines.extend(format_row(row))
-        lines.append(divider)
+            if row_divider:
+                lines.append(divider)
+        if not row_divider:
+            lines.append(divider)
         return "\n".join(lines)
 
     @staticmethod
