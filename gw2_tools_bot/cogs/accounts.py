@@ -898,7 +898,7 @@ class AccountsCog(commands.Cog):
             display_name = (
                 self._strip_emoji(selected_member.display_name)
                 if selected_member
-                else "—"
+                else "--"
             )
             roles = (
                 ", ".join(
@@ -909,7 +909,7 @@ class AccountsCog(commands.Cog):
                     )
                 )
                 if selected_member
-                else "—"
+                else "--"
             )
             guild_tags = (
                 ", ".join(guild_tags_for_member(selected_member)) or target_guild_tag
@@ -943,7 +943,7 @@ class AccountsCog(commands.Cog):
                 )
                 csv_rows.append(
                     (
-                        self._strip_emoji(selected_member.name) if selected_member else "—",
+                        self._strip_emoji(selected_member.name) if selected_member else "--",
                         account_label,
                         guild_tags,
                         combined_issues,
@@ -971,14 +971,14 @@ class AccountsCog(commands.Cog):
                     if role.name and not role.is_default()
                 )
             )
-            guild_tags = ", ".join(guild_tags_for_member(member)) or "—"
+            guild_tags = ", ".join(guild_tags_for_member(member)) or "--"
 
             if not account_names:
-                discrepancy_rows.append((display_name, "—", guild_tags, "No API key"))
+                discrepancy_rows.append((display_name, "--", guild_tags, "No API key"))
                 csv_rows.append(
                     (
                         self._strip_emoji(member.name),
-                        "—",
+                        "--",
                         guild_tags,
                         "No API key",
                         roles,
