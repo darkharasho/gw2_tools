@@ -222,7 +222,6 @@ class GuildConfig:
     alliance_current_time: Optional[str] = None
     alliance_prediction_day: Optional[int] = None
     alliance_current_day: Optional[int] = None
-    guild_audit_full_roster: bool = False
     comp: CompConfig = field(default_factory=CompConfig)
     comp_active_preset: Optional[str] = None
 
@@ -1006,13 +1005,6 @@ class StorageManager:
                 payload["alliance_current_day"] = day_value if 0 <= day_value <= 6 else None
         else:
             payload["alliance_current_day"] = None
-        guild_audit_full_roster = payload.get("guild_audit_full_roster")
-        if isinstance(guild_audit_full_roster, bool):
-            payload["guild_audit_full_roster"] = guild_audit_full_roster
-        elif isinstance(guild_audit_full_roster, int):
-            payload["guild_audit_full_roster"] = bool(guild_audit_full_roster)
-        else:
-            payload["guild_audit_full_roster"] = False
         return GuildConfig(**payload)
 
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
@@ -1064,7 +1056,6 @@ class StorageManager:
                 config.alliance_current_day = int(config.alliance_current_day)
             else:
                 config.alliance_current_day = None
-        config.guild_audit_full_roster = bool(config.guild_audit_full_roster)
         if config.alliance_channel_id is not None:
             try:
                 config.alliance_channel_id = int(config.alliance_channel_id)
