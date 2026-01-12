@@ -1036,6 +1036,17 @@ class AuditStore:
                 ),
             )
 
+    def purge_events_before(self, cutoff: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM discord_audit_events WHERE created_at < ?",
+                (cutoff,),
+            )
+            connection.execute(
+                "DELETE FROM gw2_audit_events WHERE created_at < ?",
+                (cutoff,),
+            )
+
     def query_gw2_events(
         self,
         *,
