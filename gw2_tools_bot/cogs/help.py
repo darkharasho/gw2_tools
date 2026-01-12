@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import logging
 from typing import Iterable
 
 import discord
@@ -12,6 +13,9 @@ from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 PUBLIC_COMMANDS = {
     "apikey add",
     "apikey refresh",
@@ -19,6 +23,7 @@ PUBLIC_COMMANDS = {
     "apikey help",
     "apikey list",
     "gw2guild search",
+    "help",
 }
 
 
@@ -50,15 +55,28 @@ class HelpCog(commands.Cog):
                 guild,
                 member,
             )
+        
+        LOGGER.info("Help command invoked by %s (auth=%s)", interaction.user, is_authorised)
 
-        commands_list = self.bot.tree.get_commands(guild=guild)
+        # Fetch global commands
+        commands_list = self.bot.tree.get_commands(guild=None)
+        # Fetch guild-specific commands if in a guild
+        if guild:
+            commands_list.extend(self.bot.tree.get_commands(guild=guild))
+
         command_entries = _collect_commands(commands_list)
+        LOGGER.info("Collected %d commands for help display", len(command_entries))
+
         lines_by_group: dict[str, list[str]] = defaultdict(list)
 
         for command in command_entries:
             qualified_name = command.qualified_name
-            if not is_authorised and qualified_name not in PUBLIC_COMMANDS:
+            # Case-insensitive check for public commands
+            is_public = qualified_name.lower() in {cmd.lower() for cmd in PUBLIC_COMMANDS}
+            
+            if not is_authorised and not is_public:
                 continue
+
             group_name = qualified_name.split(" ", 1)[0]
             lines_by_group[group_name].append(
                 f"/{qualified_name} — {command.description or 'No description provided.'}"
