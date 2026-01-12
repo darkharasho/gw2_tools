@@ -7,7 +7,7 @@ import logging
 import re
 from collections import defaultdict
 from io import StringIO
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import aiohttp
 import discord
@@ -42,6 +42,7 @@ class AccountsCog(commands.Cog):
         self._session: Optional[aiohttp.ClientSession] = None
         self._refresh_task: Optional[asyncio.Task] = None
         self._audit_key_cache: Dict[Tuple[int, str], str] = {}
+        self._audit_key_cache_loaded: Set[int] = set()
 
     async def cog_load(self) -> None:
         self._member_cache_refresher.start()
@@ -433,9 +434,26 @@ class AccountsCog(commands.Cog):
     def _has_guild_permission(self, record: ApiKeyRecord) -> bool:
         return "guilds" in {value.lower() for value in record.permissions}
 
+    def _ensure_audit_key_cache_loaded(self, guild_id: int) -> None:
+        if guild_id in self._audit_key_cache_loaded:
+            return
+        cached_entries = self.bot.storage.get_audit_key_cache(guild_id)
+        for gw2_guild_id, api_key in cached_entries.items():
+            self._audit_key_cache[(guild_id, gw2_guild_id)] = api_key
+        self._audit_key_cache_loaded.add(guild_id)
+
+    def _persist_audit_key_cache(self, guild_id: int) -> None:
+        entries = {
+            gw2_guild_id: api_key
+            for (cache_guild_id, gw2_guild_id), api_key in self._audit_key_cache.items()
+            if cache_guild_id == guild_id
+        }
+        self.bot.storage.save_audit_key_cache(guild_id, entries)
+
     async def _fetch_guild_members_for_audit(
         self, guild: discord.Guild, guild_id: str
     ) -> List[Dict[str, object]]:
+        self._ensure_audit_key_cache_loaded(guild.id)
         candidates = [
             record
             for _, _, record in self.bot.storage.query_api_keys(
@@ -465,8 +483,10 @@ class AccountsCog(commands.Cog):
                 except ValueError as exc:
                     last_error = exc
                     self._audit_key_cache.pop(cache_key, None)
+                    self._persist_audit_key_cache(guild.id)
             else:
                 self._audit_key_cache.pop(cache_key, None)
+                self._persist_audit_key_cache(guild.id)
 
         for record in candidates:
             if record.key == cached_key:
@@ -474,6 +494,7 @@ class AccountsCog(commands.Cog):
             try:
                 members = await self._fetch_guild_members(guild_id, api_key=record.key)
                 self._audit_key_cache[cache_key] = record.key
+                self._persist_audit_key_cache(guild.id)
                 return members
             except ValueError as exc:
                 last_error = exc
