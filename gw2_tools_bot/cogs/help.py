@@ -14,6 +14,7 @@ from ..branding import BRAND_COLOUR
 
 PUBLIC_COMMANDS = {
     "apikey add",
+    "apikey refresh",
     "apikey remove",
     "apikey help",
     "apikey list",
