@@ -624,14 +624,20 @@ class AuditCog(commands.Cog):
         event_type = row["event_type"]
         actor = row["actor_name"] or "Unknown"
         target = row["target_name"] or "Unknown"
-        details = row["details"] or ""
-        return [created_at, event_type, actor, target, details]
+        details = AuditCog._normalise_table_cell(row["details"] or "")
+        return [
+            created_at,
+            event_type,
+            AuditCog._normalise_table_cell(actor),
+            AuditCog._normalise_table_cell(target),
+            details,
+        ]
 
     @staticmethod
     def _format_gw2_table_row(row: Mapping[str, Any]) -> list[str]:
         created_at = str(row["created_at"])
         event_type = row["event_type"]
-        user = row["user"] or "Unknown"
+        user = AuditCog._normalise_table_cell(row["user"] or "Unknown")
         details = row["details"] or "{}"
         try:
             payload = json.loads(details)
@@ -639,7 +645,12 @@ class AuditCog(commands.Cog):
             summary = details
         else:
             summary = AuditCog._summarise_gw2_payload(payload)
-        return [created_at, event_type, user, summary]
+        return [
+            created_at,
+            event_type,
+            user,
+            AuditCog._normalise_table_cell(summary),
+        ]
 
     @staticmethod
     def _truncate_cell(value: str, max_length: int) -> str:
@@ -648,6 +659,13 @@ class AuditCog(commands.Cog):
         if max_length <= 1:
             return value[:max_length]
         return value[: max_length - 1] + "…"
+
+    @staticmethod
+    def _normalise_table_cell(value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", str(value)).strip()
+        cleaned = re.sub(r"\(\d{5,}\)", "", cleaned).strip()
+        cleaned = cleaned.replace(" ,", ",").replace("  ", " ")
+        return cleaned
 
     @staticmethod
     def _format_table(
