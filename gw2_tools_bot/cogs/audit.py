@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import textwrap
 import re
 from datetime import datetime, timedelta, timezone
 from io import StringIO
@@ -684,17 +685,39 @@ class AuditCog(commands.Cog):
         if max_widths:
             widths = [min(width, max_widths[idx]) for idx, width in enumerate(widths)]
 
-        def format_row(row: list[str]) -> str:
-            cells = [
-                AuditCog._truncate_cell(cell, widths[idx]).ljust(widths[idx])
-                for idx, cell in enumerate(row)
+        def wrap_cell(value: str, width: int) -> list[str]:
+            if not value:
+                return [""]
+            if width <= 0:
+                return [value]
+            return textwrap.wrap(
+                value,
+                width=width,
+                break_long_words=True,
+                break_on_hyphens=False,
+            ) or [""]
+
+        def format_row(row: list[str]) -> list[str]:
+            wrapped_cells = [
+                wrap_cell(cell, widths[idx]) for idx, cell in enumerate(row)
             ]
-            return "| " + " | ".join(cells) + " |"
+            height = max(len(cell_lines) for cell_lines in wrapped_cells)
+            lines = []
+            for line_index in range(height):
+                cells = []
+                for idx, cell_lines in enumerate(wrapped_cells):
+                    cell_value = (
+                        cell_lines[line_index] if line_index < len(cell_lines) else ""
+                    )
+                    cells.append(cell_value.ljust(widths[idx]))
+                lines.append("| " + " | ".join(cells) + " |")
+            return lines
 
         divider = "+-" + "-+-".join("-" * width for width in widths) + "-+"
-        lines = [divider, format_row(headers), divider]
+        header_row = [AuditCog._truncate_cell(header, widths[idx]) for idx, header in enumerate(headers)]
+        lines = [divider, format_row(header_row)[0], divider]
         for row in normalised_rows:
-            lines.append(format_row(row))
+            lines.extend(format_row(row))
         lines.append(divider)
         return "\n".join(lines)
 
