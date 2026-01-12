@@ -41,6 +41,7 @@ class AccountsCog(commands.Cog):
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._refresh_task: Optional[asyncio.Task] = None
+        self._audit_key_cache: Dict[Tuple[int, str], str] = {}
 
     async def cog_load(self) -> None:
         self._member_cache_refresher.start()
@@ -448,10 +449,32 @@ class AccountsCog(commands.Cog):
                 "Ask a guild leader to add their API key with /apikey add."
             )
 
+        cache_key = (guild.id, self._normalise_guild_id(guild_id))
+        cached_key = self._audit_key_cache.get(cache_key)
         last_error: Optional[ValueError] = None
+        if cached_key:
+            cached_record = next(
+                (record for record in candidates if record.key == cached_key),
+                None,
+            )
+            if cached_record:
+                try:
+                    return await self._fetch_guild_members(
+                        guild_id, api_key=cached_record.key
+                    )
+                except ValueError as exc:
+                    last_error = exc
+                    self._audit_key_cache.pop(cache_key, None)
+            else:
+                self._audit_key_cache.pop(cache_key, None)
+
         for record in candidates:
+            if record.key == cached_key:
+                continue
             try:
-                return await self._fetch_guild_members(guild_id, api_key=record.key)
+                members = await self._fetch_guild_members(guild_id, api_key=record.key)
+                self._audit_key_cache[cache_key] = record.key
+                return members
             except ValueError as exc:
                 last_error = exc
                 continue
