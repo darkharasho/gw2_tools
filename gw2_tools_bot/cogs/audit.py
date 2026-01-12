@@ -208,7 +208,10 @@ class AuditCog(commands.Cog):
 
         table = self._format_table(
             headers=["Timestamp", "Event", "Actor", "Target", "Details"],
-            rows=[self._format_discord_table_row(row) for row in rows],
+            rows=[
+                self._format_discord_table_row(row, guild=interaction.guild)
+                for row in rows
+            ],
             max_widths=[26, 20, 30, 30, 80],
             row_divider=True,
         )
@@ -640,12 +643,19 @@ class AuditCog(commands.Cog):
         return None
 
     @staticmethod
-    def _format_discord_table_row(row: Mapping[str, Any]) -> list[str]:
+    def _format_discord_table_row(
+        row: Mapping[str, Any],
+        *,
+        guild: Optional[discord.Guild] = None,
+    ) -> list[str]:
         created_at = AuditCog._format_timestamp(row["created_at"])
         event_type = row["event_type"]
-        actor = AuditCog._format_user_label(row["actor_name"])
-        target = AuditCog._format_user_label(row["target_name"])
-        details = AuditCog._normalise_table_cell(row["details"] or "")
+        actor = AuditCog._format_user_label(row["actor_name"], guild=guild)
+        target = AuditCog._format_user_label(row["target_name"], guild=guild)
+        details_text = row["details"] or ""
+        details = AuditCog._normalise_table_cell(
+            AuditCog._resolve_channel_mentions(details_text, guild=guild)
+        )
         return [
             created_at,
             event_type,
@@ -690,17 +700,47 @@ class AuditCog(commands.Cog):
         return cleaned
 
     @staticmethod
-    def _format_user_label(value: Optional[str]) -> str:
+    def _format_user_label(
+        value: Optional[str],
+        *,
+        guild: Optional[discord.Guild] = None,
+    ) -> str:
         if not value:
             return "Unknown"
         match = re.search(r"<@!?\d+>\s*\(([^)]+)\)", value)
         if match:
             username = match.group(1)
             return AuditCog._normalise_table_cell(f"@{username} ({username})")
+        mention_match = re.search(r"<@!?(\d+)>", value)
+        if mention_match and guild is not None:
+            member = guild.get_member(int(mention_match.group(1)))
+            if member:
+                return AuditCog._normalise_table_cell(
+                    f"@{member.name} ({member.name})"
+                )
         cleaned = AuditCog._normalise_table_cell(value)
         if cleaned.startswith("<@") and cleaned.endswith(">"):
             return "Unknown"
         return cleaned
+
+    @staticmethod
+    def _resolve_channel_mentions(
+        value: str,
+        *,
+        guild: Optional[discord.Guild] = None,
+    ) -> str:
+        if not value:
+            return ""
+
+        def replace(match: re.Match[str]) -> str:
+            channel_id = int(match.group(1))
+            if guild is not None:
+                channel = guild.get_channel(channel_id)
+                if channel is not None:
+                    return _format_channel_label(channel)
+            return "#deleted-channel"
+
+        return re.sub(r"<#(\d+)>", replace, str(value))
 
     @staticmethod
     def _format_timestamp(value: Any) -> str:
