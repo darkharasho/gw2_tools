@@ -27,6 +27,7 @@ GW2_LOG_FETCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
 AUDIT_CHANNEL_MESSAGE_LIMIT = 1900
 AUDIT_QUERY_LIMIT = 25
 GW2_QUERY_LIMIT = 25
+AUDIT_RETENTION_DAYS = 30
 
 DISCORD_EVENT_TITLES = {
     "member_join": "Member joined",
@@ -96,9 +97,11 @@ class AuditCog(commands.Cog):
         self.bot = bot
         self._session = aiohttp.ClientSession(timeout=GW2_LOG_FETCH_TIMEOUT)
         self._poll_gw2_logs.start()
+        self._purge_audit_logs.start()
 
     def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         self._poll_gw2_logs.cancel()
+        self._purge_audit_logs.cancel()
         if not self._session.closed:
             self.bot.loop.create_task(self._session.close())
 
@@ -464,6 +467,21 @@ class AuditCog(commands.Cog):
 
     @_poll_gw2_logs.before_loop
     async def _before_poll_gw2_logs(self) -> None:  # pragma: no cover - lifecycle
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(hours=24)
+    async def _purge_audit_logs(self) -> None:
+        if not self.bot.guilds:
+            return
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=AUDIT_RETENTION_DAYS)
+        ).isoformat()
+        for guild in self.bot.guilds:
+            store = self.bot.storage.get_audit_store(guild.id)
+            store.purge_events_before(cutoff)
+
+    @_purge_audit_logs.before_loop
+    async def _before_purge_audit_logs(self) -> None:  # pragma: no cover - lifecycle
         await self.bot.wait_until_ready()
 
     async def _sync_gw2_guild_log(
