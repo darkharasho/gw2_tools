@@ -654,7 +654,10 @@ class AuditCog(commands.Cog):
         target = AuditCog._format_user_label(row["target_name"], guild=guild)
         details_text = row["details"] or ""
         details = AuditCog._normalise_table_cell(
-            AuditCog._resolve_channel_mentions(details_text, guild=guild)
+            AuditCog._resolve_role_mentions(
+                AuditCog._resolve_channel_mentions(details_text, guild=guild),
+                guild=guild,
+            )
         )
         return [
             created_at,
@@ -741,6 +744,25 @@ class AuditCog(commands.Cog):
             return "#deleted-channel"
 
         return re.sub(r"<#(\d+)>", replace, str(value))
+
+    @staticmethod
+    def _resolve_role_mentions(
+        value: str,
+        *,
+        guild: Optional[discord.Guild] = None,
+    ) -> str:
+        if not value:
+            return ""
+
+        def replace(match: re.Match[str]) -> str:
+            role_id = int(match.group(1))
+            if guild is not None:
+                role = guild.get_role(role_id)
+                if role is not None:
+                    return f"@{role.name}"
+            return "@deleted-role"
+
+        return re.sub(r"<@&(\d+)>", replace, str(value))
 
     @staticmethod
     def _format_timestamp(value: Any) -> str:
