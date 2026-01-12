@@ -775,6 +775,7 @@ class AccountsCog(commands.Cog):
             if config.alliance_guild_id
             else None
         )
+        show_full_roster = bool(getattr(config, "guild_audit_full_roster", False))
 
         await interaction.response.defer(ephemeral=ephemeral, thinking=True)
 
@@ -933,17 +934,20 @@ class AccountsCog(commands.Cog):
             elif not member_wvw_lookup.get(normalized_name, False):
                 issues.append("Not WvW member")
 
-            combined_issues = "; ".join(issues) if issues else "None"
-            discrepancy_rows.append((display_name, account_label, guild_tags, combined_issues))
-            csv_rows.append(
-                (
-                    self._strip_emoji(selected_member.name) if selected_member else "—",
-                    account_label,
-                    guild_tags,
-                    combined_issues,
-                    roles,
+            if issues or show_full_roster:
+                combined_issues = "; ".join(issues) if issues else "None"
+                discrepancy_rows.append(
+                    (display_name, account_label, guild_tags, combined_issues)
                 )
-            )
+                csv_rows.append(
+                    (
+                        self._strip_emoji(selected_member.name) if selected_member else "—",
+                        account_label,
+                        guild_tags,
+                        combined_issues,
+                        roles,
+                    )
+                )
 
         for member in role.members:
             records = [
@@ -1160,6 +1164,30 @@ class AccountsCog(commands.Cog):
             interaction,
             title="Alliance guild cleared",
             description="WvW membership checks will use the audited guild roster.",
+        )
+
+    @guild_roles.command(
+        name="setauditfull",
+        description="Toggle whether /guildroles audit includes the full guild roster.",
+    )
+    @app_commands.describe(enabled="Show all guild roster members, even with no issues")
+    async def set_audit_full_roster(
+        self, interaction: discord.Interaction, enabled: bool
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
+        config.guild_audit_full_roster = enabled
+        self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
+        description = (
+            "Full guild roster entries will be included in audits."
+            if enabled
+            else "Only members with issues will be listed in audits."
+        )
+        await self._send_embed(
+            interaction,
+            title="Guild audit roster setting",
+            description=description,
         )
 
     @guild_roles.command(name="remove", description="Remove a guild to role mapping.")
