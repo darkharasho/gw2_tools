@@ -2,6 +2,8 @@
 
 The bot stores persistent data in SQLite at `gw2_tools_bot/data/api_keys.sqlite`. The tables below outline the current schema.
 
+Audit logging data is stored per Discord guild in `gw2_tools_bot/data/guild_<guild_id>/audit.sqlite`.
+
 ## Tables
 
 ### `api_keys`
@@ -35,3 +37,34 @@ The bot stores persistent data in SQLite at `gw2_tools_bot/data/api_keys.sqlite`
 | `tag` | TEXT | Optional guild tag from the GW2 API. |
 | `label` | TEXT NOT NULL | Display label combining the guild name and tag (when available). |
 | `updated_at` | TEXT NOT NULL | ISO 8601 timestamp of the most recent cache refresh. |
+
+## Audit tables
+
+### `discord_audit_events`
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Unique row identifier. |
+| `created_at` | TEXT NOT NULL | ISO 8601 timestamp for the audit entry. |
+| `event_type` | TEXT NOT NULL | Discord audit event identifier. |
+| `actor_id` | INTEGER | Discord user ID responsible for the event, when available. |
+| `actor_name` | TEXT | Display label for the actor, when available. |
+| `target_id` | INTEGER | Discord user ID targeted by the event, when available. |
+| `target_name` | TEXT | Display label for the target, when available. |
+| `details` | TEXT | Summary of the audit event. |
+
+### `gw2_audit_events`
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Unique row identifier. |
+| `log_id` | INTEGER | Guild Wars 2 log entry ID. |
+| `created_at` | TEXT NOT NULL | Timestamp from the GW2 API log entry. |
+| `event_type` | TEXT NOT NULL | Guild log entry type. |
+| `user` | TEXT | Guild Wars 2 account name on the entry. |
+| `details` | TEXT | JSON payload from the GW2 API log entry. |
+
+### `gw2_sync_state`
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | INTEGER PRIMARY KEY | Singleton row (always `1`). |
+| `last_log_id` | INTEGER | Most recent GW2 log ID fetched. |
+| `last_checked_at` | TEXT | ISO 8601 timestamp of the last GW2 log sync. |
