@@ -59,10 +59,11 @@ def _escape_text(value: Optional[str]) -> str:
 def _display_user(user: Optional[discord.abc.User]) -> Optional[str]:
     if user is None:
         return None
+    mention = getattr(user, "mention", str(user))
     if isinstance(user, discord.Member):
         if user.display_name and user.display_name != user.name:
-            return f"{user.display_name} ({user})"
-    return str(user)
+            return f"{mention} ({user.display_name} ({user}))"
+    return f"{mention} ({user})"
 
 
 def _format_user_field(user: Optional[discord.abc.User], *, fallback: str) -> str:
@@ -336,18 +337,29 @@ class AuditCog(commands.Cog):
     ) -> None:
         if after.guild is None:
             return
-        if before.content == after.content:
+        content_changed = before.content != after.content
+        attachments_changed = len(before.attachments) != len(after.attachments)
+        embeds_changed = len(before.embeds) != len(after.embeds)
+        if not content_changed and not attachments_changed and not embeds_changed:
             return
         author = after.author if isinstance(after.author, discord.abc.User) else None
         details_parts = []
         details_parts.append(f"Channel: {after.channel.mention}")
-        if before.content:
+        if content_changed and before.content:
             details_parts.append(
                 f"Before: `{_truncate(_escape_text(before.content))}`"
             )
-        if after.content:
+        if content_changed and after.content:
             details_parts.append(
                 f"After: `{_truncate(_escape_text(after.content))}`"
+            )
+        if attachments_changed:
+            details_parts.append(
+                f"Attachments: {len(before.attachments)} -> {len(after.attachments)}"
+            )
+        if embeds_changed:
+            details_parts.append(
+                f"Embeds: {len(before.embeds)} -> {len(after.embeds)}"
             )
         details = "\n".join(part for part in details_parts if part)
         await self._log_discord_event(
