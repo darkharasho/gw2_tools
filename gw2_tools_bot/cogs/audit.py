@@ -36,8 +36,20 @@ DISCORD_EVENT_TITLES = {
     "member_ban": "Member banned",
     "member_unban": "Member unbanned",
     "member_role_update": "Member roles updated",
+    "member_server_mute": "Member server muted",
+    "member_server_unmute": "Member server unmuted",
+    "member_server_deaf": "Member server deafened",
+    "member_server_undeaf": "Member server undeafened",
     "message_delete": "Message deleted",
     "message_edit": "Message edited",
+    "role_create": "Role created",
+    "role_update": "Role updated",
+    "role_delete": "Role deleted",
+    "guild_update": "Server updated",
+    "emoji_update": "Emojis updated",
+    "channel_create": "Channel created",
+    "channel_update": "Channel updated",
+    "channel_delete": "Channel deleted",
 }
 
 
@@ -447,6 +459,203 @@ class AuditCog(commands.Cog):
             details=details,
         )
 
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        if member.guild is None:
+            return
+        event_type = None
+        if before.mute != after.mute:
+            event_type = "member_server_mute" if after.mute else "member_server_unmute"
+        elif before.deaf != after.deaf:
+            event_type = "member_server_deaf" if after.deaf else "member_server_undeaf"
+        if not event_type:
+            return
+        actor = await self._find_audit_entry_user(
+            member.guild,
+            discord.AuditLogAction.member_update,
+            member.id,
+        )
+        details = {}
+        if after.channel:
+            details["Channel"] = _format_channel_label(after.channel)
+        await self._log_discord_event(
+            member.guild,
+            event_type=event_type,
+            actor=actor,
+            target=member,
+            details=details or {"Details": "Voice state updated."},
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_update(self, before: discord.Guild, after: discord.Guild) -> None:
+        if after is None:
+            return
+        details: dict[str, str] = {}
+        if before.name != after.name:
+            details["Name"] = f"{before.name} -> {after.name}"
+        if before.afk_channel != after.afk_channel:
+            before_label = (
+                _format_channel_label(before.afk_channel)
+                if before.afk_channel
+                else "None"
+            )
+            after_label = (
+                _format_channel_label(after.afk_channel)
+                if after.afk_channel
+                else "None"
+            )
+            details["AFK Channel"] = f"{before_label} -> {after_label}"
+        if before.afk_timeout != after.afk_timeout:
+            details["AFK Timeout"] = f"{before.afk_timeout}s -> {after.afk_timeout}s"
+        if not details:
+            return
+        actor = await self._find_audit_entry_user(
+            after,
+            discord.AuditLogAction.guild_update,
+            after.id,
+        )
+        await self._log_discord_event(
+            after,
+            event_type="guild_update",
+            actor=actor,
+            target=None,
+            details=details,
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_emojis_update(
+        self,
+        guild: discord.Guild,
+        before: list[discord.Emoji],
+        after: list[discord.Emoji],
+    ) -> None:
+        before_names = {emoji.name for emoji in before}
+        after_names = {emoji.name for emoji in after}
+        added = sorted(after_names - before_names)
+        removed = sorted(before_names - after_names)
+        if not added and not removed:
+            return
+        details: dict[str, str] = {}
+        if added:
+            details["Added"] = _format_multiline_value(", ".join(added))
+        if removed:
+            details["Removed"] = _format_multiline_value(", ".join(removed))
+        actor = await self._find_audit_entry_any(
+            guild, discord.AuditLogAction.emoji_update
+        )
+        await self._log_discord_event(
+            guild,
+            event_type="emoji_update",
+            actor=actor,
+            target=None,
+            details=details,
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role) -> None:
+        actor = await self._find_audit_entry_user(
+            role.guild, discord.AuditLogAction.role_create, role.id
+        )
+        await self._log_discord_event(
+            role.guild,
+            event_type="role_create",
+            actor=actor,
+            target=None,
+            details={"Role": role.name},
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role) -> None:
+        actor = await self._find_audit_entry_user(
+            role.guild, discord.AuditLogAction.role_delete, role.id
+        )
+        await self._log_discord_event(
+            role.guild,
+            event_type="role_delete",
+            actor=actor,
+            target=None,
+            details={"Role": role.name},
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_role_update(
+        self, before: discord.Role, after: discord.Role
+    ) -> None:
+        details: dict[str, str] = {}
+        if before.name != after.name:
+            details["Name"] = f"{before.name} -> {after.name}"
+        if before.color != after.color:
+            details["Color"] = f"{before.color} -> {after.color}"
+        if not details:
+            return
+        actor = await self._find_audit_entry_user(
+            after.guild, discord.AuditLogAction.role_update, after.id
+        )
+        await self._log_discord_event(
+            after.guild,
+            event_type="role_update",
+            actor=actor,
+            target=None,
+            details=details,
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_create(
+        self, channel: discord.abc.GuildChannel
+    ) -> None:
+        actor = await self._find_audit_entry_user(
+            channel.guild, discord.AuditLogAction.channel_create, channel.id
+        )
+        await self._log_discord_event(
+            channel.guild,
+            event_type="channel_create",
+            actor=actor,
+            target=None,
+            details={"Channel": _format_channel_label(channel)},
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(
+        self, channel: discord.abc.GuildChannel
+    ) -> None:
+        actor = await self._find_audit_entry_user(
+            channel.guild, discord.AuditLogAction.channel_delete, channel.id
+        )
+        await self._log_discord_event(
+            channel.guild,
+            event_type="channel_delete",
+            actor=actor,
+            target=None,
+            details={"Channel": _format_channel_label(channel)},
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_update(
+        self,
+        before: discord.abc.GuildChannel,
+        after: discord.abc.GuildChannel,
+    ) -> None:
+        details: dict[str, str] = {}
+        if before.name != after.name:
+            details["Name"] = f"{before.name} -> {after.name}"
+        if not details:
+            return
+        actor = await self._find_audit_entry_user(
+            after.guild, discord.AuditLogAction.channel_update, after.id
+        )
+        await self._log_discord_event(
+            after.guild,
+            event_type="channel_update",
+            actor=actor,
+            target=None,
+            details=details,
+        )
+
     # ------------------------------------------------------------------
     # GW2 sync loop
     # ------------------------------------------------------------------
@@ -656,6 +865,22 @@ class AuditCog(commands.Cog):
         except discord.Forbidden:
             return None
         except discord.HTTPException:
+            return None
+        return None
+
+    async def _find_audit_entry_any(
+        self,
+        guild: discord.Guild,
+        action: discord.AuditLogAction,
+    ) -> Optional[discord.abc.User]:
+        try:
+            async for entry in guild.audit_logs(limit=5, action=action):
+                if entry.created_at:
+                    delta = datetime.now(timezone.utc) - entry.created_at
+                    if delta > timedelta(minutes=2):
+                        continue
+                return entry.user
+        except (discord.Forbidden, discord.HTTPException):
             return None
         return None
 
