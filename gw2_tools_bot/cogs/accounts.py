@@ -1057,7 +1057,7 @@ class AccountsCog(commands.Cog):
             writer.writerows(csv_rows)
             files.append(discord.File(fp=StringIO(buffer.getvalue()), filename="guild_audit.csv"))
 
-        content = "\n".join(summary_lines + ["", "Attached guild_audit.txt with audit results."])
+        content = "\n".join(summary_lines)
         await interaction.followup.send(content=content, files=files, ephemeral=ephemeral)
 
     # ------------------------------------------------------------------
