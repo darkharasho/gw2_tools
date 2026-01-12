@@ -55,9 +55,6 @@ class HelpCog(commands.Cog):
                 guild,
                 member,
             )
-
-                member,
-            )
         
         LOGGER.info("Help command invoked by %s (auth=%s)", interaction.user, is_authorised)
 
