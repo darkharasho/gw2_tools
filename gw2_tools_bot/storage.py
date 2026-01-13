@@ -6,7 +6,7 @@ import logging
 import sqlite3
 import unicodedata
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -68,7 +68,7 @@ def normalise_timezone(value: str) -> str:
 def utcnow() -> str:
     """Return the current UTC timestamp formatted for storage."""
 
-    return datetime.utcnow().strftime(ISOFORMAT)
+    return datetime.now(timezone.utc).strftime(ISOFORMAT)
 
 
 def normalise_guild_id(guild_id: str) -> str:
@@ -1034,6 +1034,17 @@ class AuditStore:
                     self._normalise_name(user),
                     details,
                 ),
+            )
+
+    def purge_events_before(self, cutoff: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM discord_audit_events WHERE created_at < ?",
+                (cutoff,),
+            )
+            connection.execute(
+                "DELETE FROM gw2_audit_events WHERE created_at < ?",
+                (cutoff,),
             )
 
     def query_gw2_events(

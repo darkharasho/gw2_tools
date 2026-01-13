@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+<<<<<<< HEAD
+=======
+import logging
+>>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
 from typing import Iterable
 
 import discord
@@ -12,12 +16,25 @@ from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
 
 
+<<<<<<< HEAD
 PUBLIC_COMMANDS = {
     "apikey add",
+=======
+LOGGER = logging.getLogger(__name__)
+
+
+PUBLIC_COMMANDS = {
+    "apikey add",
+    "apikey refresh",
+>>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
     "apikey remove",
     "apikey help",
     "apikey list",
     "gw2guild search",
+<<<<<<< HEAD
+=======
+    "help",
+>>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
 }
 
 
@@ -48,17 +65,42 @@ class HelpCog(commands.Cog):
             is_authorised = self.bot.is_authorised(
                 guild,
                 member,
+<<<<<<< HEAD
                 permissions=getattr(interaction, "permissions", None),
             )
 
         commands_list = self.bot.tree.get_commands(guild=guild)
         command_entries = _collect_commands(commands_list)
+=======
+            )
+        
+        LOGGER.info("Help command invoked by %s (auth=%s)", interaction.user, is_authorised)
+
+        # Fetch global commands
+        commands_list = self.bot.tree.get_commands(guild=None)
+        # Fetch guild-specific commands if in a guild
+        if guild:
+            commands_list.extend(self.bot.tree.get_commands(guild=guild))
+
+        command_entries = _collect_commands(commands_list)
+        LOGGER.info("Collected %d commands for help display", len(command_entries))
+
+>>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
         lines_by_group: dict[str, list[str]] = defaultdict(list)
 
         for command in command_entries:
             qualified_name = command.qualified_name
+<<<<<<< HEAD
             if not is_authorised and qualified_name not in PUBLIC_COMMANDS:
                 continue
+=======
+            # Case-insensitive check for public commands
+            is_public = qualified_name.lower() in {cmd.lower() for cmd in PUBLIC_COMMANDS}
+            
+            if not is_authorised and not is_public:
+                continue
+
+>>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
             group_name = qualified_name.split(" ", 1)[0]
             lines_by_group[group_name].append(
                 f"/{qualified_name} — {command.description or 'No description provided.'}"
