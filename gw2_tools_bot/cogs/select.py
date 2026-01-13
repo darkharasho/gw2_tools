@@ -5,6 +5,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import aiohttp
@@ -15,7 +16,7 @@ from discord.ext import commands
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
-from ..storage import normalise_guild_id
+from ..storage import ISOFORMAT, normalise_guild_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class SelectCog(commands.Cog):
         super().__init__()
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
+        self._world_cache: Dict[int, str] = {}
 
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         if self._session and not self._session.closed:
@@ -316,17 +318,77 @@ class SelectCog(commands.Cog):
             self.bot.storage.upsert_guild_details(cache_payload)
         return details
 
+    @staticmethod
+    def _parse_timestamp(value: str) -> Optional[datetime]:
+        try:
+            parsed = datetime.strptime(value, ISOFORMAT)
+        except (TypeError, ValueError):
+            return None
+        return parsed.replace(tzinfo=timezone.utc)
+
     async def _cached_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
-        guild_list = list(guild_ids)
-        labels = self.bot.storage.get_guild_labels(guild_list)
-        missing = [gid for gid in guild_list if gid and gid not in labels]
-        if missing:
+        normalized = [
+            normalise_guild_id(guild_id)
+            for guild_id in guild_ids
+            if isinstance(guild_id, str) and normalise_guild_id(guild_id)
+        ]
+        if not normalized:
+            return {}
+
+        cached = self.bot.storage.get_guild_details(normalized)
+        labels: Dict[str, str] = {}
+        stale: List[str] = []
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+
+        for guild_id in normalized:
+            detail = cached.get(guild_id)
+            if not detail:
+                stale.append(guild_id)
+                continue
+            label, updated_at = detail
+            labels[guild_id] = label
+            updated = self._parse_timestamp(updated_at)
+            if not updated or updated < cutoff:
+                stale.append(guild_id)
+
+        if stale:
             try:
-                await self._fetch_guild_details(missing)
+                refreshed = await self._fetch_guild_details(stale)
+                labels.update(refreshed)
             except ValueError:
                 LOGGER.warning("Guild lookup failed while warming cache", exc_info=True)
-            labels.update(self.bot.storage.get_guild_labels(guild_list))
+
         return labels
+
+    async def _fetch_account_summary(
+        self, api_key: str
+    ) -> Tuple[Optional[str], Optional[int], Optional[int]]:
+        payload = await self._fetch_json(
+            "https://api.guildwars2.com/v2/account", api_key=api_key
+        )
+        account_name = payload.get("name")
+        account_name_value = account_name if isinstance(account_name, str) else None
+        wvw_rank = payload.get("wvw_rank")
+        wvw_rank_value = wvw_rank if isinstance(wvw_rank, int) else None
+        world_id = payload.get("world")
+        world_value = world_id if isinstance(world_id, int) else None
+        return account_name_value, wvw_rank_value, world_value
+
+    async def _fetch_world_name(self, world_id: int) -> Optional[str]:
+        if world_id in self._world_cache:
+            return self._world_cache[world_id]
+        try:
+            payload = await self._fetch_json(
+                "https://api.guildwars2.com/v2/worlds", params={"ids": str(world_id)}
+            )
+        except ValueError:
+            return None
+        if isinstance(payload, list) and payload:
+            name = payload[0].get("name")
+            if isinstance(name, str) and name.strip():
+                self._world_cache[world_id] = name.strip()
+                return self._world_cache[world_id]
+        return None
 
     def _friendly_guild_label(
         self, guild_id: str, guild_details: Mapping[str, str]
@@ -1115,6 +1177,93 @@ class SelectCog(commands.Cog):
         )
 
     @select.command(
+        name="member",
+        description="Show a detailed lookup for a Discord member.",
+    )
+    @app_commands.describe(member="Discord member to look up")
+    async def member_lookup(
+        self, interaction: discord.Interaction, member: discord.Member
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        if not interaction.guild:
+            await self._send_message(
+                interaction,
+                content="Select: This command can only be used in a server.",
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        records = self.bot.storage.get_user_api_keys(interaction.guild.id, member.id)
+        if not records:
+            await self._send_message(
+                interaction,
+                content="Select: No stored API keys were found for that member.",
+                use_followup=True,
+            )
+            return
+
+        embeds: List[discord.Embed] = []
+        for record in records:
+            account_name = record.account_name or "Unknown account"
+            wvw_rank_label = "Unknown"
+            wvw_team_label = "Unassigned"
+
+            try:
+                fetched_name, wvw_rank, world_id = await self._fetch_account_summary(
+                    record.key
+                )
+                if fetched_name:
+                    account_name = fetched_name
+                if wvw_rank is not None:
+                    wvw_rank_label = str(wvw_rank)
+                if world_id:
+                    world_name = await self._fetch_world_name(world_id)
+                    wvw_team_label = world_name or f"World {world_id}"
+            except ValueError:
+                LOGGER.warning(
+                    "Failed to fetch account details for select member lookup.",
+                    exc_info=True,
+                )
+
+            guild_details = await self._cached_guild_labels(record.guild_ids)
+            guild_labels = [
+                guild_details.get(guild_id, guild_id) for guild_id in record.guild_ids
+            ]
+            guild_value = (
+                "\n".join(f"- {label}" for label in guild_labels) if guild_labels else "None"
+            )
+
+            embed = self._embed(title=f"{member.display_name} | {member.name}")
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.add_field(
+                name="Username",
+                value=self._trim_field(f"```\n{account_name}\n```"),
+                inline=False,
+            )
+            embed.add_field(
+                name="WvW Rank",
+                value=f"```\n{wvw_rank_label}\n```",
+                inline=True,
+            )
+            embed.add_field(
+                name="WvW Team",
+                value=self._trim_field(f"```\n{wvw_team_label}\n```"),
+                inline=True,
+            )
+            embed.add_field(
+                name="Guilds",
+                value=self._trim_field(f"```\n{guild_value}\n```"),
+                inline=False,
+            )
+            embeds.append(embed)
+
+        for idx in range(0, len(embeds), 10):
+            await interaction.followup.send(embeds=embeds[idx : idx + 10], ephemeral=True)
+
+    @select.command(
         name="query",
         description=(
             "Admin member search by GW2 guild, Discord role, account, character, or Discord name."
@@ -1328,7 +1477,8 @@ class SelectCog(commands.Cog):
             description=(
                 "Use `/select query` for a single set of optional filters, `/select and` "
                 "to require two values of the same type, or `/select or` to try "
-                "alternate filters. All filters are optional."
+                "alternate filters. All filters are optional. Use `/select member` to "
+                "see the detailed embed for one Discord member."
             ),
         )
 
