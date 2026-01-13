@@ -939,25 +939,16 @@ class SelectCog(commands.Cog):
             prefix = "Filters" if len(filter_sets) == 1 else f"Filters set {idx}"
             filters_label.append(f"{prefix}: {', '.join(parts)}")
 
-        summary_embed = self._embed(
-            title="Select results",
-            description="",
-        )
-        summary_embed.add_field(
-            name="Filters",
-            value=self._trim_field("```\n" + "\n".join(filters_label) + "\n```"),
-            inline=False,
-        )
-        summary_embed.add_field(
-            name="Group by",
-            value=group_by.capitalize() if group_by else "None",
-            inline=False,
-        )
-        summary_embed.add_field(
-            name="Matches",
-            value=str(len(matched)),
-            inline=False,
-        )
+        # Build simple text summary instead of embeds
+        summary_lines = ["**Select Query Results**", ""]
+        summary_lines.append("**Filters:**")
+        for label in filters_label:
+            summary_lines.append(f"  {label}")
+        summary_lines.append("")
+        summary_lines.append(f"**Group by:** {group_by.capitalize() if group_by else 'None'}")
+        summary_lines.append(f"**Matches:** {len(matched)}")
+        
+        content = "\n".join(summary_lines)
 
         files: List[discord.File] = []
         
