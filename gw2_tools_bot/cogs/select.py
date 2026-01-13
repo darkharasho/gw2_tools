@@ -362,19 +362,19 @@ class SelectCog(commands.Cog):
 
     async def _fetch_account_summary(
         self, api_key: str
-    ) -> Tuple[Optional[str], Optional[int], Optional[int]]:
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
         payload = await self._fetch_json(
             "https://api.guildwars2.com/v2/account", api_key=api_key
         )
         account_name = payload.get("name")
         account_name_value = account_name if isinstance(account_name, str) else None
-        wvw_rank = payload.get("wvw_rank")
-        wvw_rank_value = wvw_rank if isinstance(wvw_rank, int) else None
         team_id = payload.get("wvw_team_id")
         team_value = team_id if isinstance(team_id, int) else None
         world_id = payload.get("world")
         world_value = world_id if isinstance(world_id, int) else None
-        return account_name_value, wvw_rank_value, team_value or world_value
+        wvw_guild_id = payload.get("wvw_guild_id")
+        wvw_guild_value = wvw_guild_id if isinstance(wvw_guild_id, str) else None
+        return account_name_value, team_value or world_value, wvw_guild_value
 
     def _friendly_guild_label(
         self, guild_id: str, guild_details: Mapping[str, str]
@@ -1194,19 +1194,20 @@ class SelectCog(commands.Cog):
         embeds: List[discord.Embed] = []
         for record in records:
             account_name = record.account_name or "Unknown account"
-            wvw_rank_label = "Unknown"
             wvw_team_label = "Unassigned"
+            wvw_guild_label = "None"
 
             try:
-                fetched_name, wvw_rank, world_id = await self._fetch_account_summary(
+                fetched_name, world_id, wvw_guild_id = await self._fetch_account_summary(
                     record.key
                 )
                 if fetched_name:
                     account_name = fetched_name
-                if wvw_rank is not None:
-                    wvw_rank_label = str(wvw_rank)
                 if world_id:
                     wvw_team_label = WVW_SERVER_NAMES.get(world_id, "Unknown")
+                if wvw_guild_id:
+                    wvw_guild_detail = await self._cached_guild_labels([wvw_guild_id])
+                    wvw_guild_label = wvw_guild_detail.get(wvw_guild_id, wvw_guild_id)
             except ValueError:
                 LOGGER.warning(
                     "Failed to fetch account details for select member lookup.",
@@ -1229,13 +1230,13 @@ class SelectCog(commands.Cog):
                 inline=False,
             )
             embed.add_field(
-                name="WvW Rank",
-                value=f"```\n{wvw_rank_label}\n```",
+                name="WvW Team",
+                value=self._trim_field(f"```\n{wvw_team_label}\n```"),
                 inline=True,
             )
             embed.add_field(
-                name="WvW Team",
-                value=self._trim_field(f"```\n{wvw_team_label}\n```"),
+                name="WvW Guild",
+                value=self._trim_field(f"```\n{wvw_guild_label}\n```"),
                 inline=True,
             )
             embed.add_field(
