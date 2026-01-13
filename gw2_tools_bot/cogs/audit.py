@@ -239,6 +239,55 @@ class AuditCog(commands.Cog):
         await interaction.response.send_message(file=file, ephemeral=True)
 
     @audit.command(
+        name="historical_query",
+        description="Query Discord audit entries by username (including departed members).",
+    )
+    @app_commands.describe(username="Discord username to search for.")
+    async def audit_historical_query_command(
+        self, interaction: discord.Interaction, username: str
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        if interaction.guild is None:
+            return
+
+        query = username.strip()
+        if not query:
+            await interaction.response.send_message(
+                "Please provide a Discord username to search for.",
+                ephemeral=True,
+            )
+            return
+
+        store = self.bot.storage.get_audit_store(interaction.guild.id)
+        rows = store.query_discord_events(
+            user_query=query, limit=AUDIT_QUERY_LIMIT
+        )
+        if not rows:
+            await interaction.response.send_message(
+                "No Discord audit entries found for that username.",
+                ephemeral=True,
+            )
+            return
+
+        table = self._format_table(
+            headers=["Timestamp", "Event", "Actor", "Target", "Details"],
+            rows=[
+                self._format_discord_table_row(row, guild=interaction.guild)
+                for row in rows
+            ],
+            max_widths=[26, 20, 30, 30, 80],
+            row_divider=True,
+        )
+        buffer = StringIO()
+        buffer.write("Discord audit results\n")
+        buffer.write(table)
+        buffer.write("\n")
+        buffer.seek(0)
+        file = discord.File(fp=buffer, filename="discord_audit.txt")
+        await interaction.response.send_message(file=file, ephemeral=True)
+
+    @audit.command(
         name="gw2_query",
         description="Query GW2 guild log entries for a user.",
     )
