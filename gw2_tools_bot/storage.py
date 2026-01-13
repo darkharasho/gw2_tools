@@ -605,6 +605,30 @@ class ApiKeyStore:
 
         return {row["guild_id"]: row["label"] for row in rows}
 
+    def get_guild_details(
+        self, guild_ids: Iterable[str]
+    ) -> Dict[str, Tuple[str, str]]:
+        """Return cached guild labels and refresh timestamps for the provided guild IDs."""
+
+        normalized = [gid for gid in (normalise_guild_id(gid) for gid in guild_ids) if gid]
+        if not normalized:
+            return {}
+
+        placeholders = ",".join("?" for _ in normalized)
+        query = (
+            "SELECT guild_id, label, updated_at FROM guild_details "
+            f"WHERE guild_id IN ({placeholders})"
+        )
+
+        with self._connect() as connection:
+            rows = connection.execute(query, normalized).fetchall()
+
+        return {
+            row["guild_id"]: (row["label"], row["updated_at"])
+            for row in rows
+            if row["label"] and row["updated_at"]
+        }
+
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> ApiKeyRecord:
         permissions = json.loads(row["permissions"]) if row["permissions"] else []
@@ -1456,6 +1480,9 @@ class StorageManager:
 
     def get_guild_labels(self, guild_ids: Iterable[str]) -> Dict[str, str]:
         return self.api_key_store.get_guild_labels(guild_ids)
+
+    def get_guild_details(self, guild_ids: Iterable[str]) -> Dict[str, Tuple[str, str]]:
+        return self.api_key_store.get_guild_details(guild_ids)
 
     def all_api_keys(self) -> List[Tuple[int, int, ApiKeyRecord]]:
         return self.api_key_store.all_api_keys()
