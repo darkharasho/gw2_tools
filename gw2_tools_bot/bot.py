@@ -43,6 +43,7 @@ class GW2ToolsBot(commands.Bot):
         await self.load_extension("gw2_tools_bot.cogs.help")
         await self.load_extension("gw2_tools_bot.cogs.accounts")
         await self.load_extension("gw2_tools_bot.cogs.select")
+        await self.load_extension("gw2_tools_bot.cogs.database")
         await self.load_extension("gw2_tools_bot.cogs.builds")
         await self.load_extension("gw2_tools_bot.cogs.arcdps")
         await self.load_extension("gw2_tools_bot.cogs.update_notes")
