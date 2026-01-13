@@ -430,7 +430,8 @@ class SelectCog(commands.Cog):
         )
         if member:
             discord_label = f"{member.display_name} ({member.name})"
-            discord_detail = f"{discord_label}\nID: {member.id}"
+            discord_detail = f"[{discord_label}](https://discord.com/users/{member.id})"
+            embed.set_thumbnail(url=member.display_avatar.url)
         else:
             discord_detail = "Unknown"
         embed.add_field(
@@ -1277,7 +1278,6 @@ class SelectCog(commands.Cog):
                 record=record,
                 member=member,
             )
-            embed.set_thumbnail(url=member.display_avatar.url)
             embeds.append(embed)
 
         for idx in range(0, len(embeds), 10):
