@@ -125,6 +125,39 @@ class SelectCog(commands.Cog):
         return name.strip().casefold()
 
     @staticmethod
+    def _format_table(
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        *,
+        placeholder: str = "None",
+        code_block: bool = True,
+    ) -> str:
+        if not rows:
+            return placeholder
+
+        widths = [len(header) for header in headers]
+        for row in rows:
+            for idx, cell in enumerate(row):
+                widths[idx] = max(widths[idx], len(cell))
+
+        def _format_row(row: Sequence[str]) -> str:
+            padded_cells = [f" {cell.ljust(widths[idx])} " for idx, cell in enumerate(row)]
+            return "|" + "|".join(padded_cells) + "|"
+
+        def _divider(char: str) -> str:
+            segments = (char * (width + 2) for width in widths)
+            return "+" + "+".join(segments) + "+"
+
+        header_divider = _divider("=")
+        row_divider = _divider("-")
+
+        lines = [header_divider, _format_row(headers), header_divider]
+        lines.extend(_format_row(row) for row in rows)
+        lines.append(row_divider)
+        table = "\n".join(lines)
+        return f"```\n{table}\n```" if code_block else table
+
+    @staticmethod
     def _option_names(interaction: discord.Interaction) -> set[str]:
         """Return provided option names for the current subcommand."""
 
@@ -927,6 +960,107 @@ class SelectCog(commands.Cog):
         )
 
         files: List[discord.File] = []
+        
+        # Determine which columns to include based on filters and grouping
+        show_characters_column = any(fs.character_provided for fs in filter_sets) and not count_only
+        show_account_column = not group_by or group_by != "account"
+        show_guild_column = not group_by or group_by != "guild"
+        show_role_column = not group_by or group_by != "role"
+        show_discord_column = not group_by or group_by != "discord"
+        
+        # Build headers dynamically
+        headers: List[str] = []
+        if show_discord_column:
+            headers.append("Discord")
+        if show_account_column:
+            headers.append("GW2 Account")
+        if show_guild_column:
+            headers.append("Guilds")
+        if show_role_column:
+            headers.append("Roles")
+        if show_characters_column:
+            headers.append("Characters")
+        
+        # Generate table sections (one per group if grouped, otherwise one table)
+        table_sections: List[str] = []
+        
+        for group_key in sorted(grouped.keys(), key=lambda k: (-len(grouped[k]), k.casefold())):
+            entries = grouped[group_key]
+            table_rows: List[Sequence[str]] = []
+            
+            for (
+                member,
+                account_names,
+                characters,
+                character_entries,
+                matched_guilds,
+                matched_roles,
+                mapped_role_mentions,
+                guild_ids,
+                filter_set,
+            ) in entries:
+                guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
+                roles = [role.name for role in member.roles if not role.is_default()]
+                characters_for_output = (
+                    [name for name, _ in character_entries]
+                    if filter_set.character_provided
+                    else characters
+                )
+                
+                row: List[str] = []
+                
+                if show_discord_column:
+                    discord_name = f"{member.display_name} ({member.name})"
+                    row.append(discord_name)
+                
+                if show_account_column:
+                    account_str = "; ".join(account_names) if account_names else "--"
+                    row.append(account_str)
+                
+                if show_guild_column:
+                    guilds_str = ", ".join(guild_labels) if guild_labels else "No guilds"
+                    row.append(guilds_str)
+                
+                if show_role_column:
+                    roles_str = ", ".join(roles) if roles else "--"
+                    row.append(roles_str)
+                
+                if show_characters_column:
+                    characters_str = ", ".join(characters_for_output[:5]) if characters_for_output else "--"
+                    if len(characters_for_output) > 5:
+                        characters_str += f" (+{len(characters_for_output) - 5} more)"
+                    row.append(characters_str)
+                
+                table_rows.append(tuple(row))
+            
+            # Create table for this group
+            if group_by and group_key != "Matches":
+                # Add group header
+                display_group_key = group_key
+                if group_by == "role" and group_key.startswith("<@&") and group_key.endswith(">"):
+                    try:
+                        role_id = int(group_key.strip("<@&>"))
+                        role_obj = interaction.guild.get_role(role_id) if role_id else None
+                        display_group_key = role_obj.name if role_obj else group_key
+                    except ValueError:
+                        pass
+                
+                section_header = f"\n{display_group_key} ({len(table_rows)} member{'s' if len(table_rows) != 1 else ''})\n" + "=" * 60
+                table_text = self._format_table(headers, table_rows, placeholder="None", code_block=False)
+                table_sections.append(f"{section_header}\n\n{table_text}")
+            else:
+                # No grouping or single "Matches" group
+                table_text = self._format_table(headers, table_rows, placeholder="None", code_block=False)
+                table_sections.append(table_text)
+        
+        # Combine all table sections
+        full_table = "\n\n".join(table_sections) if table_sections else "No matches found."
+        table_buffer = io.StringIO(full_table)
+        files.append(
+            discord.File(fp=io.StringIO(table_buffer.getvalue()), filename="select_query.txt")
+        )
+        
+        # Generate CSV if requested
         if as_csv:
             buffer = io.StringIO()
             writer = csv.writer(buffer)
@@ -973,12 +1107,13 @@ class SelectCog(commands.Cog):
                 )
 
             buffer.seek(0)
-            files = [
+            files.append(
                 discord.File(
                     fp=io.BytesIO(buffer.getvalue().encode("utf-8")),
                     filename="select_query.csv",
                 )
-            ]
+            )
+
 
         match_blocks: List[str] = []
 
