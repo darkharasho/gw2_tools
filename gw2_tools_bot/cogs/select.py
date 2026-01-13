@@ -1206,7 +1206,7 @@ class SelectCog(commands.Cog):
                 if wvw_rank is not None:
                     wvw_rank_label = str(wvw_rank)
                 if world_id:
-                    wvw_team_label = WVW_SERVER_NAMES.get(world_id, f"World {world_id}")
+                    wvw_team_label = WVW_SERVER_NAMES.get(world_id, "Unknown")
             except ValueError:
                 LOGGER.warning(
                     "Failed to fetch account details for select member lookup.",
