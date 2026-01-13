@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
+from ..constants import WVW_SERVER_NAMES
 from ..http_utils import read_response_text
 from ..storage import ISOFORMAT, normalise_guild_id
 
@@ -54,7 +55,6 @@ class SelectCog(commands.Cog):
         super().__init__()
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
-        self._world_cache: Dict[int, str] = {}
 
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         if self._session and not self._session.closed:
@@ -370,25 +370,11 @@ class SelectCog(commands.Cog):
         account_name_value = account_name if isinstance(account_name, str) else None
         wvw_rank = payload.get("wvw_rank")
         wvw_rank_value = wvw_rank if isinstance(wvw_rank, int) else None
+        team_id = payload.get("wvw_team_id")
+        team_value = team_id if isinstance(team_id, int) else None
         world_id = payload.get("world")
         world_value = world_id if isinstance(world_id, int) else None
-        return account_name_value, wvw_rank_value, world_value
-
-    async def _fetch_world_name(self, world_id: int) -> Optional[str]:
-        if world_id in self._world_cache:
-            return self._world_cache[world_id]
-        try:
-            payload = await self._fetch_json(
-                "https://api.guildwars2.com/v2/worlds", params={"ids": str(world_id)}
-            )
-        except ValueError:
-            return None
-        if isinstance(payload, list) and payload:
-            name = payload[0].get("name")
-            if isinstance(name, str) and name.strip():
-                self._world_cache[world_id] = name.strip()
-                return self._world_cache[world_id]
-        return None
+        return account_name_value, wvw_rank_value, team_value or world_value
 
     def _friendly_guild_label(
         self, guild_id: str, guild_details: Mapping[str, str]
@@ -1220,8 +1206,7 @@ class SelectCog(commands.Cog):
                 if wvw_rank is not None:
                     wvw_rank_label = str(wvw_rank)
                 if world_id:
-                    world_name = await self._fetch_world_name(world_id)
-                    wvw_team_label = world_name or f"World {world_id}"
+                    wvw_team_label = WVW_SERVER_NAMES.get(world_id, f"World {world_id}")
             except ValueError:
                 LOGGER.warning(
                     "Failed to fetch account details for select member lookup.",
