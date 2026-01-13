@@ -250,6 +250,19 @@ class SelectCog(commands.Cog):
         else:
             await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
 
+    async def _send_message(
+        self,
+        interaction: discord.Interaction,
+        *,
+        content: str,
+        ephemeral: bool = True,
+        use_followup: bool = False,
+    ) -> None:
+        if use_followup or interaction.response.is_done():
+            await interaction.followup.send(content=content, ephemeral=ephemeral)
+        else:
+            await interaction.response.send_message(content=content, ephemeral=ephemeral)
+
     async def _safe_followup(
         self,
         interaction: discord.Interaction,
@@ -270,6 +283,28 @@ class SelectCog(commands.Cog):
         except discord.NotFound:
             LOGGER.warning("Interaction expired before results could be sent")
 
+    async def _safe_followup_messages(
+        self,
+        interaction: discord.Interaction,
+        *,
+        contents: Sequence[str],
+        files: Optional[Sequence[discord.File]] = None,
+    ) -> None:
+        """Send one or more followup messages, retrying only if interaction is active."""
+
+        if not contents:
+            return
+
+        try:
+            await interaction.followup.send(
+                content=contents[0],
+                files=list(files) if files is not None else [],
+                ephemeral=True,
+            )
+            for content in contents[1:]:
+                await interaction.followup.send(content=content, ephemeral=True)
+        except discord.NotFound:
+            LOGGER.warning("Interaction expired before results could be sent")
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
@@ -685,11 +720,9 @@ class SelectCog(commands.Cog):
             return
 
         if not interaction.guild:
-            await self._send_embed(
+            await self._send_message(
                 interaction,
-                title="Select",
-                description="This command can only be used in a server.",
-                colour=BRAND_COLOUR,
+                content="Select: This command can only be used in a server.",
             )
             return
 
@@ -713,11 +746,9 @@ class SelectCog(commands.Cog):
             group_by = group_by.lower()
         allowed_groups = {"guild", "role", "account", "discord"}
         if group_by and group_by not in allowed_groups:
-            await self._send_embed(
+            await self._send_message(
                 interaction,
-                title="Select",
-                description="Unsupported group. Choose guild, role, account, or discord.",
-                colour=BRAND_COLOUR,
+                content="Select: Unsupported group. Choose guild, role, account, or discord.",
             )
             return
 
@@ -725,10 +756,9 @@ class SelectCog(commands.Cog):
 
         results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
         if not results:
-            await self._send_embed(
+            await self._send_message(
                 interaction,
-                title="Select",
-                description="No stored API keys were found for this server.",
+                content="Select: No stored API keys were found for this server.",
                 use_followup=True,
             )
             return
@@ -794,14 +824,12 @@ class SelectCog(commands.Cog):
                         canonical_character = entries[0][0]
                         break
                 if not canonical_character:
-                    await self._send_embed(
+                    await self._send_message(
                         interaction,
-                        title="Select",
-                        description=(
-                            "No stored characters matched that name. Try selecting a name "
+                        content=(
+                            "Select: No stored characters matched that name. Try selecting a name "
                             "from the autocomplete list or refresh your API keys with `/apikey update`."
                         ),
-                        colour=BRAND_COLOUR,
                         use_followup=True,
                     )
                     return
@@ -810,10 +838,9 @@ class SelectCog(commands.Cog):
                 fset.character_labels = canonical_labels
 
         if not bundles:
-            await self._send_embed(
+            await self._send_message(
                 interaction,
-                title="Select",
-                description="No stored API keys were found for this server.",
+                content="Select: No stored API keys were found for this server.",
                 use_followup=True,
             )
             return
@@ -900,10 +927,9 @@ class SelectCog(commands.Cog):
                 break
 
         if not matched:
-            await self._send_embed(
+            await self._send_message(
                 interaction,
-                title="Select",
-                description="No members matched the provided filters.",
+                content="Select: No members matched the provided filters.",
                 use_followup=True,
             )
             return
@@ -999,25 +1025,16 @@ class SelectCog(commands.Cog):
             prefix = "Filters" if len(filter_sets) == 1 else f"Filters set {idx}"
             filters_label.append(f"{prefix}: {', '.join(parts)}")
 
-        summary_embed = self._embed(
-            title="Select results",
-            description="",
-        )
-        summary_embed.add_field(
-            name="Filters",
-            value=self._trim_field("```\n" + "\n".join(filters_label) + "\n```"),
-            inline=False,
-        )
-        summary_embed.add_field(
-            name="Group by",
-            value=group_by.capitalize() if group_by else "None",
-            inline=False,
-        )
-        summary_embed.add_field(
-            name="Matches",
-            value=str(len(matched)),
-            inline=False,
-        )
+        summary_lines = [
+            "Select results",
+            "Filters:",
+            "```",
+            *filters_label,
+            "```",
+            f"Group by: {group_by.capitalize() if group_by else 'None'}",
+            f"Matches: {len(matched)}",
+        ]
+        summary_content = "\n".join(summary_lines)
 
         files: List[discord.File] = []
         if as_csv:
@@ -1149,29 +1166,12 @@ class SelectCog(commands.Cog):
                     )
                 )
 
-        match_embeds: List[discord.Embed] = []
-        if match_blocks:
-            current: List[str] = []
-            current_len = 0
-            for block in match_blocks:
-                block_len = len(block) + (2 if current else 0)
-                if current and current_len + block_len > 3800:
-                    embed = self._embed(title="Matches", description="\n\n".join(current))
-                    match_embeds.append(embed)
-                    current = []
-                    current_len = 0
+        contents = [summary_content]
+        contents.extend(match_blocks)
 
-                if block:
-                    current.append(block)
-                    current_len += block_len
-
-            if current:
-                embed = self._embed(title="Matches", description="\n\n".join(current))
-                match_embeds.append(embed)
-
-        await self._safe_followup(
+        await self._safe_followup_messages(
             interaction,
-            embeds=[summary_embed, *match_embeds] if match_embeds else [summary_embed],
+            contents=contents,
             files=files,
         )
 
