@@ -141,64 +141,6 @@ class SelectCog(commands.Cog):
         table = "\n".join(lines)
         return f"```\n{table}\n```" if code_block else table
 
-    def _table_sections(
-        self,
-        *,
-        base_title: str,
-        headers: Sequence[str],
-        rows: Sequence[Sequence[str]],
-        placeholder: str = "None",
-        limit: int = 1800,
-    ) -> List[str]:
-        """Format one or more text sections containing tables under a character limit."""
-
-        def _truncate_table(table: str, allowed_length: int) -> str:
-            if allowed_length <= 0:
-                return ""
-            if table.startswith("```\n") and table.endswith("\n```"):
-                body = table[4:-4]
-                allowed_body_length = max(0, allowed_length - 8)
-                if len(body) <= allowed_body_length:
-                    return table
-                truncated_body = body[: max(0, allowed_body_length - 3)] + "..."
-                return f"```\n{truncated_body}\n```"
-            return table[:allowed_length]
-
-        if not rows:
-            return [f"**{base_title}**\n{placeholder}"]
-
-        remaining_rows = list(rows)
-        sections: List[str] = []
-        part = 1
-        while remaining_rows:
-            chunk: List[Sequence[str]] = []
-            while remaining_rows:
-                candidate_row = remaining_rows[0]
-                candidate_chunk = chunk + [candidate_row]
-                candidate_table = self._format_table(headers, candidate_chunk)
-                candidate_title = (
-                    base_title if part == 1 else f"{base_title} (part {part})"
-                )
-                candidate_content = f"**{candidate_title}**\n{candidate_table}"
-                if len(candidate_content) > limit:
-                    break
-                chunk.append(remaining_rows.pop(0))
-
-            if not chunk:
-                chunk.append(remaining_rows.pop(0))
-
-            title = base_title if part == 1 else f"{base_title} (part {part})"
-            table = self._format_table(headers, chunk)
-            content = f"**{title}**\n{table}"
-            if len(content) > limit:
-                allowed_table_length = max(0, limit - len(f"**{title}**\n"))
-                table = _truncate_table(table, allowed_table_length)
-                content = f"**{title}**\n{table}" if table else f"**{title}**"
-            sections.append(content)
-            part += 1
-
-        return sections
-
     @staticmethod
     def _trim_field(value: str, limit: int = 1024) -> str:
         if len(value) <= limit:
@@ -964,9 +906,10 @@ class SelectCog(commands.Cog):
             if group_by == "guild":
                 keys = matched_guilds or ["No guilds"]
             elif group_by == "role":
-                keys = mapped_role_mentions or matched_roles
-                if not keys:
-                    keys = ["No mapped roles"]
+                role_names = [
+                    role.name for role in member.roles if not role.is_default()
+                ]
+                keys = role_names or ["No roles"]
             elif group_by == "account":
                 keys = [
                     ", ".join(account_names)
@@ -1025,15 +968,13 @@ class SelectCog(commands.Cog):
             prefix = "Filters" if len(filter_sets) == 1 else f"Filters set {idx}"
             filters_label.append(f"{prefix}: {', '.join(parts)}")
 
-        summary_lines = [
-            "Select results",
-            "Filters:",
-            "```",
-            *filters_label,
-            "```",
-            f"Group by: {group_by.capitalize() if group_by else 'None'}",
-            f"Matches: {len(matched)}",
-        ]
+        summary_lines = ["Select results", "Filters:", *filters_label]
+        summary_lines.extend(
+            [
+                f"Group by: {group_by.capitalize() if group_by else 'None'}",
+                f"Matches: {len(matched)}",
+            ]
+        )
         summary_content = "\n".join(summary_lines)
 
         files: List[discord.File] = []
@@ -1100,19 +1041,6 @@ class SelectCog(commands.Cog):
             for group, entries in sorted(
                 grouped.items(), key=lambda item: (-len(item[1]), item[0].casefold())
             ):
-                display_group = group
-                if (
-                    group_by == "role"
-                    and group.startswith("<@&")
-                    and group.endswith(">")
-                ):
-                    try:
-                        role_id = int(group.strip("<@&>"))
-                    except ValueError:
-                        role_id = None
-                    role_obj = interaction.guild.get_role(role_id) if role_id else None
-                    display_group = role_obj.name if role_obj else "Role"
-
                 group_rows: List[List[str]] = []
                 for (
                     member,
@@ -1137,9 +1065,9 @@ class SelectCog(commands.Cog):
                             if label
                         }.values()
                     )
-                    role_labels = self._role_labels(
-                        mapped_role_mentions or matched_roles, interaction.guild
-                    )
+                    role_labels = [
+                        role.name for role in member.roles if not role.is_default()
+                    ]
                     characters_label = "; ".join(
                         [
                             f"{name} ({acct})" if acct else name
@@ -1150,19 +1078,20 @@ class SelectCog(commands.Cog):
                     row = [
                         f"{member.display_name} ({member.name})",
                         ", ".join(account_names) if account_names else "Unknown",
-                        ", ".join(role_labels) if role_labels else "No mapped roles",
+                        ", ".join(role_labels) if role_labels else "No roles",
                         ", ".join(guilds_label) if guilds_label else "No guilds",
                     ]
                     if show_characters:
                         row.append(characters_label or "None")
                     group_rows.append(row)
 
-                table_title = display_group if group_by else "Matches"
-                match_blocks.extend(
-                    self._table_sections(
-                        base_title=table_title,
+                table_title = group if group_by else "Matches"
+                match_blocks.append(table_title)
+                match_blocks.append(
+                    self._format_table(
                         headers=headers,
                         rows=group_rows,
+                        code_block=False,
                     )
                 )
 
