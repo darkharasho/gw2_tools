@@ -349,6 +349,8 @@ class AccountsCog(commands.Cog):
             LOGGER.exception("Initial cache refresh failed")
 
     async def _refresh_member_cache(self) -> None:
+        users_to_sync: Set[Tuple[int, int]] = set()
+
         for guild_id, user_id, record in self.bot.storage.all_api_keys():
             guild_obj = self.bot.get_guild(guild_id)
             if not guild_obj or not guild_obj.get_member(user_id):
@@ -411,6 +413,24 @@ class AccountsCog(commands.Cog):
                 updated_at=utcnow(),
             )
             self.bot.storage.upsert_api_key(guild_id, user_id, refreshed)
+            users_to_sync.add((guild_id, user_id))
+
+        for guild_id, user_id in users_to_sync:
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                continue
+            member = guild.get_member(user_id)
+            if not member:
+                continue
+
+            try:
+                await self._sync_roles(guild, member)
+            except Exception:
+                LOGGER.exception(
+                    "Failed to sync roles for user %s in guild %s during weekly refresh",
+                    user_id,
+                    guild_id,
+                )
 
     async def _fetch_guild_members(
         self, guild_id: str, *, api_key: str
