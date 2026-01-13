@@ -362,7 +362,7 @@ class SelectCog(commands.Cog):
 
     async def _fetch_account_summary(
         self, api_key: str
-    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+    ) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
         payload = await self._fetch_json(
             "https://api.guildwars2.com/v2/account", api_key=api_key
         )
@@ -374,7 +374,7 @@ class SelectCog(commands.Cog):
         world_value = world_id if isinstance(world_id, int) else None
         wvw_guild_id = payload.get("wvw_guild_id")
         wvw_guild_value = wvw_guild_id if isinstance(wvw_guild_id, str) else None
-        return account_name_value, team_value or world_value, wvw_guild_value
+        return account_name_value, team_value, world_value, wvw_guild_value
 
     async def _build_gw2_account_embed(
         self,
@@ -388,16 +388,25 @@ class SelectCog(commands.Cog):
         wvw_guild_label = "None"
 
         try:
-            fetched_name, world_id, wvw_guild_id = await self._fetch_account_summary(
-                record.key
-            )
+            (
+                fetched_name,
+                wvw_team_id,
+                world_id,
+                wvw_guild_id,
+            ) = await self._fetch_account_summary(record.key)
             if fetched_name:
                 account_name = fetched_name
-            if world_id:
-                wvw_team_label = WVW_SERVER_NAMES.get(world_id, "Unknown")
+            team_candidates = [
+                team_id for team_id in (wvw_team_id, world_id) if team_id
+            ]
+            for team_id in team_candidates:
+                wvw_team_label = WVW_SERVER_NAMES.get(team_id, "Unknown")
+                if wvw_team_label != "Unknown":
+                    break
             if wvw_guild_id:
-                wvw_guild_detail = await self._cached_guild_labels([wvw_guild_id])
-                wvw_guild_label = wvw_guild_detail.get(wvw_guild_id, wvw_guild_id)
+                normalized_id = normalise_guild_id(wvw_guild_id)
+                wvw_guild_detail = await self._cached_guild_labels([normalized_id])
+                wvw_guild_label = wvw_guild_detail.get(normalized_id, wvw_guild_id)
         except ValueError:
             LOGGER.warning(
                 "Failed to fetch account details for select lookup.",
