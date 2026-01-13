@@ -4,15 +4,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-<<<<<<< HEAD
 import re
-from datetime import datetime, timedelta, timezone
-=======
 import textwrap
-import re
 from datetime import datetime, timedelta, timezone
 from io import StringIO
->>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
 from typing import Any, Iterable, Mapping, Optional
 
 import aiohttp
@@ -21,10 +16,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import GW2ToolsBot
-<<<<<<< HEAD
-=======
 from ..branding import BRAND_COLOUR
->>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
 from ..http_utils import read_response_text
 from ..storage import normalise_guild_id, utcnow
 
