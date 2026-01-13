@@ -7,3 +7,9 @@ brotli>=1.1.0
 zstandard>=0.22.0
 requests>=2.31.0
 markdownify>=0.13.1
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.1
+aioresponses>=0.7.4
