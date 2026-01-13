@@ -1166,13 +1166,23 @@ class SelectCog(commands.Cog):
                     )
                 )
 
-        contents = [summary_content]
-        contents.extend(match_blocks)
+        output_buffer = io.StringIO()
+        output_buffer.write(summary_content)
+        output_buffer.write("\n\n")
+        if match_blocks:
+            output_buffer.write("\n\n".join(match_blocks))
+            output_buffer.write("\n")
+        output_buffer.seek(0)
+
+        output_files = [
+            discord.File(fp=output_buffer, filename="select_results.txt"),
+            *files,
+        ]
 
         await self._safe_followup_messages(
             interaction,
-            contents=contents,
-            files=files,
+            contents=["Select results attached."],
+            files=output_files,
         )
 
     @select.command(
