@@ -350,6 +350,24 @@ class AccountsCog(commands.Cog):
 
     async def _refresh_member_cache(self) -> None:
         for guild_id, user_id, record in self.bot.storage.all_api_keys():
+            guild_obj = self.bot.get_guild(guild_id)
+            if not guild_obj or not guild_obj.get_member(user_id):
+                deleted = self.bot.storage.delete_api_key(
+                    guild_id, user_id, record.name
+                )
+                LOGGER.warning(
+                    "Removed API key for departed member during refresh.\n"
+                    "Guild: %s (%s)\n"
+                    "User ID: %s\n"
+                    "Key Name: %s\n"
+                    "Deleted: %s",
+                    guild_obj.name if guild_obj else "Unknown Guild",
+                    guild_id,
+                    user_id,
+                    record.name,
+                    deleted,
+                )
+                continue
             try:
                 (
                     permissions,
@@ -362,7 +380,6 @@ class AccountsCog(commands.Cog):
                     record.key, allow_missing_permissions=True
                 )
             except ValueError as exc:
-                guild_obj = self.bot.get_guild(guild_id)
                 guild_name = guild_obj.name if guild_obj else "Unknown Guild"
                 user_obj = self.bot.get_user(user_id)
                 user_str = f"{user_obj} ({user_obj.display_name})" if user_obj else "Unknown User"
