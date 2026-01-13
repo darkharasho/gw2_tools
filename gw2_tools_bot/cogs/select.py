@@ -382,6 +382,7 @@ class SelectCog(commands.Cog):
         title: str,
         record: "ApiKeyRecord",
         account_label: Optional[str] = None,
+        member: Optional[discord.Member] = None,
     ) -> discord.Embed:
         account_name = account_label or record.account_name or "Unknown account"
         wvw_team_label = "Unassigned"
@@ -425,6 +426,16 @@ class SelectCog(commands.Cog):
         embed.add_field(
             name="Username",
             value=self._trim_field(f"```\n{account_name}\n```"),
+            inline=False,
+        )
+        if member:
+            discord_label = f"{member.display_name} ({member.name})"
+            discord_detail = f"{discord_label}\nID: {member.id}"
+        else:
+            discord_detail = "Unknown"
+        embed.add_field(
+            name="Discord",
+            value=self._trim_field(f"```\n{discord_detail}\n```"),
             inline=False,
         )
         embed.add_field(
@@ -1264,6 +1275,7 @@ class SelectCog(commands.Cog):
             embed = await self._build_gw2_account_embed(
                 title=f"{member.display_name} | {member.name}",
                 record=record,
+                member=member,
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             embeds.append(embed)
@@ -1293,20 +1305,20 @@ class SelectCog(commands.Cog):
 
         query = account_name.strip().casefold()
         results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
-        exact_match: Optional[ApiKeyRecord] = None
-        partial_match: Optional[ApiKeyRecord] = None
-        for _, _, record in results:
+        exact_match: Optional[Tuple[int, ApiKeyRecord]] = None
+        partial_match: Optional[Tuple[int, ApiKeyRecord]] = None
+        for _, user_id, record in results:
             if not record.account_name:
                 continue
             candidate = record.account_name.casefold()
             if candidate == query:
-                exact_match = record
+                exact_match = (user_id, record)
                 break
             if query and query in candidate and partial_match is None:
-                partial_match = record
+                partial_match = (user_id, record)
 
-        record = exact_match or partial_match
-        if not record:
+        match = exact_match or partial_match
+        if not match:
             await self._send_message(
                 interaction,
                 content="Select: No stored API keys matched that account name.",
@@ -1314,11 +1326,14 @@ class SelectCog(commands.Cog):
             )
             return
 
+        user_id, record = match
+        discord_member = interaction.guild.get_member(user_id)
         title = f"{record.account_name or account_name} | GW2 account"
         embed = await self._build_gw2_account_embed(
             title=title,
             record=record,
             account_label=record.account_name or account_name,
+            member=discord_member,
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -1346,6 +1361,7 @@ class SelectCog(commands.Cog):
         query_key = query.casefold()
         results = self.bot.storage.query_api_keys(guild_id=interaction.guild.id)
         matched_record: Optional[ApiKeyRecord] = None
+        matched_user_id: Optional[int] = None
         matched_character = query
 
         for guild_id, user_id, record in results:
@@ -1353,6 +1369,7 @@ class SelectCog(commands.Cog):
             for name in character_names:
                 if name.casefold() == query_key:
                     matched_record = record
+                    matched_user_id = user_id
                     matched_character = name
                     break
             if matched_record:
@@ -1370,6 +1387,7 @@ class SelectCog(commands.Cog):
             for name in characters:
                 if name.casefold() == query_key:
                     matched_record = record
+                    matched_user_id = user_id
                     matched_character = name
                     break
             if matched_record:
@@ -1384,10 +1402,16 @@ class SelectCog(commands.Cog):
             return
 
         title = f"{matched_character} | {matched_record.account_name or 'GW2 account'}"
+        discord_member = (
+            interaction.guild.get_member(matched_user_id)
+            if matched_user_id is not None
+            else None
+        )
         embed = await self._build_gw2_account_embed(
             title=title,
             record=matched_record,
             account_label=matched_record.account_name or "Unknown account",
+            member=discord_member,
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
