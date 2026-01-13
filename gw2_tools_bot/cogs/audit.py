@@ -27,10 +27,7 @@ GW2_LOG_FETCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
 AUDIT_CHANNEL_MESSAGE_LIMIT = 1900
 AUDIT_QUERY_LIMIT = 25
 GW2_QUERY_LIMIT = 25
-<<<<<<< HEAD
-=======
 AUDIT_RETENTION_DAYS = 30
->>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
 
 DISCORD_EVENT_TITLES = {
     "member_join": "Member joined",
@@ -38,10 +35,6 @@ DISCORD_EVENT_TITLES = {
     "member_kick": "Member kicked",
     "member_ban": "Member banned",
     "member_unban": "Member unbanned",
-<<<<<<< HEAD
-    "message_delete": "Message deleted",
-    "message_edit": "Message edited",
-=======
     "member_role_update": "Member roles updated",
     "member_server_mute": "Member server muted",
     "member_server_unmute": "Member server unmuted",
@@ -57,7 +50,6 @@ DISCORD_EVENT_TITLES = {
     "channel_create": "Channel created",
     "channel_update": "Channel updated",
     "channel_delete": "Channel deleted",
->>>>>>> 9bb3e0141ddda61990372c60e88701b73ba51b1a
 }
 
 
