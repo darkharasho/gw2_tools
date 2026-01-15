@@ -211,31 +211,80 @@ class AuditCog(commands.Cog):
 
         user_id = user.id
         store = self.bot.storage.get_audit_store(interaction.guild.id)
-        rows = store.query_discord_events(
+        discord_rows = store.query_discord_events(
             user_id=user_id, user_query=str(user), limit=AUDIT_QUERY_LIMIT
         )
-        if not rows:
+        api_key_records = self.bot.storage.get_user_api_keys(
+            interaction.guild.id, user_id
+        )
+        account_names = {
+            record.account_name.strip()
+            for record in api_key_records
+            if record.account_name and record.account_name.strip()
+        }
+        gw2_rows = []
+        seen_gw2 = set()
+        for account_name in sorted(account_names):
+            for row in store.query_gw2_events(
+                user_query=account_name, limit=GW2_QUERY_LIMIT
+            ):
+                key = row["log_id"] if row["log_id"] is not None else row["id"]
+                if key in seen_gw2:
+                    continue
+                seen_gw2.add(key)
+                gw2_rows.append(row)
+        if not discord_rows and not gw2_rows:
             await interaction.response.send_message(
-                "No Discord audit entries found for that user.",
+                "No audit entries found for that user.",
                 ephemeral=True,
             )
             return
 
+        combined_rows: list[tuple[datetime, list[str]]] = []
+        for row in discord_rows:
+            formatted = self._format_discord_table_row(row, guild=interaction.guild)
+            combined_rows.append(
+                (
+                    self._parse_timestamp_for_sort(row["created_at"]),
+                    [
+                        formatted[0],
+                        "Discord",
+                        formatted[1],
+                        formatted[2],
+                        formatted[3],
+                        formatted[4],
+                    ],
+                )
+            )
+        for row in gw2_rows:
+            formatted = self._format_gw2_table_row(row)
+            combined_rows.append(
+                (
+                    self._parse_timestamp_for_sort(row["created_at"]),
+                    [
+                        formatted[0],
+                        "GW2",
+                        formatted[1],
+                        formatted[2],
+                        "-",
+                        formatted[3],
+                    ],
+                )
+            )
+        combined_rows.sort(key=lambda entry: entry[0], reverse=True)
+
         table = self._format_table(
-            headers=["Timestamp", "Event", "Actor", "Target", "Details"],
-            rows=[
-                self._format_discord_table_row(row, guild=interaction.guild)
-                for row in rows
-            ],
-            max_widths=[26, 20, 30, 30, 80],
+            headers=["Timestamp", "Source", "Event", "Actor/User", "Target", "Details"],
+            rows=[row for _, row in combined_rows],
+            max_widths=[26, 10, 20, 30, 30, 80],
             row_divider=True,
         )
         buffer = StringIO()
-        buffer.write("Discord audit results\n")
+        buffer.write("Audit results (Discord + Guild Wars 2)\n")
         buffer.write(table)
         buffer.write("\n")
         buffer.seek(0)
-        file = discord.File(fp=buffer, filename="discord_audit.txt")
+        file = discord.File(fp=buffer, filename="audit_results.txt")
         await interaction.response.send_message(file=file, ephemeral=True)
 
     @audit.command(
@@ -1078,6 +1127,20 @@ class AuditCog(commands.Cog):
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
         return timestamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    @staticmethod
+    def _parse_timestamp_for_sort(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            timestamp = value
+        else:
+            text = str(value)
+            try:
+                timestamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp
 
     @staticmethod
     def _format_table(
