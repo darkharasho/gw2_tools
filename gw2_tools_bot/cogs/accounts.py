@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -17,7 +18,7 @@ from discord.ext import commands, tasks
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
-from ..storage import ApiKeyRecord, normalise_guild_id, utcnow
+from ..storage import ISOFORMAT, ApiKeyRecord, normalise_guild_id, utcnow
 
 LOGGER = logging.getLogger(__name__)
 
@@ -332,14 +333,51 @@ class AccountsCog(commands.Cog):
             self.bot.storage.upsert_guild_details(cache_payload)
         return details
 
-    async def _cached_guild_labels(self, guild_ids: Sequence[str]) -> Dict[str, str]:
-        if not guild_ids:
-            return {}
+    @staticmethod
+    def _parse_timestamp(value: str) -> Optional[datetime]:
         try:
-            return await self._fetch_guild_details(guild_ids)
-        except ValueError:
-            LOGGER.warning("Guild lookup failed while fetching live labels", exc_info=True)
+            parsed = datetime.strptime(value, ISOFORMAT)
+        except (TypeError, ValueError):
+            return None
+        return parsed.replace(tzinfo=timezone.utc)
+
+    async def _cached_guild_labels(
+        self, guild_ids: Sequence[str], *, api_key: Optional[str] = None
+    ) -> Dict[str, str]:
+        normalized = [
+            self._normalise_guild_id(guild_id)
+            for guild_id in guild_ids
+            if isinstance(guild_id, str) and self._normalise_guild_id(guild_id)
+        ]
+        if not normalized:
             return {}
+
+        cached = self.bot.storage.get_guild_details(normalized)
+        labels: Dict[str, str] = {}
+        stale: List[str] = []
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+
+        for guild_id in normalized:
+            detail = cached.get(guild_id)
+            if not detail:
+                stale.append(guild_id)
+                continue
+            label, updated_at = detail
+            labels[guild_id] = label
+            updated = self._parse_timestamp(updated_at)
+            if not updated or updated < cutoff:
+                stale.append(guild_id)
+
+        if stale:
+            try:
+                refreshed = await self._fetch_guild_details(stale, api_key=api_key)
+                labels.update(refreshed)
+            except ValueError:
+                LOGGER.warning(
+                    "Guild lookup failed while refreshing cached labels", exc_info=True
+                )
+
+        return labels
 
     async def _run_initial_refreshes(self) -> None:
         await self.bot.wait_until_ready()
@@ -622,7 +660,7 @@ class AccountsCog(commands.Cog):
                 if isinstance(guild_id, str) and guild_id.strip()
             }
         )
-        guild_details = await self._fetch_guild_details(guild_ids, api_key=api_key)
+        guild_details = await self._cached_guild_labels(guild_ids, api_key=api_key)
         characters = await self._fetch_character_names(api_key)
         return permissions, guild_ids, guild_details, account_name, missing, characters
 
