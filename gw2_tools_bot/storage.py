@@ -1205,7 +1205,8 @@ class StorageManager:
             payload["guild_role_ids"] = cleaned_roles
         else:
             payload["guild_role_ids"] = {}
-        preferred_allowlist = payload.get("preferred_guild_role_allowlist")
+        legacy_blacklist = payload.pop("preferred_guild_role_blacklist", None)
+        preferred_allowlist = payload.get("preferred_guild_role_allowlist") or legacy_blacklist
         if isinstance(preferred_allowlist, list):
             cleaned_allowlist: List[int] = []
             seen: set[int] = set()
