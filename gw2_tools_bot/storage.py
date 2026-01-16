@@ -208,6 +208,7 @@ class GuildConfig:
 
     moderator_role_ids: List[int]
     guild_role_ids: Dict[str, int] = field(default_factory=dict)
+    preferred_guild_role_allowlist: List[int] = field(default_factory=list)
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
     update_notes_channel_id: Optional[int] = None
@@ -438,10 +439,18 @@ class ApiKeyStore:
                     label TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS preferred_guild_roles (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(guild_id, user_id)
+                );
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild_user ON api_keys(guild_id, user_id);
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild ON api_keys(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_api_key_guilds_lookup ON api_key_guilds(guild_id, api_key_id);
                 CREATE INDEX IF NOT EXISTS idx_api_key_guilds_api ON api_key_guilds(api_key_id);
+                CREATE INDEX IF NOT EXISTS idx_preferred_guild_roles_role ON preferred_guild_roles(guild_id, role_id);
                 """
             )
 
@@ -509,6 +518,47 @@ class ApiKeyStore:
             return default
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
+
+    def get_preferred_guild_role(self, guild_id: int, user_id: int) -> Optional[int]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT role_id FROM preferred_guild_roles WHERE guild_id = ? AND user_id = ?",
+                (guild_id, user_id),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            return int(row["role_id"])
+        except (TypeError, ValueError):
+            return None
+
+    def set_preferred_guild_role(
+        self, guild_id: int, user_id: int, role_id: Optional[int]
+    ) -> None:
+        with self._connect() as connection:
+            if role_id is None:
+                connection.execute(
+                    "DELETE FROM preferred_guild_roles WHERE guild_id = ? AND user_id = ?",
+                    (guild_id, user_id),
+                )
+                return
+            connection.execute(
+                """
+                INSERT INTO preferred_guild_roles (guild_id, user_id, role_id, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    role_id = excluded.role_id,
+                    updated_at = excluded.updated_at
+                """,
+                (guild_id, user_id, role_id, utcnow()),
+            )
+
+    def clear_preferred_guild_role_for_role(self, guild_id: int, role_id: int) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM preferred_guild_roles WHERE guild_id = ? AND role_id = ?",
+                (guild_id, role_id),
+            )
 
     @staticmethod
     def _normalise_permissions(permissions: Iterable[str]) -> List[str]:
@@ -1155,6 +1205,30 @@ class StorageManager:
             payload["guild_role_ids"] = cleaned_roles
         else:
             payload["guild_role_ids"] = {}
+        legacy_blacklist = payload.pop("preferred_guild_role_blacklist", None)
+        preferred_allowlist = payload.get("preferred_guild_role_allowlist") or legacy_blacklist
+        if isinstance(preferred_allowlist, list):
+            cleaned_allowlist: List[int] = []
+            seen: set[int] = set()
+            for role_id in preferred_allowlist:
+                if isinstance(role_id, bool):
+                    continue
+                if isinstance(role_id, int):
+                    value = role_id
+                elif isinstance(role_id, str):
+                    try:
+                        value = int(role_id)
+                    except ValueError:
+                        continue
+                else:
+                    continue
+                if value in seen:
+                    continue
+                cleaned_allowlist.append(value)
+                seen.add(value)
+            payload["preferred_guild_role_allowlist"] = cleaned_allowlist
+        else:
+            payload["preferred_guild_role_allowlist"] = []
         comp_payload = payload.get("comp")
         if isinstance(comp_payload, dict):
             payload["comp"] = CompConfig.from_dict(comp_payload)
@@ -1283,6 +1357,26 @@ class StorageManager:
                     except ValueError:
                         continue
             config.guild_role_ids = cleaned_roles
+        if config.preferred_guild_role_allowlist:
+            cleaned_allowlist: List[int] = []
+            seen: set[int] = set()
+            for role_id in config.preferred_guild_role_allowlist:
+                if isinstance(role_id, bool):
+                    continue
+                if isinstance(role_id, int):
+                    value = role_id
+                elif isinstance(role_id, str):
+                    try:
+                        value = int(role_id)
+                    except ValueError:
+                        continue
+                else:
+                    continue
+                if value in seen:
+                    continue
+                cleaned_allowlist.append(value)
+                seen.add(value)
+            config.preferred_guild_role_allowlist = cleaned_allowlist
         if config.alliance_guild_id:
             cleaned_guild_id = normalise_guild_id(config.alliance_guild_id)
             config.alliance_guild_id = cleaned_guild_id or None
@@ -1459,6 +1553,17 @@ class StorageManager:
 
     def all_api_keys(self) -> List[Tuple[int, int, ApiKeyRecord]]:
         return self.api_key_store.all_api_keys()
+
+    def get_preferred_guild_role(self, guild_id: int, user_id: int) -> Optional[int]:
+        return self.api_key_store.get_preferred_guild_role(guild_id, user_id)
+
+    def set_preferred_guild_role(
+        self, guild_id: int, user_id: int, role_id: Optional[int]
+    ) -> None:
+        self.api_key_store.set_preferred_guild_role(guild_id, user_id, role_id)
+
+    def clear_preferred_guild_role_for_role(self, guild_id: int, role_id: int) -> None:
+        self.api_key_store.clear_preferred_guild_role_for_role(guild_id, role_id)
 
     def all_gw2_guild_ids(self) -> List[str]:
         return self.api_key_store.all_gw2_guild_ids()
