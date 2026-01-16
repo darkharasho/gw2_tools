@@ -17,7 +17,7 @@ from discord.ext import commands, tasks
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
-from ..storage import ApiKeyRecord, normalise_guild_id, utcnow
+from ..storage import ApiKeyRecord, GuildConfig, normalise_guild_id, utcnow
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,9 +30,9 @@ class AccountsCog(commands.Cog):
     guild_roles = app_commands.Group(
         name="guildroles", description="Configure Guild Wars 2 guild to role mappings."
     )
-    guild_role_blacklist = app_commands.Group(
-        name="blacklist",
-        description="Manage preferred guild role blacklist entries.",
+    guild_role_allowlist = app_commands.Group(
+        name="whitelist",
+        description="Manage preferred guild role allowlist entries.",
         parent=guild_roles,
     )
     guild_role_preferences = app_commands.Group(
@@ -706,17 +706,19 @@ class AccountsCog(commands.Cog):
             role_id for guild_id, role_id in normalized_role_map.items() if guild_id in guild_memberships
         }
         preferred_role_id = self.bot.storage.get_preferred_guild_role(guild.id, member.id)
-        if preferred_role_id and preferred_role_id in config.preferred_guild_role_blacklist:
-            preferred_role_id = None
-        if preferred_role_id:
+        allowlist_role_ids = set(config.preferred_guild_role_allowlist or [])
+        if preferred_role_id and preferred_role_id in allowlist_role_ids:
             preferred_role = guild.get_role(preferred_role_id)
             if preferred_role:
                 preferred_position = preferred_role.position
                 desired_role_ids = {
                     role_id
                     for role_id in desired_role_ids
-                    if (role := guild.get_role(role_id)) is not None
-                    and role.position <= preferred_position
+                    if role_id not in allowlist_role_ids
+                    or (
+                        (role := guild.get_role(role_id)) is not None
+                        and role.position <= preferred_position
+                    )
                 }
 
         me = guild.me
@@ -847,12 +849,30 @@ class AccountsCog(commands.Cog):
     # ------------------------------------------------------------------
     # Preferred guild roles
     # ------------------------------------------------------------------
+    def _preferred_role_choices(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        config: GuildConfig,
+    ) -> List[discord.Role]:
+        mapped_role_ids = set(config.guild_role_ids.values())
+        allowlist_ids = set(config.preferred_guild_role_allowlist or [])
+        eligible = [
+            role
+            for role in member.roles
+            if role is not None
+            and role.id in mapped_role_ids
+            and role.id in allowlist_ids
+        ]
+        eligible.sort(key=lambda role: role.position, reverse=True)
+        return eligible
+
     @guild_role_preferences.command(
         name="set", description="Choose the highest guild role you want assigned."
     )
-    @app_commands.describe(role="Preferred Discord guild role")
+    @app_commands.describe(role_id="Preferred Discord guild role")
     async def set_preferred_guild_role(
-        self, interaction: discord.Interaction, role: discord.Role
+        self, interaction: discord.Interaction, role_id: str
     ) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await self._send_embed(
@@ -873,23 +893,37 @@ class AccountsCog(commands.Cog):
             )
             return
 
-        if role.id in config.preferred_guild_role_blacklist:
-            await self._send_embed(
-                interaction,
-                title="Preferred guild role",
-                description=f"{role.mention} is blocked from being selected as a preferred role.",
-                colour=BRAND_COLOUR,
-            )
-            return
-
-        mapped_role_ids = set(config.guild_role_ids.values())
-        if role.id not in mapped_role_ids:
+        if not config.preferred_guild_role_allowlist:
             await self._send_embed(
                 interaction,
                 title="Preferred guild role",
                 description=(
-                    f"{role.mention} is not mapped to a Guild Wars 2 guild. "
-                    "Ask a moderator to map it with /guildroles set before selecting it."
+                    "No roles are available for preferred selection yet. Ask a moderator to add roles to the "
+                    "/guildroles whitelist."
+                ),
+                colour=BRAND_COLOUR,
+            )
+            return
+
+        try:
+            selected_role_id = int(role_id)
+        except ValueError:
+            selected_role_id = None
+
+        eligible_roles = self._preferred_role_choices(
+            interaction.guild, interaction.user, config
+        )
+        selected_role = (
+            next((role for role in eligible_roles if role.id == selected_role_id), None)
+            if selected_role_id
+            else None
+        )
+        if not selected_role:
+            await self._send_embed(
+                interaction,
+                title="Preferred guild role",
+                description=(
+                    "That role is not available for preferred selection. Choose one of your whitelisted guild roles."
                 ),
                 colour=BRAND_COLOUR,
             )
@@ -897,7 +931,7 @@ class AccountsCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         self.bot.storage.set_preferred_guild_role(
-            interaction.guild.id, interaction.user.id, role.id
+            interaction.guild.id, interaction.user.id, selected_role.id
         )
 
         added, removed, error = await self._sync_roles(interaction.guild, interaction.user)
@@ -913,7 +947,7 @@ class AccountsCog(commands.Cog):
 
         embed = self._embed(
             title="Preferred guild role set",
-            description=f"Your preferred guild role is now {role.mention}.",
+            description=f"Your preferred guild role is now {selected_role.mention}.",
         )
         embed.add_field(
             name="Role sync",
@@ -921,6 +955,27 @@ class AccountsCog(commands.Cog):
             inline=False,
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @set_preferred_guild_role.autocomplete("role_id")
+    async def preferred_guild_role_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return []
+        config = self.bot.get_config(interaction.guild.id)
+        eligible_roles = self._preferred_role_choices(
+            interaction.guild, interaction.user, config
+        )
+        if not eligible_roles:
+            return []
+        current_lower = current.lower()
+        choices: List[app_commands.Choice[str]] = []
+        for role in eligible_roles:
+            if current_lower in role.name.lower():
+                choices.append(app_commands.Choice(name=role.name, value=str(role.id)))
+            if len(choices) >= 25:
+                break
+        return choices
 
     @guild_role_preferences.command(
         name="clear", description="Clear your preferred guild role selection."
@@ -1400,72 +1455,72 @@ class AccountsCog(commands.Cog):
             description="WvW membership checks will use the audited guild roster.",
         )
 
-    @guild_role_blacklist.command(
+    @guild_role_allowlist.command(
         name="add",
-        description="Blacklist a role so it cannot be chosen as a preferred guild role.",
+        description="Allow a role to be chosen as a preferred guild role.",
     )
-    @app_commands.describe(role="Discord role to blacklist from preferred selection")
-    async def add_preferred_guild_role_blacklist(
+    @app_commands.describe(role="Discord role to allow for preferred selection")
+    async def add_preferred_guild_role_allowlist(
         self, interaction: discord.Interaction, role: discord.Role
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
 
         config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
-        if role.id in config.preferred_guild_role_blacklist:
+        if role.id in config.preferred_guild_role_allowlist:
             await self._send_embed(
                 interaction,
-                title="Preferred role blacklist",
-                description=f"{role.mention} is already blocked from preferred selection.",
+                title="Preferred role allowlist",
+                description=f"{role.mention} is already available for preferred selection.",
             )
             return
 
-        config.preferred_guild_role_blacklist.append(role.id)
+        config.preferred_guild_role_allowlist.append(role.id)
+        self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
+        await self._send_embed(
+            interaction,
+            title="Preferred role allowlist updated",
+            description=f"{role.mention} can now be selected as a preferred guild role.",
+        )
+
+    @guild_role_allowlist.command(
+        name="remove",
+        description="Remove a role from the preferred guild role allowlist.",
+    )
+    @app_commands.describe(role="Discord role to remove from preferred selection")
+    async def remove_preferred_guild_role_allowlist(
+        self, interaction: discord.Interaction, role: discord.Role
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
+        if role.id not in config.preferred_guild_role_allowlist:
+            await self._send_embed(
+                interaction,
+                title="Preferred role allowlist",
+                description=f"{role.mention} is not currently allowed for preferred selection.",
+            )
+            return
+
+        config.preferred_guild_role_allowlist = [
+            role_id
+            for role_id in config.preferred_guild_role_allowlist
+            if role_id != role.id
+        ]
         self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
         self.bot.storage.clear_preferred_guild_role_for_role(interaction.guild.id, role.id)
         await self._send_embed(
             interaction,
-            title="Preferred role blacklist updated",
+            title="Preferred role allowlist updated",
             description=f"{role.mention} can no longer be selected as a preferred guild role.",
         )
 
-    @guild_role_blacklist.command(
-        name="remove",
-        description="Remove a role from the preferred guild role blacklist.",
-    )
-    @app_commands.describe(role="Discord role to allow for preferred selection again")
-    async def remove_preferred_guild_role_blacklist(
-        self, interaction: discord.Interaction, role: discord.Role
-    ) -> None:
-        if not await self.bot.ensure_authorised(interaction):
-            return
-
-        config = self.bot.get_config(interaction.guild.id)  # type: ignore[union-attr]
-        if role.id not in config.preferred_guild_role_blacklist:
-            await self._send_embed(
-                interaction,
-                title="Preferred role blacklist",
-                description=f"{role.mention} is not currently blacklisted.",
-            )
-            return
-
-        config.preferred_guild_role_blacklist = [
-            role_id
-            for role_id in config.preferred_guild_role_blacklist
-            if role_id != role.id
-        ]
-        self.bot.save_config(interaction.guild.id, config)  # type: ignore[union-attr]
-        await self._send_embed(
-            interaction,
-            title="Preferred role blacklist updated",
-            description=f"{role.mention} can now be selected as a preferred guild role.",
-        )
-
-    @guild_role_blacklist.command(
+    @guild_role_allowlist.command(
         name="list",
-        description="List roles blocked from being selected as preferred guild roles.",
+        description="List roles allowed to be selected as preferred guild roles.",
     )
-    async def list_preferred_guild_role_blacklist(
+    async def list_preferred_guild_role_allowlist(
         self, interaction: discord.Interaction
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
@@ -1474,28 +1529,28 @@ class AccountsCog(commands.Cog):
         if not interaction.guild:
             await self._send_embed(
                 interaction,
-                title="Preferred role blacklist",
+                title="Preferred role allowlist",
                 description="This command can only be used in a server.",
             )
             return
 
         config = self.bot.get_config(interaction.guild.id)
-        if not config.preferred_guild_role_blacklist:
+        if not config.preferred_guild_role_allowlist:
             await self._send_embed(
                 interaction,
-                title="Preferred role blacklist",
-                description="No roles are currently blocked from preferred selection.",
+                title="Preferred role allowlist",
+                description="No roles are currently available for preferred selection.",
             )
             return
 
         role_labels: List[str] = []
-        for role_id in config.preferred_guild_role_blacklist:
+        for role_id in config.preferred_guild_role_allowlist:
             role = interaction.guild.get_role(role_id)
             role_labels.append(role.mention if role else f"role ID {role_id}")
 
         await self._send_embed(
             interaction,
-            title="Preferred role blacklist",
+            title="Preferred role allowlist",
             description=self._format_list(role_labels),
         )
 

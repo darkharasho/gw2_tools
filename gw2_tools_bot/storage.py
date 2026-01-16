@@ -208,7 +208,7 @@ class GuildConfig:
 
     moderator_role_ids: List[int]
     guild_role_ids: Dict[str, int] = field(default_factory=dict)
-    preferred_guild_role_blacklist: List[int] = field(default_factory=list)
+    preferred_guild_role_allowlist: List[int] = field(default_factory=list)
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
     update_notes_channel_id: Optional[int] = None
@@ -1205,11 +1205,11 @@ class StorageManager:
             payload["guild_role_ids"] = cleaned_roles
         else:
             payload["guild_role_ids"] = {}
-        preferred_blacklist = payload.get("preferred_guild_role_blacklist")
-        if isinstance(preferred_blacklist, list):
-            cleaned_blacklist: List[int] = []
+        preferred_allowlist = payload.get("preferred_guild_role_allowlist")
+        if isinstance(preferred_allowlist, list):
+            cleaned_allowlist: List[int] = []
             seen: set[int] = set()
-            for role_id in preferred_blacklist:
+            for role_id in preferred_allowlist:
                 if isinstance(role_id, bool):
                     continue
                 if isinstance(role_id, int):
@@ -1223,11 +1223,11 @@ class StorageManager:
                     continue
                 if value in seen:
                     continue
-                cleaned_blacklist.append(value)
+                cleaned_allowlist.append(value)
                 seen.add(value)
-            payload["preferred_guild_role_blacklist"] = cleaned_blacklist
+            payload["preferred_guild_role_allowlist"] = cleaned_allowlist
         else:
-            payload["preferred_guild_role_blacklist"] = []
+            payload["preferred_guild_role_allowlist"] = []
         comp_payload = payload.get("comp")
         if isinstance(comp_payload, dict):
             payload["comp"] = CompConfig.from_dict(comp_payload)
@@ -1356,10 +1356,10 @@ class StorageManager:
                     except ValueError:
                         continue
             config.guild_role_ids = cleaned_roles
-        if config.preferred_guild_role_blacklist:
-            cleaned_blacklist: List[int] = []
+        if config.preferred_guild_role_allowlist:
+            cleaned_allowlist: List[int] = []
             seen: set[int] = set()
-            for role_id in config.preferred_guild_role_blacklist:
+            for role_id in config.preferred_guild_role_allowlist:
                 if isinstance(role_id, bool):
                     continue
                 if isinstance(role_id, int):
@@ -1373,9 +1373,9 @@ class StorageManager:
                     continue
                 if value in seen:
                     continue
-                cleaned_blacklist.append(value)
+                cleaned_allowlist.append(value)
                 seen.add(value)
-            config.preferred_guild_role_blacklist = cleaned_blacklist
+            config.preferred_guild_role_allowlist = cleaned_allowlist
         if config.alliance_guild_id:
             cleaned_guild_id = normalise_guild_id(config.alliance_guild_id)
             config.alliance_guild_id = cleaned_guild_id or None
