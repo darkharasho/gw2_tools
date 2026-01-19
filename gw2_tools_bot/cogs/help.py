@@ -22,6 +22,8 @@ PUBLIC_COMMANDS = {
     "apikey remove",
     "apikey help",
     "apikey list",
+    "guildrole clear",
+    "guildrole set",
     "gw2guild search",
     "help",
 }
