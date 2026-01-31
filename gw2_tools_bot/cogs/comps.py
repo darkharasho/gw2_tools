@@ -131,6 +131,21 @@ def _format_schedule_text(schedule: CompSchedule) -> str:
     return "Not scheduled."
 
 
+def _format_class_summary(classes: Sequence[CompClassConfig], *, max_items: int = 10) -> str:
+    if not classes:
+        return "No classes configured."
+    items: List[str] = []
+    for entry in classes[:max_items]:
+        if entry.required is None:
+            items.append(f"• {entry.name}")
+        else:
+            items.append(f"• {entry.name} ({entry.required})")
+    remaining = len(classes) - len(items)
+    if remaining > 0:
+        items.append(f"• +{remaining} more")
+    return "\n".join(items)
+
+
 def _resolve_timezone(value: str, *, strict: bool = True) -> tzinfo:
     cleaned = normalise_timezone(value)
     alias_key = cleaned.upper()
@@ -2073,7 +2088,7 @@ class CompCog(commands.GroupCog, name="comp"):
         selected_schedule_id: Optional[str] = None,
         include_schedules: bool = True,
     ) -> discord.Embed:
-        embed = discord.Embed(title="Guild Composition Settings", color=BRAND_COLOUR)
+        embed = discord.Embed(title="Guild Composition", color=BRAND_COLOUR)
         comp_config = config.comp
         if comp_config.channel_id:
             channel = guild.get_channel(comp_config.channel_id)
@@ -2084,7 +2099,6 @@ class CompCog(commands.GroupCog, name="comp"):
         else:
             channel = None
             channel_value = "Not set"
-        embed.add_field(name="Post Channel", value=channel_value, inline=False)
         if comp_config.ping_role_id:
             role = guild.get_role(comp_config.ping_role_id)
             if role:
@@ -2093,7 +2107,11 @@ class CompCog(commands.GroupCog, name="comp"):
                 role_value = f"<@&{comp_config.ping_role_id}>"
         else:
             role_value = "Not set"
-        embed.add_field(name="Ping Role", value=role_value, inline=False)
+        embed.add_field(
+            name="Posting",
+            value=f"Channel: {channel_value}\nPing: {role_value}",
+            inline=False,
+        )
 
         if include_schedules:
             schedules = config.comp_schedules
@@ -2115,10 +2133,9 @@ class CompCog(commands.GroupCog, name="comp"):
             embed.add_field(name="Schedules", value=schedule_value, inline=False)
 
         if active_preset:
-            preset_text = f"Linked to **{active_preset}**."
+            preset_text = f"Active: **{active_preset}**"
         else:
-            preset_text = "Not linked to a saved preset."
-        embed.add_field(name="Active Preset", value=preset_text, inline=False)
+            preset_text = "Active: Not set"
 
         presets = self.bot.storage.get_comp_presets(guild.id)
         if presets:
@@ -2130,7 +2147,11 @@ class CompCog(commands.GroupCog, name="comp"):
                 preset_value = ", ".join(preset_names)
         else:
             preset_value = "No presets saved."
-        embed.add_field(name="Presets", value=preset_value, inline=False)
+        embed.add_field(
+            name="Presets",
+            value=f"{preset_text}\nAvailable: {preset_value}",
+            inline=False,
+        )
 
         if comp_config.overview:
             overview_text = self._format_overview_text(
@@ -2139,20 +2160,17 @@ class CompCog(commands.GroupCog, name="comp"):
                 guild=guild,
                 channel=channel,
             )
-            embed.add_field(name="Composition Overview", value=overview_text, inline=False)
+            if len(overview_text) > 500:
+                overview_text = overview_text[:497] + "..."
+            embed.add_field(name="Overview", value=overview_text, inline=False)
         else:
-            embed.add_field(name="Composition Overview", value="No overview set.", inline=False)
+            embed.add_field(name="Overview", value="No overview set.", inline=False)
 
-        if comp_config.classes:
-            lines = []
-            for entry in comp_config.classes:
-                if entry.required is None:
-                    lines.append(f"• {entry.name}")
-                else:
-                    lines.append(f"• {entry.name} — {entry.required}")
-            embed.add_field(name="Configured Classes", value="\n".join(lines), inline=False)
-        else:
-            embed.add_field(name="Configured Classes", value="No classes configured.", inline=False)
+        embed.add_field(
+            name="Classes",
+            value=_format_class_summary(comp_config.classes),
+            inline=False,
+        )
         return embed
 
     def build_schedule_embed(
@@ -2162,7 +2180,7 @@ class CompCog(commands.GroupCog, name="comp"):
         *,
         selected_schedule_id: Optional[str] = None,
     ) -> discord.Embed:
-        embed = discord.Embed(title="Composition Schedule Settings", color=BRAND_COLOUR)
+        embed = discord.Embed(title="Scheduled Composition", color=BRAND_COLOUR)
         schedules = config.comp_schedules
         presets = self.bot.storage.get_comp_presets(guild.id)
         preset_lookup = {preset.name.casefold(): preset for preset in presets}
@@ -2183,7 +2201,11 @@ class CompCog(commands.GroupCog, name="comp"):
 
         schedule_text = _format_schedule_text(selected)
         preset_label = selected.preset_name or "Unlinked preset"
-        embed.add_field(name="Schedule", value=f"**{selected.name}**\n{schedule_text}", inline=False)
+        embed.add_field(
+            name="Schedule",
+            value=f"**{selected.name}**\n{schedule_text}",
+            inline=False,
+        )
         embed.add_field(name="Preset", value=preset_label, inline=False)
 
         preset = None
@@ -2192,20 +2214,11 @@ class CompCog(commands.GroupCog, name="comp"):
         if preset is None:
             embed.add_field(name="Composition", value="Preset not found.", inline=False)
         else:
-            classes = []
-            for entry in preset.config.classes:
-                if entry.required is None:
-                    classes.append(entry.name)
-                else:
-                    classes.append(f"{entry.name} ({entry.required})")
-            if classes:
-                max_classes = 10
-                class_list = classes[:max_classes]
-                if len(classes) > max_classes:
-                    class_list.append(f"...and {len(classes) - max_classes} more")
-                embed.add_field(name="Composition", value=", ".join(class_list), inline=False)
-            else:
-                embed.add_field(name="Composition", value="No classes configured.", inline=False)
+            embed.add_field(
+                name="Composition",
+                value=_format_class_summary(preset.config.classes),
+                inline=False,
+            )
 
             if preset.config.overview:
                 overview = preset.config.overview.strip()
