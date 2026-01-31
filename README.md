@@ -81,13 +81,12 @@ The RSS poller wakes up every 10 minutes. When it finds new entries it posts a r
 
 Guild moderators can organise strike, raid, or WvW squad signups through the `/comp` command group. The workflow is designed so admins can configure everything in a single flow and players can register themselves without additional permissions.
 
-1. Run `/comp manage` to open the configuration view. Pick the channel where future posts should appear, set the day or comma-separated days and time the signup should be published, and choose whether the schedule repeats weekly or is a one-off announcement. The timezone field accepts full IANA names such as `America/Los_Angeles` as well as common abbreviations like `PST` or `EST`.
-2. Click **Edit composition** to open the class editor modal. Add each profession or elite specialisation you want in the squad, optionally specifying the number of slots available. Class icons are sourced from `media/gw2wikiicons`, and the tool builds a grid of icons for the embed automatically.
-3. Use **Post preview** to review the generated embed before saving. When you confirm the settings the bot stores them in the guild configuration and schedules the next post.
+1. Run `/comp manage` to open the configuration view. Pick the channel where future posts should appear, optionally set a ping role, and use **Edit classes** / **Edit overview** to define a roster. The timezone field accepts full IANA names such as `America/Los_Angeles` as well as common abbreviations like `PST` or `EST`.
+2. Save lineups you want to reuse with **Save as preset**. Presets capture the configured classes and overview (without the live signup state), letting you prepare different rosters for strikes, raids, or WvW.
+3. Use **Add schedule** to attach a preset to a recurring post time. Each schedule stores its own day(s), time, and timezone, so you can create multiple recurring posts for different activities.
 4. When the scheduled time arrives the bot publishes an embed containing each configured class as an inline field. A dropdown menu appears under the message so members can select the class they want to play; the bot tracks selections, prevents users from taking multiple slots, and updates the counts instantly.
-5. Save lineups you want to reuse with **Save as preset**. Presets capture the configured classes, schedule, and overview without the live signup state, letting you prepare different rosters for strikes, raids, or WvW.
-6. Switch between stored presets from the dropdown at the top of the management view. Loading a preset immediately updates the guild configuration and marks it as the active preset so the next scheduled post uses the selected lineup.
-7. If you need to adjust the roster or schedule, rerun `/comp manage` to edit the configuration. Existing posts will update when members change their dropdown choice, and the next scheduled announcement will use your latest settings. Updating the configuration clears the active preset so you can resave it when you're happy with the changes.
+5. Use the schedule dropdown to review, edit, or delete schedules. **Post now** sends the currently selected schedule immediately.
+6. If you need to adjust a roster, load or update the preset, then edit the schedule to keep it in sync with the latest lineup.
 
 Presets can be renamed, overwritten, or deleted through the same management view, and each guild's presets are stored separately under `gw2_tools_bot/data/guild_<guild_id>/comp_presets.json` so servers only see their own rosters.
 
