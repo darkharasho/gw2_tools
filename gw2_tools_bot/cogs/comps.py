@@ -402,13 +402,20 @@ class CompSignupSelect(discord.ui.Select):
 
 
 class CompChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, view: "CompConfigView", default_channel: Optional[discord.abc.GuildChannel]):
+    def __init__(
+        self,
+        view: "CompConfigView",
+        default_channel: Optional[discord.abc.GuildChannel],
+        *,
+        row: Optional[int] = None,
+    ):
         super().__init__(
             placeholder="Select the channel for scheduled compositions",
             channel_types=(discord.ChannelType.text, discord.ChannelType.news),
             min_values=0,
             max_values=1,
             default_values=[default_channel] if default_channel else None,
+            row=row,
         )
         self.config_view = view
 
@@ -428,12 +435,19 @@ class CompChannelSelect(discord.ui.ChannelSelect):
 
 
 class CompRoleSelect(discord.ui.RoleSelect):
-    def __init__(self, view: "CompConfigView", default_role: Optional[discord.Role]):
+    def __init__(
+        self,
+        view: "CompConfigView",
+        default_role: Optional[discord.Role],
+        *,
+        row: Optional[int] = None,
+    ):
         super().__init__(
             placeholder="Select a role to ping with composition posts",
             min_values=0,
             max_values=1,
             default_values=[default_role] if default_role else None,
+            row=row,
         )
         self.config_view = view
 
@@ -523,7 +537,12 @@ class ScheduleModal(discord.ui.Modal):
             await interaction.response.send_message("Schedule name is required.", ephemeral=True)
             return
 
-        preset = self.config_view.find_preset(preset_value)
+        presets = self.config_view.cog.bot.storage.get_comp_presets(self.config_view.guild.id)
+        preset = None
+        for item in presets:
+            if item.name.casefold() == preset_value.casefold():
+                preset = item
+                break
         if not preset:
             await interaction.response.send_message(
                 "Preset not found. Select or save a preset first.",
@@ -722,14 +741,16 @@ class ClassesModal(discord.ui.Modal):
 
 
 class PostNowButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(style=discord.ButtonStyle.success, label="Post now")
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(style=discord.ButtonStyle.success, label="Post now", row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
         if not view:
             return
-        schedule = view.get_selected_schedule()
+        schedule = None
+        if hasattr(view, "get_selected_schedule"):
+            schedule = view.get_selected_schedule()  # type: ignore[call-arg]
         if schedule:
             _, _, comp_config = view.cog.resolve_comp_context(
                 view.guild.id, schedule_id=schedule.schedule_id
@@ -778,8 +799,8 @@ class PostNowButton(discord.ui.Button["CompConfigView"]):
 
 
 class CloseButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(style=discord.ButtonStyle.secondary, label="Close")
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(style=discord.ButtonStyle.secondary, label="Close", row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         if self.view and isinstance(self.view, CompConfigView):
@@ -820,7 +841,7 @@ class SavedCompSelect(discord.ui.Select):
 
 
 class SavePresetModal(discord.ui.Modal):
-    def __init__(self, view: "CompConfigView") -> None:
+    def __init__(self, view: "CompManageView") -> None:
         super().__init__(title="Save composition preset")
         self.config_view = view
         self.name_input = discord.ui.TextInput(
@@ -859,24 +880,23 @@ class SavePresetModal(discord.ui.Modal):
         )
 
 
-class SavePresetButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(label="Save as preset", style=discord.ButtonStyle.secondary)
+class SavePresetButton(discord.ui.Button["CompManageView"]):
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="Save as preset", style=discord.ButtonStyle.secondary, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
-        if not isinstance(view, CompConfigView):
+        if not isinstance(view, CompManageView):
             return
         await interaction.response.send_modal(SavePresetModal(view))
 
-
-class UpdatePresetButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(label="Update preset", style=discord.ButtonStyle.secondary)
+class UpdatePresetButton(discord.ui.Button["CompManageView"]):
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="Update preset", style=discord.ButtonStyle.secondary, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
-        if not isinstance(view, CompConfigView):
+        if not isinstance(view, CompManageView):
             return
         preset = view.get_selected_preset()
         if not preset:
@@ -899,13 +919,13 @@ class UpdatePresetButton(discord.ui.Button["CompConfigView"]):
         )
 
 
-class LoadPresetButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(label="Load preset", style=discord.ButtonStyle.primary)
+class LoadPresetButton(discord.ui.Button["CompManageView"]):
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="Load preset", style=discord.ButtonStyle.primary, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
-        if not isinstance(view, CompConfigView):
+        if not isinstance(view, CompManageView):
             return
         preset = view.get_selected_preset()
         if not preset:
@@ -922,18 +942,29 @@ class LoadPresetButton(discord.ui.Button["CompConfigView"]):
             ephemeral=True,
         )
 
-
-class DeletePresetButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(label="Delete preset", style=discord.ButtonStyle.danger)
+class DeletePresetButton(discord.ui.Button["CompManageView"]):
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="Delete preset", style=discord.ButtonStyle.danger, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
-        if not isinstance(view, CompConfigView):
+        if not isinstance(view, CompManageView):
             return
         preset = view.get_selected_preset()
         if not preset:
             await interaction.response.send_message("Select a preset to delete first.", ephemeral=True)
+            return
+        blocking = [
+            schedule.name
+            for schedule in view.config.comp_schedules
+            if schedule.preset_name
+            and schedule.preset_name.casefold() == preset.name.casefold()
+        ]
+        if blocking:
+            await interaction.response.send_message(
+                "Preset is still used by schedules: " + ", ".join(blocking),
+                ephemeral=True,
+            )
             return
         removed_active = False
         if view.config.comp_active_preset and view.config.comp_active_preset.casefold() == preset.name.casefold():
@@ -953,13 +984,14 @@ class DeletePresetButton(discord.ui.Button["CompConfigView"]):
 
 
 class SavedScheduleSelect(discord.ui.Select):
-    def __init__(self, view: "CompConfigView") -> None:
+    def __init__(self, view: "CompConfigView", *, row: Optional[int] = None) -> None:
         options, enabled = view.build_schedule_options()
         super().__init__(
             placeholder="Saved schedules",
             min_values=1,
             max_values=1,
             options=options,
+            row=row,
         )
         self.config_view = view
         self.disabled = not enabled
@@ -979,8 +1011,8 @@ class SavedScheduleSelect(discord.ui.Select):
 
 
 class AddScheduleButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(label="Add schedule", style=discord.ButtonStyle.success)
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="Add schedule", style=discord.ButtonStyle.success, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
@@ -995,8 +1027,8 @@ class AddScheduleButton(discord.ui.Button["CompConfigView"]):
 
 
 class EditScheduleButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(label="Edit schedule", style=discord.ButtonStyle.primary)
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="Edit schedule", style=discord.ButtonStyle.primary, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
@@ -1010,8 +1042,8 @@ class EditScheduleButton(discord.ui.Button["CompConfigView"]):
 
 
 class DeleteScheduleButton(discord.ui.Button["CompConfigView"]):
-    def __init__(self) -> None:
-        super().__init__(label="Delete schedule", style=discord.ButtonStyle.danger)
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="Delete schedule", style=discord.ButtonStyle.danger, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         view = self.view
@@ -1061,7 +1093,21 @@ class DeleteScheduleButton(discord.ui.Button["CompConfigView"]):
         await interaction.response.send_message("Schedule deleted.", ephemeral=True)
 
 
-class CompConfigView(discord.ui.View):
+class ScheduleListButton(discord.ui.Button["CompConfigView"]):
+    def __init__(self, *, row: Optional[int] = None) -> None:
+        super().__init__(label="List schedules", style=discord.ButtonStyle.secondary, row=row)
+
+    async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        view = self.view
+        if not isinstance(view, CompConfigView):
+            return
+        embed = view.cog.build_schedule_embed(
+            view.guild, view.config, selected_schedule_id=view.selected_schedule_id
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class CompManageView(discord.ui.View):
     def __init__(self, cog: "CompCog", guild: discord.Guild, config: GuildConfig):
         super().__init__(timeout=300)
         self.cog = cog
@@ -1069,31 +1115,37 @@ class CompConfigView(discord.ui.View):
         self.config = config
         self.presets: List[CompPreset] = self.cog.bot.storage.get_comp_presets(guild.id)
         self.selected_preset_name: Optional[str] = config.comp_active_preset
-        self.selected_schedule_id: Optional[str] = None
-        if config.comp_schedules:
-            self.selected_schedule_id = config.comp_schedules[0].schedule_id
         self.preset_select = SavedCompSelect(self)
         self.add_item(self.preset_select)
-        self.add_item(SavePresetButton())
-        self.add_item(UpdatePresetButton())
-        self.add_item(LoadPresetButton())
-        self.add_item(DeletePresetButton())
-        self.schedule_select = SavedScheduleSelect(self)
-        self.add_item(self.schedule_select)
-        self.add_item(AddScheduleButton())
-        self.add_item(EditScheduleButton())
-        self.add_item(DeleteScheduleButton())
+        self.add_item(SavePresetButton(row=1))
+        self.add_item(UpdatePresetButton(row=1))
+        self.add_item(LoadPresetButton(row=1))
+        self.add_item(DeletePresetButton(row=1))
         comp_config = config.comp
         default_channel = guild.get_channel(comp_config.channel_id) if comp_config.channel_id else None
-        self.add_item(CompChannelSelect(self, default_channel))
+        self.add_item(CompChannelSelect(self, default_channel, row=2))
         default_role = guild.get_role(comp_config.ping_role_id) if comp_config.ping_role_id else None
-        self.add_item(CompRoleSelect(self, default_role))
-        self.add_item(discord.ui.Button(label="Edit overview", style=discord.ButtonStyle.primary, custom_id="comp_overview"))
+        self.add_item(CompRoleSelect(self, default_role, row=3))
+        self.add_item(
+            discord.ui.Button(
+                label="Edit overview",
+                style=discord.ButtonStyle.primary,
+                custom_id="comp_overview",
+                row=4,
+            )
+        )
         self.children[-1].callback = self._overview_callback  # type: ignore[assignment]
-        self.add_item(discord.ui.Button(label="Edit classes", style=discord.ButtonStyle.primary, custom_id="comp_classes"))
+        self.add_item(
+            discord.ui.Button(
+                label="Edit classes",
+                style=discord.ButtonStyle.primary,
+                custom_id="comp_classes",
+                row=4,
+            )
+        )
         self.children[-1].callback = self._classes_callback  # type: ignore[assignment]
-        self.add_item(PostNowButton())
-        self.add_item(CloseButton())
+        self.add_item(PostNowButton(row=4))
+        self.add_item(CloseButton(row=4))
         self.message: Optional[discord.InteractionMessage] = None
 
     def persist(self) -> None:
@@ -1120,6 +1172,121 @@ class CompConfigView(discord.ui.View):
         return options, True
 
     def refresh_preset_options(self) -> None:
+        options, enabled = self.build_preset_options()
+        self.preset_select.options = options
+        self.preset_select.disabled = not enabled
+
+    def add_or_replace_preset(self, preset: CompPreset) -> None:
+        replaced = False
+        for index, existing in enumerate(self.presets):
+            if existing.name.casefold() == preset.name.casefold():
+                self.presets[index] = preset
+                replaced = True
+                break
+        if not replaced:
+            self.presets.append(preset)
+        self.presets.sort(key=lambda item: item.name.casefold())
+
+    def get_selected_preset(self) -> Optional[CompPreset]:
+        if not self.selected_preset_name:
+            return None
+        name_lower = self.selected_preset_name.casefold()
+        for preset in self.presets:
+            if preset.name.casefold() == name_lower:
+                return preset
+        return None
+
+    def find_preset(self, name: str) -> Optional[CompPreset]:
+        name_lower = name.casefold()
+        for preset in self.presets:
+            if preset.name.casefold() == name_lower:
+                return preset
+        return None
+
+    def mark_modified(self) -> None:
+        if self.config.comp_active_preset or self.selected_preset_name:
+            self.config.comp_active_preset = None
+            self.selected_preset_name = None
+
+    async def refresh_summary(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        if not self.message:
+            if interaction.message:
+                self.message = interaction.message  # type: ignore[assignment]
+            else:
+                try:
+                    self.message = await interaction.original_response()
+                except discord.HTTPException:
+                    return
+        embed = self.cog.build_summary_embed(
+            self.guild,
+            self.config,
+            active_preset=self.config.comp_active_preset,
+            selected_schedule_id=None,
+            include_schedules=False,
+        )
+        try:
+            await self.message.edit(embed=embed, view=self)
+        except discord.HTTPException:
+            LOGGER.warning("Failed to update composition configuration summary for guild %s", self.guild.id)
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    async def _overview_callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        await interaction.response.send_modal(OverviewModal(self))
+
+    async def _classes_callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        await interaction.response.send_modal(ClassesModal(self))
+
+
+class CompConfigView(discord.ui.View):
+    def __init__(self, cog: "CompCog", guild: discord.Guild, config: GuildConfig):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.config = config
+        self.presets: List[CompPreset] = self.cog.bot.storage.get_comp_presets(guild.id)
+        self.selected_preset_name: Optional[str] = config.comp_active_preset
+        self.selected_schedule_id: Optional[str] = None
+        if config.comp_schedules:
+            self.selected_schedule_id = config.comp_schedules[0].schedule_id
+        self.preset_select: Optional[SavedCompSelect] = None
+        self.schedule_select = SavedScheduleSelect(self, row=0)
+        self.add_item(self.schedule_select)
+        self.add_item(AddScheduleButton(row=1))
+        self.add_item(EditScheduleButton(row=1))
+        self.add_item(DeleteScheduleButton(row=1))
+        self.add_item(ScheduleListButton(row=1))
+        self.add_item(CloseButton(row=2))
+        self.message: Optional[discord.InteractionMessage] = None
+
+    def persist(self) -> None:
+        self.cog.bot.save_config(self.guild.id, self.config)
+
+    def persist_presets(self) -> None:
+        self.cog.bot.storage.save_comp_presets(self.guild.id, self.presets)
+
+    def build_preset_options(self) -> Tuple[List[discord.SelectOption], bool]:
+        if not self.presets:
+            placeholder = discord.SelectOption(
+                label="No saved presets", value="__none__", description="Save a preset to enable this list."
+            )
+            return [placeholder], False
+        self.presets.sort(key=lambda preset: preset.name.casefold())
+        options = [
+            discord.SelectOption(
+                label=preset.name,
+                value=preset.name,
+                default=(preset.name == self.selected_preset_name),
+            )
+            for preset in self.presets
+        ]
+        return options, True
+
+    def refresh_preset_options(self) -> None:
+        if self.preset_select is None:
+            return
         options, enabled = self.build_preset_options()
         self.preset_select.options = options
         self.preset_select.disabled = not enabled
@@ -1214,10 +1381,9 @@ class CompConfigView(discord.ui.View):
                     self.message = await interaction.original_response()
                 except discord.HTTPException:
                     return
-        embed = self.cog.build_summary_embed(
+        embed = self.cog.build_schedule_embed(
             self.guild,
             self.config,
-            active_preset=self.config.comp_active_preset,
             selected_schedule_id=self.selected_schedule_id,
         )
         try:
@@ -1240,6 +1406,9 @@ class CompCog(commands.GroupCog, name="comp"):
     """Schedule and manage guild composition signups."""
 
     POST_CHECK_INTERVAL_MINUTES = 1
+    schedule = app_commands.Group(
+        name="schedule", description="Manage scheduled composition posts."
+    )
 
     def __init__(self, bot: GW2ToolsBot) -> None:
         super().__init__()
@@ -1346,26 +1515,72 @@ class CompCog(commands.GroupCog, name="comp"):
     async def on_guild_available(self, guild: discord.Guild) -> None:  # pragma: no cover - requires Discord
         await self._register_persistent_view(guild.id)
 
-    @app_commands.command(name="manage", description="Configure scheduled composition posts for this guild.")
+    @app_commands.command(name="manage", description="Manage composition presets and roster for this guild.")
     async def manage(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
         if not await self.bot.ensure_authorised(interaction):
             return
         assert interaction.guild is not None
         config = self.bot.get_config(interaction.guild.id)
-        view = CompConfigView(self, interaction.guild, config)
+        view = CompManageView(self, interaction.guild, config)
         embed = self.build_summary_embed(
             interaction.guild,
             config,
             active_preset=config.comp_active_preset,
-            selected_schedule_id=view.selected_schedule_id,
+            selected_schedule_id=None,
+            include_schedules=False,
         )
         await interaction.response.send_message(
-            "Use the controls below to configure scheduled composition posts.",
+            "Use the controls below to manage the roster and presets. "
+            "To manage scheduled posts, run `/comp schedule manage`.",
             embed=embed,
             view=view,
             ephemeral=True,
         )
         view.message = await interaction.original_response()
+
+    @schedule.command(name="manage", description="Manage scheduled composition posts for this guild.")
+    async def schedule_manage(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        view = CompConfigView(self, interaction.guild, config)
+        embed = self.build_schedule_embed(
+            interaction.guild,
+            config,
+            selected_schedule_id=view.selected_schedule_id,
+        )
+        await interaction.response.send_message(
+            "Use the controls below to manage scheduled composition posts. "
+            "For roster and presets, run `/comp manage`.",
+            embed=embed,
+            view=view,
+            ephemeral=True,
+        )
+        view.message = await interaction.original_response()
+
+    @schedule.command(name="list", description="List scheduled composition posts for this guild.")
+    async def schedule_list(self, interaction: discord.Interaction) -> None:  # pragma: no cover - requires Discord
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        schedules = config.comp_schedules
+        embed = discord.Embed(
+            title="Scheduled Composition Posts",
+            color=BRAND_COLOUR,
+        )
+        if not schedules:
+            embed.description = "No schedules configured yet."
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        lines = []
+        for schedule in sorted(schedules, key=lambda item: item.name.casefold()):
+            preset_label = schedule.preset_name or "Unlinked preset"
+            schedule_text = _format_schedule_text(schedule)
+            lines.append(f"• **{schedule.name}** — {preset_label} — {schedule_text}")
+        embed.description = "\n".join(lines)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @tasks.loop(minutes=POST_CHECK_INTERVAL_MINUTES)
     async def poster_loop(self) -> None:  # pragma: no cover - relies on Discord
@@ -1856,6 +2071,7 @@ class CompCog(commands.GroupCog, name="comp"):
         *,
         active_preset: Optional[str] = None,
         selected_schedule_id: Optional[str] = None,
+        include_schedules: bool = True,
     ) -> discord.Embed:
         embed = discord.Embed(title="Guild Composition Settings", color=BRAND_COLOUR)
         comp_config = config.comp
@@ -1879,29 +2095,42 @@ class CompCog(commands.GroupCog, name="comp"):
             role_value = "Not set"
         embed.add_field(name="Ping Role", value=role_value, inline=False)
 
-        schedules = config.comp_schedules
-        if schedules:
-            lines: List[str] = []
-            sorted_schedules = sorted(schedules, key=lambda item: item.name.casefold())
-            max_lines = 10
-            for schedule in sorted_schedules[:max_lines]:
-                prefix = "-> " if schedule.schedule_id == selected_schedule_id else "- "
-                preset_label = schedule.preset_name or "Unlinked preset"
-                schedule_text = _format_schedule_text(schedule)
-                lines.append(f"{prefix}{schedule.name} - {preset_label} - {schedule_text}")
-            if len(sorted_schedules) > max_lines:
-                remaining = len(sorted_schedules) - max_lines
-                lines.append(f"...and {remaining} more")
-            schedule_value = "\n".join(lines)
-        else:
-            schedule_value = "No schedules configured."
-        embed.add_field(name="Schedules", value=schedule_value, inline=False)
+        if include_schedules:
+            schedules = config.comp_schedules
+            if schedules:
+                lines: List[str] = []
+                sorted_schedules = sorted(schedules, key=lambda item: item.name.casefold())
+                max_lines = 10
+                for schedule in sorted_schedules[:max_lines]:
+                    prefix = "-> " if schedule.schedule_id == selected_schedule_id else "- "
+                    preset_label = schedule.preset_name or "Unlinked preset"
+                    schedule_text = _format_schedule_text(schedule)
+                    lines.append(f"{prefix}{schedule.name} - {preset_label} - {schedule_text}")
+                if len(sorted_schedules) > max_lines:
+                    remaining = len(sorted_schedules) - max_lines
+                    lines.append(f"...and {remaining} more")
+                schedule_value = "\n".join(lines)
+            else:
+                schedule_value = "No schedules configured."
+            embed.add_field(name="Schedules", value=schedule_value, inline=False)
 
         if active_preset:
             preset_text = f"Linked to **{active_preset}**."
         else:
             preset_text = "Not linked to a saved preset."
         embed.add_field(name="Active Preset", value=preset_text, inline=False)
+
+        presets = self.bot.storage.get_comp_presets(guild.id)
+        if presets:
+            preset_names = [preset.name for preset in presets]
+            preset_names.sort(key=str.casefold)
+            if len(preset_names) > 10:
+                preset_value = ", ".join(preset_names[:10]) + f", +{len(preset_names) - 10} more"
+            else:
+                preset_value = ", ".join(preset_names)
+        else:
+            preset_value = "No presets saved."
+        embed.add_field(name="Presets", value=preset_value, inline=False)
 
         if comp_config.overview:
             overview_text = self._format_overview_text(
@@ -1924,6 +2153,77 @@ class CompCog(commands.GroupCog, name="comp"):
             embed.add_field(name="Configured Classes", value="\n".join(lines), inline=False)
         else:
             embed.add_field(name="Configured Classes", value="No classes configured.", inline=False)
+        return embed
+
+    def build_schedule_embed(
+        self,
+        guild: discord.Guild,
+        config: GuildConfig,
+        *,
+        selected_schedule_id: Optional[str] = None,
+    ) -> discord.Embed:
+        embed = discord.Embed(title="Composition Schedule Settings", color=BRAND_COLOUR)
+        schedules = config.comp_schedules
+        presets = self.bot.storage.get_comp_presets(guild.id)
+        preset_lookup = {preset.name.casefold(): preset for preset in presets}
+
+        if not schedules:
+            embed.description = "No schedules configured."
+            embed.set_footer(text="Use /comp manage to edit rosters and presets.")
+            return embed
+
+        selected = None
+        if selected_schedule_id:
+            for schedule in schedules:
+                if schedule.schedule_id == selected_schedule_id:
+                    selected = schedule
+                    break
+        if selected is None:
+            selected = sorted(schedules, key=lambda item: item.name.casefold())[0]
+
+        schedule_text = _format_schedule_text(selected)
+        preset_label = selected.preset_name or "Unlinked preset"
+        embed.add_field(name="Schedule", value=f"**{selected.name}**\n{schedule_text}", inline=False)
+        embed.add_field(name="Preset", value=preset_label, inline=False)
+
+        preset = None
+        if selected.preset_name:
+            preset = preset_lookup.get(selected.preset_name.casefold())
+        if preset is None:
+            embed.add_field(name="Composition", value="Preset not found.", inline=False)
+        else:
+            classes = []
+            for entry in preset.config.classes:
+                if entry.required is None:
+                    classes.append(entry.name)
+                else:
+                    classes.append(f"{entry.name} ({entry.required})")
+            if classes:
+                max_classes = 10
+                class_list = classes[:max_classes]
+                if len(classes) > max_classes:
+                    class_list.append(f"...and {len(classes) - max_classes} more")
+                embed.add_field(name="Composition", value=", ".join(class_list), inline=False)
+            else:
+                embed.add_field(name="Composition", value="No classes configured.", inline=False)
+
+            if preset.config.overview:
+                overview = preset.config.overview.strip()
+                if len(overview) > 300:
+                    overview = overview[:297] + "..."
+                embed.add_field(name="Overview", value=overview, inline=False)
+
+        if len(schedules) > 1:
+            other_lines = []
+            for schedule in sorted(schedules, key=lambda item: item.name.casefold()):
+                if schedule.schedule_id == selected.schedule_id:
+                    continue
+                other_text = _format_schedule_text(schedule)
+                other_preset = schedule.preset_name or "Unlinked preset"
+                other_lines.append(f"• {schedule.name} — {other_preset} — {other_text}")
+            if other_lines:
+                embed.add_field(name="Other Schedules", value="\n".join(other_lines), inline=False)
+        embed.set_footer(text="Use /comp manage to edit rosters and presets.")
         return embed
 
     def _build_comp_embed(
