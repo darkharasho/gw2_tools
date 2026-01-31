@@ -5,6 +5,7 @@ import json
 import logging
 import sqlite3
 import unicodedata
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -228,10 +229,16 @@ class GuildConfig:
     alliance_current_day: Optional[int] = None
     comp: CompConfig = field(default_factory=CompConfig)
     comp_active_preset: Optional[str] = None
+    comp_schedules: List[CompSchedule] = field(default_factory=list)
 
     @classmethod
     def default(cls) -> "GuildConfig":
-        return cls(moderator_role_ids=[], guild_role_ids={}, comp=CompConfig())
+        return cls(
+            moderator_role_ids=[],
+            guild_role_ids={},
+            comp=CompConfig(),
+            comp_schedules=[],
+        )
 
 
 @dataclass
@@ -259,6 +266,138 @@ class CompPreset:
         return {
             "name": self.name,
             "config": asdict(self.config.copy(include_runtime_fields=False)),
+        }
+
+
+@dataclass
+class CompSchedule:
+    """Scheduled composition posting configuration."""
+
+    schedule_id: str
+    name: str
+    preset_name: Optional[str] = None
+    post_days: List[int] = field(default_factory=list)
+    post_time: Optional[str] = None
+    timezone: str = "UTC"
+    signups: Dict[str, List[int]] = field(default_factory=dict)
+    message_id: Optional[int] = None
+    last_post_at: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "CompSchedule":
+        raw_id = payload.get("schedule_id") or payload.get("id")
+        if isinstance(raw_id, str) and raw_id.strip():
+            schedule_id = raw_id.strip()
+        else:
+            schedule_id = uuid.uuid4().hex
+
+        raw_name = payload.get("name")
+        if not isinstance(raw_name, str):
+            raise ValueError("Schedule name must be a string")
+        name = raw_name.strip()
+        if not name:
+            raise ValueError("Schedule name cannot be empty")
+
+        preset_name = payload.get("preset_name")
+        if isinstance(preset_name, str):
+            preset_name = preset_name.strip() or None
+        else:
+            preset_name = None
+
+        post_days_payload = payload.get("post_days")
+        post_days: List[int] = []
+        if isinstance(post_days_payload, list):
+            for raw in post_days_payload:
+                candidate: Optional[int] = None
+                if isinstance(raw, int):
+                    candidate = raw
+                elif isinstance(raw, str):
+                    try:
+                        candidate = int(raw)
+                    except ValueError:
+                        candidate = None
+                if candidate is None:
+                    continue
+                if 0 <= candidate <= 6 and candidate not in post_days:
+                    post_days.append(candidate)
+
+        post_day = payload.get("post_day")
+        if post_days:
+            post_day = None
+        elif isinstance(post_day, str):
+            try:
+                post_day = int(post_day)
+            except ValueError:
+                post_day = None
+        if isinstance(post_day, int) and 0 <= post_day <= 6:
+            post_days.append(post_day)
+
+        timezone_value = payload.get("timezone", "UTC")
+        timezone_value = normalise_timezone(timezone_value)
+
+        signups_payload = payload.get("signups", {}) or {}
+        signups: Dict[str, List[int]] = {}
+        if isinstance(signups_payload, dict):
+            for class_name, values in signups_payload.items():
+                if not isinstance(class_name, str) or not isinstance(values, list):
+                    continue
+                valid: List[int] = []
+                for raw in values:
+                    if isinstance(raw, int):
+                        valid.append(raw)
+                    elif isinstance(raw, str):
+                        try:
+                            valid.append(int(raw))
+                        except ValueError:
+                            continue
+                signups[class_name] = valid
+
+        message_raw = payload.get("message_id")
+        if isinstance(message_raw, int):
+            message_id = message_raw
+        elif isinstance(message_raw, str):
+            try:
+                message_id = int(message_raw)
+            except ValueError:
+                message_id = None
+        else:
+            message_id = None
+
+        last_post_at = payload.get("last_post_at")
+        if isinstance(last_post_at, str):
+            last_post_at = last_post_at.strip() or None
+        else:
+            last_post_at = None
+
+        post_time_raw = payload.get("post_time")
+        if isinstance(post_time_raw, str):
+            post_time = post_time_raw.strip() or None
+        else:
+            post_time = None
+
+        return cls(
+            schedule_id=schedule_id,
+            name=name,
+            preset_name=preset_name,
+            post_days=post_days,
+            post_time=post_time,
+            timezone=timezone_value,
+            signups=signups,
+            message_id=message_id,
+            last_post_at=last_post_at,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "schedule_id": self.schedule_id,
+            "name": self.name,
+            "preset_name": self.preset_name,
+            "post_days": list(self.post_days),
+            "post_time": self.post_time,
+            "timezone": self.timezone,
+            "signups": self.signups,
+            "message_id": self.message_id,
+            "last_post_at": self.last_post_at,
         }
 
 
@@ -1239,6 +1378,39 @@ class StorageManager:
             payload["comp_active_preset"] = active_preset.strip() or None
         else:
             payload["comp_active_preset"] = None
+        comp_schedules_payload = payload.get("comp_schedules")
+        schedules: List[CompSchedule] = []
+        has_schedule_payload = isinstance(comp_schedules_payload, list)
+        if has_schedule_payload:
+            for item in comp_schedules_payload:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    schedules.append(CompSchedule.from_dict(item))
+                except ValueError:
+                    continue
+        if not has_schedule_payload and not schedules:
+            legacy_comp = payload["comp"]
+            has_legacy_schedule = bool(legacy_comp.post_days and legacy_comp.post_time)
+            has_legacy_runtime = bool(legacy_comp.message_id or legacy_comp.signups)
+            if has_legacy_schedule or has_legacy_runtime:
+                schedules.append(
+                    CompSchedule(
+                        schedule_id=uuid.uuid4().hex,
+                        name="Default schedule",
+                        preset_name=payload.get("comp_active_preset"),
+                        post_days=list(legacy_comp.post_days),
+                        post_time=legacy_comp.post_time,
+                        timezone=legacy_comp.timezone,
+                        signups=legacy_comp.signups,
+                        message_id=legacy_comp.message_id,
+                        last_post_at=legacy_comp.last_post_at,
+                    )
+                )
+                legacy_comp.signups = {}
+                legacy_comp.message_id = None
+                legacy_comp.last_post_at = None
+        payload["comp_schedules"] = schedules
         audit_channel_id = payload.get("audit_channel_id")
         if isinstance(audit_channel_id, int):
             payload["audit_channel_id"] = audit_channel_id
@@ -1339,6 +1511,69 @@ class StorageManager:
         if config.comp_active_preset:
             cleaned = str(config.comp_active_preset).strip()
             config.comp_active_preset = cleaned or None
+        if config.comp_schedules:
+            cleaned_schedules: List[CompSchedule] = []
+            seen_ids: set[str] = set()
+            for schedule in config.comp_schedules:
+                if not isinstance(schedule, CompSchedule):
+                    continue
+                schedule_id = str(schedule.schedule_id).strip() if schedule.schedule_id else ""
+                if not schedule_id or schedule_id in seen_ids:
+                    schedule_id = uuid.uuid4().hex
+                schedule.schedule_id = schedule_id
+                seen_ids.add(schedule_id)
+                name = str(schedule.name).strip() if schedule.name else ""
+                if not name:
+                    continue
+                schedule.name = name
+                if schedule.preset_name is not None:
+                    preset_clean = str(schedule.preset_name).strip()
+                    schedule.preset_name = preset_clean or None
+                schedule.timezone = normalise_timezone(schedule.timezone)
+                if schedule.post_time is not None:
+                    time_clean = str(schedule.post_time).strip()
+                    schedule.post_time = time_clean or None
+                post_days: List[int] = []
+                for raw in schedule.post_days or []:
+                    candidate: Optional[int] = None
+                    if isinstance(raw, int):
+                        candidate = raw
+                    elif isinstance(raw, str):
+                        try:
+                            candidate = int(raw)
+                        except ValueError:
+                            candidate = None
+                    if candidate is None or not 0 <= candidate <= 6:
+                        continue
+                    if candidate not in post_days:
+                        post_days.append(candidate)
+                schedule.post_days = post_days
+                if schedule.message_id is not None:
+                    try:
+                        schedule.message_id = int(schedule.message_id)
+                    except (TypeError, ValueError):
+                        schedule.message_id = None
+                signups_clean: Dict[str, List[int]] = {}
+                if schedule.signups:
+                    for class_name, values in schedule.signups.items():
+                        if not isinstance(class_name, str) or not isinstance(values, list):
+                            continue
+                        valid: List[int] = []
+                        for raw in values:
+                            if isinstance(raw, int):
+                                valid.append(raw)
+                            elif isinstance(raw, str):
+                                try:
+                                    valid.append(int(raw))
+                                except ValueError:
+                                    continue
+                        signups_clean[class_name] = valid
+                schedule.signups = signups_clean
+                if schedule.last_post_at is not None:
+                    cleaned_last = str(schedule.last_post_at).strip()
+                    schedule.last_post_at = cleaned_last or None
+                cleaned_schedules.append(schedule)
+            config.comp_schedules = cleaned_schedules
         if config.guild_role_ids:
             cleaned_roles: Dict[str, int] = {}
             for guild_key, role_id in config.guild_role_ids.items():
