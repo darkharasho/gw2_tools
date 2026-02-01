@@ -1602,7 +1602,10 @@ class CompCog(commands.GroupCog, name="comp"):
         if not self.bot.guilds:
             return
         for guild in self.bot.guilds:
-            await self._maybe_post_for_guild(guild)
+            try:
+                await self._maybe_post_for_guild(guild)
+            except Exception:  # pragma: no cover - defensive logging
+                LOGGER.exception("Schedule loop failed for guild %s", guild.id)
 
     @poster_loop.before_loop
     async def before_poster_loop(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -1635,9 +1638,33 @@ class CompCog(commands.GroupCog, name="comp"):
                     schedule.preset_name,
                 )
             return
-        if not (comp_config.channel_id and schedule.post_days and schedule.post_time):
+        if not comp_config.channel_id:
+            LOGGER.debug(
+                "Schedule '%s' in guild %s skipped: no channel configured",
+                schedule.name,
+                guild.id,
+            )
+            return
+        if not schedule.post_days:
+            LOGGER.debug(
+                "Schedule '%s' in guild %s skipped: no post days configured",
+                schedule.name,
+                guild.id,
+            )
+            return
+        if not schedule.post_time:
+            LOGGER.debug(
+                "Schedule '%s' in guild %s skipped: no post time configured",
+                schedule.name,
+                guild.id,
+            )
             return
         if not comp_config.classes:
+            LOGGER.debug(
+                "Schedule '%s' in guild %s skipped: no classes configured",
+                schedule.name,
+                guild.id,
+            )
             return
 
         try:
@@ -1653,14 +1680,34 @@ class CompCog(commands.GroupCog, name="comp"):
 
         now = datetime.now(tz)
         if now.weekday() not in schedule.post_days:
+            LOGGER.debug(
+                "Schedule '%s' in guild %s skipped: %s not in %s",
+                schedule.name,
+                guild.id,
+                now.weekday(),
+                schedule.post_days,
+            )
             return
 
         target_time = _parse_time(schedule.post_time or "")
         if not target_time:
+            LOGGER.warning(
+                "Schedule '%s' in guild %s skipped: invalid time '%s'",
+                schedule.name,
+                guild.id,
+                schedule.post_time,
+            )
             return
 
         target_dt = datetime.combine(now.date(), target_time, tz)
         if now < target_dt:
+            LOGGER.debug(
+                "Schedule '%s' in guild %s skipped: %s before target %s",
+                schedule.name,
+                guild.id,
+                now.isoformat(),
+                target_dt.isoformat(),
+            )
             return
 
         last_post_at = schedule.last_post_at
@@ -1672,8 +1719,19 @@ class CompCog(commands.GroupCog, name="comp"):
                 except ValueError:
                     last_local = last_post_dt.replace(tzinfo=timezone.utc).astimezone(tz)
                 if last_local.date() == now.date() and last_local >= target_dt:
+                    LOGGER.debug(
+                        "Schedule '%s' in guild %s skipped: already posted at %s",
+                        schedule.name,
+                        guild.id,
+                        last_local.isoformat(),
+                    )
                     return
 
+        LOGGER.info(
+            "Posting scheduled composition '%s' for guild %s",
+            schedule.name,
+            guild.id,
+        )
         await self.post_composition(
             guild.id,
             reset_signups=True,
