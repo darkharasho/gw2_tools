@@ -1381,6 +1381,7 @@ class StorageManager:
         comp_schedules_payload = payload.get("comp_schedules")
         schedules: List[CompSchedule] = []
         has_schedule_payload = isinstance(comp_schedules_payload, list)
+        migrated_schedules = False
         if has_schedule_payload:
             for item in comp_schedules_payload:
                 if not isinstance(item, dict):
@@ -1407,6 +1408,7 @@ class StorageManager:
                         last_post_at=legacy_comp.last_post_at,
                     )
                 )
+                migrated_schedules = True
                 legacy_comp.signups = {}
                 legacy_comp.message_id = None
                 legacy_comp.last_post_at = None
@@ -1503,7 +1505,14 @@ class StorageManager:
                 payload["alliance_current_day"] = day_value if 0 <= day_value <= 6 else None
         else:
             payload["alliance_current_day"] = None
-        return GuildConfig(**payload)
+        config = GuildConfig(**payload)
+        if migrated_schedules:
+            logger.info(
+                "Migrated legacy comp schedule for guild %s to comp_schedules",
+                guild_id,
+            )
+            self.save_config(guild_id, config)
+        return config
 
     def save_config(self, guild_id: int, config: GuildConfig) -> None:
         if config.comp:
