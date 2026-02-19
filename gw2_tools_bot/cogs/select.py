@@ -7,7 +7,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import aiohttp
 import discord
@@ -125,6 +125,68 @@ class SelectCog(commands.Cog):
         embed = discord.Embed(title=title, description=description or "", colour=colour)
         embed.set_footer(text="Guild Wars 2 Tools")
         return embed
+
+    @staticmethod
+    def _truncate_text(value: str, *, limit: int = 260) -> str:
+        cleaned = value.strip()
+        if len(cleaned) <= limit:
+            return cleaned
+        return cleaned[: limit - 3] + "..."
+
+    def _build_ai_status_embed(
+        self,
+        *,
+        stage: str,
+        detail: str,
+        prompt: Optional[str] = None,
+        query: Optional[str] = None,
+        state: str = "running",
+    ) -> discord.Embed:
+        colour = BRAND_COLOUR
+        if state == "done":
+            colour = discord.Colour.green()
+        elif state == "error":
+            colour = discord.Colour.red()
+
+        description_lines = [
+            f"**Stage**: {stage}",
+            f"**Detail**: {detail}",
+        ]
+        if prompt:
+            description_lines.append(
+                f"**Prompt**: `{self._truncate_text(prompt, limit=180)}`"
+            )
+        if query:
+            description_lines.append(
+                f"**Query**: `{self._truncate_text(query, limit=180)}`"
+            )
+        return self._embed(
+            title="Select AI Status",
+            description="\n".join(description_lines),
+            colour=colour,
+        )
+
+    async def _edit_ai_status_embed(
+        self,
+        interaction: discord.Interaction,
+        *,
+        stage: str,
+        detail: str,
+        prompt: Optional[str] = None,
+        query: Optional[str] = None,
+        state: str = "running",
+    ) -> None:
+        embed = self._build_ai_status_embed(
+            stage=stage,
+            detail=detail,
+            prompt=prompt,
+            query=query,
+            state=state,
+        )
+        try:
+            await interaction.edit_original_response(embed=embed)
+        except discord.NotFound:
+            LOGGER.warning("Interaction expired before status update could be sent")
 
     @staticmethod
     def _format_list(items: Sequence[str], *, placeholder: str = "None") -> str:
@@ -711,10 +773,21 @@ class SelectCog(commands.Cog):
         output_text = payload.get("output_text")
         if isinstance(output_text, str) and output_text.strip():
             return output_text.strip()
+        if isinstance(output_text, list):
+            parts: List[str] = []
+            for item in output_text:
+                if isinstance(item, str) and item.strip():
+                    parts.append(item.strip())
+                elif isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text.strip())
+            if parts:
+                return "\n".join(parts).strip()
 
         output = payload.get("output")
         if not isinstance(output, list):
-            return ""
+            output = []
         chunks: List[str] = []
         for item in output:
             if not isinstance(item, dict):
@@ -728,7 +801,54 @@ class SelectCog(commands.Cog):
                 text = part.get("text")
                 if isinstance(text, str) and text.strip():
                     chunks.append(text.strip())
-        return "\n".join(chunks).strip()
+                output_text_value = part.get("output_text")
+                if isinstance(output_text_value, str) and output_text_value.strip():
+                    chunks.append(output_text_value.strip())
+        if chunks:
+            return "\n".join(chunks).strip()
+
+        # Compatibility fallback for Chat Completions-like payloads.
+        choices = payload.get("choices")
+        if isinstance(choices, list):
+            choice = choices[0] if choices else None
+            if isinstance(choice, dict):
+                message = choice.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str) and content.strip():
+                        return content.strip()
+                    if isinstance(content, list):
+                        fallback_parts: List[str] = []
+                        for part in content:
+                            if isinstance(part, dict):
+                                text = part.get("text")
+                                if isinstance(text, str) and text.strip():
+                                    fallback_parts.append(text.strip())
+                        if fallback_parts:
+                            return "\n".join(fallback_parts).strip()
+        return ""
+
+    @staticmethod
+    def _extract_select_statement(text: str) -> str:
+        cleaned = text.strip()
+        if not cleaned:
+            return ""
+
+        if "```" in cleaned:
+            blocks = re.findall(r"```(?:\w+)?\s*(.*?)```", cleaned, flags=re.DOTALL)
+            for block in blocks:
+                candidate = block.strip()
+                if re.match(r"^\s*select\b", candidate, flags=re.IGNORECASE):
+                    return candidate
+
+        match = re.search(r"(select\b.+)", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return cleaned
+        candidate = match.group(1).strip()
+        # Keep the first statement if extra prose trails the query.
+        if ";" in candidate:
+            candidate = candidate.split(";", 1)[0].strip()
+        return candidate
 
     @classmethod
     def _is_read_only_select_query_text(cls, query: str) -> bool:
@@ -798,6 +918,7 @@ class SelectCog(commands.Cog):
             raise ValueError("AI service returned an invalid response format.") from exc
 
         generated = self._ai_response_text(parsed)
+        generated = self._extract_select_statement(generated)
         if not generated:
             raise ValueError("AI did not return a query.")
         return generated
@@ -827,18 +948,43 @@ class SelectCog(commands.Cog):
         query: str,
         scope: str,
         include_query_label: str,
+        progress_callback: Optional[
+            Callable[[str, str, Optional[str], str], Awaitable[None]]
+        ] = None,
     ) -> None:
+        async def _progress(
+            stage: str,
+            detail: str,
+            query_value: Optional[str] = None,
+            state: str = "running",
+        ) -> None:
+            if progress_callback is not None:
+                await progress_callback(stage, detail, query_value, state)
+
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await _progress(
+                "Failed",
+                "This command can only be used in a server.",
+                query,
+                "error",
+            )
             await self._send_message(
                 interaction,
                 content="Select: This command can only be used in a server.",
             )
             return
 
+        await _progress("Scope", "Resolving query scope.", query)
         is_authorised, effective_scope = await self._resolve_blanket_scope(
             interaction, scope
         )
         if effective_scope == "all" and not is_authorised:
+            await _progress(
+                "Denied",
+                "All-record scope requested without permissions.",
+                query,
+                "error",
+            )
             await self._send_message(
                 interaction,
                 content="Select: You do not have permission to query all records. Use scope `mine` or `auto`.",
@@ -847,7 +993,14 @@ class SelectCog(commands.Cog):
 
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
+        await _progress("Validate", "Validating read-only SELECT query.", query)
         if not self._is_read_only_select_query_text(query):
+            await _progress(
+                "Failed",
+                "Rejected non-read-only query text.",
+                query,
+                "error",
+            )
             await self._send_message(
                 interaction,
                 content="Select: Only read-only SELECT queries are allowed.",
@@ -857,6 +1010,12 @@ class SelectCog(commands.Cog):
         try:
             selected_fields, conditions = self._parse_blanket_query(query)
         except ValueError as exc:
+            await _progress(
+                "Failed",
+                f"Query parser rejected the input: {exc}",
+                query,
+                "error",
+            )
             await self._send_message(
                 interaction,
                 content=f"Select: {exc}",
@@ -864,12 +1023,23 @@ class SelectCog(commands.Cog):
             )
             return
 
+        await _progress(
+            "Fetch",
+            "Loading records from current server scope.",
+            query,
+        )
         user_id_filter = interaction.user.id if effective_scope == "mine" else None
         records = self.bot.storage.query_api_keys(
             guild_id=interaction.guild.id,
             user_id=user_id_filter,
         )
         if not records:
+            await _progress(
+                "Failed",
+                "No records were found in this scope.",
+                query,
+                "error",
+            )
             await self._send_message(
                 interaction,
                 content="Select: No stored API keys were found for this scope.",
@@ -877,6 +1047,11 @@ class SelectCog(commands.Cog):
             )
             return
 
+        await _progress(
+            "Filter",
+            "Applying WHERE conditions to scoped records.",
+            query,
+        )
         rows = self._build_blanket_rows(interaction.guild, records)
         matched_rows = [
             row
@@ -887,6 +1062,12 @@ class SelectCog(commands.Cog):
             )
         ]
         if not matched_rows:
+            await _progress(
+                "Done",
+                "No matching records found.",
+                query,
+                "done",
+            )
             await self._send_message(
                 interaction,
                 content="Select: No records matched the provided blanket query.",
@@ -894,6 +1075,11 @@ class SelectCog(commands.Cog):
             )
             return
 
+        await _progress(
+            "Render",
+            "Building text table output.",
+            query,
+        )
         headers = [self.BLANKET_FIELD_LABELS[field] for field in selected_fields]
         table_rows = [
             [self._blanket_value_for_display(row.get(field)) for field in selected_fields]
@@ -918,6 +1104,12 @@ class SelectCog(commands.Cog):
             interaction,
             contents=["Select blanket results attached."],
             files=[file],
+        )
+        await _progress(
+            "Completed",
+            f"Query finished with {len(matched_rows)} matches.",
+            query,
+            "done",
         )
 
     # ------------------------------------------------------------------
@@ -1859,10 +2051,30 @@ class SelectCog(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.send_message(
+            embed=self._build_ai_status_embed(
+                stage="Start",
+                detail="Preparing AI query generation.",
+                prompt=prompt,
+            ),
+            ephemeral=True,
+        )
+        await self._edit_ai_status_embed(
+            interaction,
+            stage="Generate",
+            detail="Sending prompt to AI model.",
+            prompt=prompt,
+        )
         try:
             generated_query = await self._ai_generate_blanket_query(prompt)
         except ValueError as exc:
+            await self._edit_ai_status_embed(
+                interaction,
+                stage="Failed",
+                detail=str(exc),
+                prompt=prompt,
+                state="error",
+            )
             await self._send_message(
                 interaction,
                 content=f"Select: {exc}",
@@ -1870,12 +2082,36 @@ class SelectCog(commands.Cog):
             )
             return
 
+        await self._edit_ai_status_embed(
+            interaction,
+            stage="Generated",
+            detail="AI generated a candidate SELECT query.",
+            prompt=prompt,
+            query=generated_query,
+        )
+
+        async def _progress_callback(
+            stage: str,
+            detail: str,
+            query_value: Optional[str],
+            state: str,
+        ) -> None:
+            await self._edit_ai_status_embed(
+                interaction,
+                stage=stage,
+                detail=detail,
+                prompt=prompt,
+                query=query_value or generated_query,
+                state=state,
+            )
+
         # Re-run execution through the same read-only parser and guild-scoped fetch path.
         await self._run_blanket_query(
             interaction,
             query=generated_query,
             scope=scope,
             include_query_label="AI Query",
+            progress_callback=_progress_callback,
         )
 
 

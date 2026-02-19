@@ -58,3 +58,27 @@ def test_is_read_only_select_query_text():
     assert not SelectCog._is_read_only_select_query_text(
         "SELECT user; DELETE FROM api_keys"
     )
+
+
+def test_ai_response_text_chat_completions_style():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": "SELECT user, api_keys WHERE account_name == ondria.1592"
+                }
+            }
+        ]
+    }
+    assert (
+        SelectCog._ai_response_text(payload)
+        == "SELECT user, api_keys WHERE account_name == ondria.1592"
+    )
+
+
+def test_extract_select_statement_from_code_fence():
+    text = "Here you go:\n```sql\nSELECT user, api_keys WHERE account_name == ondria.1592\n```"
+    assert (
+        SelectCog._extract_select_statement(text)
+        == "SELECT user, api_keys WHERE account_name == ondria.1592"
+    )
