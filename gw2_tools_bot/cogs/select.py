@@ -58,20 +58,40 @@ class SelectCog(commands.Cog):
         default_permissions=discord.Permissions(),
     )
     BLANKET_DEFAULT_FIELDS: Tuple[str, ...] = (
-        "user",
+        "discord_guild_id",
         "api_keys",
+        "api_key",
+        "user",
+        "user_id",
         "account_name",
+        "permission",
+        "guild_id",
         "character_name",
+        "created_at",
+        "updated_at",
     )
     BLANKET_FIELD_ALIASES: Dict[str, str] = {
         "user": "user",
         "users": "user",
         "discord_user": "user",
         "discord_name": "discord_name",
+        "discord_guild_id": "discord_guild_id",
         "user_id": "user_id",
         "api_keys": "api_keys",
         "api_key": "api_keys",
+        "api_key_name": "api_keys",
         "key_name": "api_keys",
+        "api_key_value": "api_key",
+        "api_keys.key": "api_key",
+        "api_keys.name": "api_keys",
+        "api_keys.account_name": "account_name",
+        "api_keys.permissions": "permission",
+        "api_keys.guild_ids": "guild_id",
+        "api_keys.characters": "character_name",
+        "api_keys.created_at": "created_at",
+        "api_keys.updated_at": "updated_at",
+        "api_keys.user_id": "user_id",
+        "api_keys.discord_guild_id": "discord_guild_id",
         "account": "account_name",
         "account_name": "account_name",
         "character": "character_name",
@@ -80,16 +100,22 @@ class SelectCog(commands.Cog):
         "guild_id": "guild_id",
         "permission": "permission",
         "permissions": "permission",
+        "created_at": "created_at",
+        "updated_at": "updated_at",
     }
     BLANKET_FIELD_LABELS: Dict[str, str] = {
+        "discord_guild_id": "Discord Guild ID",
         "user": "User",
         "discord_name": "Discord Name",
         "user_id": "User ID",
         "api_keys": "API Key Name",
+        "api_key": "API Key",
         "account_name": "Account Name",
         "character_name": "Character Names",
         "guild_id": "Guild IDs",
         "permission": "Permissions",
+        "created_at": "Created At",
+        "updated_at": "Updated At",
     }
     AI_FORBIDDEN_KEYWORDS: Tuple[str, ...] = (
         "update",
@@ -693,7 +719,7 @@ class SelectCog(commands.Cog):
             parts = [part.strip() for part in re.split(r"\s+and\s+", where_clause, flags=re.IGNORECASE) if part.strip()]
             for part in parts:
                 cond_match = re.match(
-                    r"^\s*([a-zA-Z_][\w]*)\s*(==|=|!=|~=)\s*(.+?)\s*$",
+                    r"^\s*([a-zA-Z_][\w.]*)\s*(==|=|!=|~=)\s*(.+?)\s*$",
                     part,
                 )
                 if not cond_match:
@@ -738,7 +764,7 @@ class SelectCog(commands.Cog):
         records: Sequence[Tuple[int, int, "ApiKeyRecord"]],
     ) -> List[Dict[str, object]]:
         rows: List[Dict[str, object]] = []
-        for _, user_id, record in records:
+        for discord_guild_id, user_id, record in records:
             member = guild.get_member(user_id)
             if member is not None:
                 user_label = f"{member.display_name} ({member.name})"
@@ -750,12 +776,16 @@ class SelectCog(commands.Cog):
                 {
                     "user": user_label,
                     "discord_name": discord_name,
+                    "discord_guild_id": str(discord_guild_id),
                     "user_id": str(user_id),
                     "api_keys": record.name or "",
+                    "api_key": record.key or "",
                     "account_name": record.account_name or "",
                     "character_name": list(record.characters or []),
                     "guild_id": list(record.guild_ids or []),
                     "permission": list(record.permissions or []),
+                    "created_at": record.created_at or "",
+                    "updated_at": record.updated_at or "",
                 }
             )
         return rows
@@ -946,7 +976,7 @@ class SelectCog(commands.Cog):
         system_prompt = (
             "You convert natural language into a single read-only query for this grammar: "
             "SELECT <field[, field...]> [FROM <ignored>] [WHERE <field> <op> <value> [AND ...]]. "
-            "Allowed fields: user, discord_name, user_id, api_keys, account_name, character_name, guild_id, permission. "
+            "Allowed fields: discord_guild_id, user, discord_name, user_id, api_keys, api_key, account_name, character_name, guild_id, permission, created_at, updated_at. "
             "Allowed operators: ==, =, !=, ~=. "
             "Semantics: == exact match; != exact mismatch; ~= case-insensitive contains. "
             "character_name, guild_id, and permission are list fields, so comparisons apply to each list item. "
@@ -1038,14 +1068,18 @@ class SelectCog(commands.Cog):
             f"- scope: {scope}",
             f"- records_in_scope: {len(records)}",
             "- fields:",
+            "  - discord_guild_id: Discord server ID for the stored key row",
             "  - user: Discord display label",
             "  - discord_name: Discord username",
             "  - user_id: Discord ID string",
             "  - api_keys: stored key name",
+            "  - api_key: full API key value",
             "  - account_name: GW2 account name (e.g. Name.1234)",
             "  - character_name: list of GW2 character names",
             "  - guild_id: list of GW2 guild UUIDs",
             "  - permission: list of GW2 API key permissions",
+            "  - created_at: row creation timestamp",
+            "  - updated_at: row update timestamp",
             "- operator_notes:",
             "  - use == for exact value matches",
             "  - use ~= for partial/contains matches",
@@ -1108,6 +1142,16 @@ class SelectCog(commands.Cog):
                     interaction,
                     content="Select: This command can only be used in a server.",
                 )
+            return
+
+        # Blanket execution is admin/mod only.
+        if not await self.bot.ensure_authorised(interaction):
+            await _progress(
+                "Denied",
+                "You do not have permission to use this command.",
+                query,
+                "error",
+            )
             return
 
         await _progress("Scope", "Resolving query scope.", query)
@@ -2166,6 +2210,8 @@ class SelectCog(commands.Cog):
                 interaction,
                 content="Select: This command can only be used in a server.",
             )
+            return
+        if not await self.bot.ensure_authorised(interaction):
             return
         if not prompt.strip():
             await self._send_message(
