@@ -111,3 +111,17 @@ def test_build_ai_schema_context_from_records():
     assert "sample_account_names: Ondria.1592" in context
     assert "sample_key_names: Main Key" in context
     assert "sample_guild_ids: abcd-1234" in context
+
+
+def test_parse_blanket_query_table_alias_field():
+    fields, conditions = SelectCog._parse_blanket_query(
+        "SELECT api_keys.name, api_keys.created_at WHERE api_keys.account_name == ondria.1592"
+    )
+    assert fields == ["api_keys", "created_at"]
+    assert conditions == [
+        _BlanketCondition(
+            field="account_name",
+            operator="==",
+            value="ondria.1592",
+        )
+    ]
