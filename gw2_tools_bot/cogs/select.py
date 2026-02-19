@@ -887,6 +887,34 @@ class SelectCog(commands.Cog):
             return f"SELECT user, account_name, api_keys WHERE account_name == {account_name}"
         return ""
 
+    @staticmethod
+    def _prompt_requests_full_rows(prompt: str) -> bool:
+        lowered = prompt.casefold()
+        markers = (
+            "full row",
+            "full rows",
+            "all fields",
+            "all columns",
+            "complete row",
+            "everything",
+            "entire row",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @classmethod
+    def _coerce_query_to_full_rows(cls, *, prompt: str, query: str) -> str:
+        if not cls._prompt_requests_full_rows(prompt):
+            return query
+        match = re.match(r"^\s*select\s+(.+)$", query, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return query
+        tail = match.group(1).strip()
+        where_match = re.search(r"\s+where\s+", tail, flags=re.IGNORECASE)
+        if where_match:
+            where_clause = tail[where_match.start() :].strip()
+            return f"SELECT * {where_clause}"
+        return "SELECT *"
+
     @classmethod
     def _is_read_only_select_query_text(cls, query: str) -> bool:
         cleaned = query.strip()
@@ -900,7 +928,9 @@ class SelectCog(commands.Cog):
             for keyword in cls.AI_FORBIDDEN_KEYWORDS
         )
 
-    async def _ai_generate_blanket_query(self, prompt: str) -> str:
+    async def _ai_generate_blanket_query(
+        self, prompt: str, *, schema_context: Optional[str] = None
+    ) -> str:
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
             raise ValueError(
@@ -908,12 +938,24 @@ class SelectCog(commands.Cog):
             )
 
         model = os.getenv("OPENAI_MODEL", "gpt-5-mini").strip() or "gpt-5-mini"
+        schema_block = (
+            schema_context.strip()
+            if isinstance(schema_context, str) and schema_context.strip()
+            else "No dynamic value samples available."
+        )
         system_prompt = (
             "You convert natural language into a single read-only query for this grammar: "
             "SELECT <field[, field...]> [FROM <ignored>] [WHERE <field> <op> <value> [AND ...]]. "
             "Allowed fields: user, discord_name, user_id, api_keys, account_name, character_name, guild_id, permission. "
             "Allowed operators: ==, =, !=, ~=. "
-            "Return ONLY the query text, no markdown, no explanation."
+            "Semantics: == exact match; != exact mismatch; ~= case-insensitive contains. "
+            "character_name, guild_id, and permission are list fields, so comparisons apply to each list item. "
+            "Prefer account_name for GW2 account identifiers like Name.1234. "
+            "If prompt asks for full rows/all fields/everything, output SELECT * with WHERE preserved. "
+            "Never output update/delete/insert/drop/alter/create/truncate/grant/revoke. "
+            "Return ONLY the query text, no markdown, no explanation.\n\n"
+            "Schema context:\n"
+            f"{schema_block}"
         )
         payload = {
             "model": model,
@@ -963,6 +1005,57 @@ class SelectCog(commands.Cog):
                 "AI did not return a usable query. Try including an account name like `Name.1234`."
             )
         return generated
+
+    @classmethod
+    def _build_ai_schema_context_from_records(
+        cls,
+        records: Sequence[Tuple[int, int, "ApiKeyRecord"]],
+        *,
+        scope: str,
+    ) -> str:
+        account_names: List[str] = []
+        key_names: List[str] = []
+        guild_ids: List[str] = []
+        permissions: List[str] = []
+
+        def _append_unique(bucket: List[str], value: str, *, limit: int = 25) -> None:
+            cleaned = value.strip()
+            if not cleaned or cleaned in bucket:
+                return
+            if len(bucket) >= limit:
+                return
+            bucket.append(cleaned)
+
+        for _guild_id, _user_id, record in records:
+            _append_unique(key_names, record.name)
+            _append_unique(account_names, record.account_name)
+            for gid in record.guild_ids or []:
+                _append_unique(guild_ids, gid)
+            for perm in record.permissions or []:
+                _append_unique(permissions, perm)
+
+        lines = [
+            f"- scope: {scope}",
+            f"- records_in_scope: {len(records)}",
+            "- fields:",
+            "  - user: Discord display label",
+            "  - discord_name: Discord username",
+            "  - user_id: Discord ID string",
+            "  - api_keys: stored key name",
+            "  - account_name: GW2 account name (e.g. Name.1234)",
+            "  - character_name: list of GW2 character names",
+            "  - guild_id: list of GW2 guild UUIDs",
+            "  - permission: list of GW2 API key permissions",
+            "- operator_notes:",
+            "  - use == for exact value matches",
+            "  - use ~= for partial/contains matches",
+            "  - combine filters with AND only",
+            f"- sample_account_names: {', '.join(account_names) if account_names else '(none)'}",
+            f"- sample_key_names: {', '.join(key_names) if key_names else '(none)'}",
+            f"- sample_guild_ids: {', '.join(guild_ids) if guild_ids else '(none)'}",
+            f"- sample_permissions: {', '.join(permissions) if permissions else '(none)'}",
+        ]
+        return "\n".join(lines)
 
     async def _resolve_blanket_scope(
         self, interaction: discord.Interaction, scope: str
@@ -2029,7 +2122,7 @@ class SelectCog(commands.Cog):
                 [
                     "Use `/select blanket` with SQL-like syntax: `SELECT user, api_keys WHERE account_name == Name.1234 AND character_name == 'Char Name'`.",
                     "Operators: `==`, `!=`, `~=` (contains).",
-                    "Use **scope=auto** to restrict non-mod users to their own data automatically.",
+                    "Access scope is automatic: mods/admins can query all records; others are restricted to their own.",
                 ]
             ),
             inline=False,
@@ -2043,25 +2136,16 @@ class SelectCog(commands.Cog):
     )
     @app_commands.describe(
         query="Example: SELECT user, api_keys WHERE account_name == Example.1234 AND character_name == 'My Character'",
-        scope="auto: mods query all, others query their own records only",
-    )
-    @app_commands.choices(
-        scope=[
-            app_commands.Choice(name="Auto", value="auto"),
-            app_commands.Choice(name="Mine only", value="mine"),
-            app_commands.Choice(name="All records", value="all"),
-        ]
     )
     async def blanket_query(
         self,
         interaction: discord.Interaction,
         query: str,
-        scope: str = "auto",
     ) -> None:
         await self._run_blanket_query(
             interaction,
             query=query,
-            scope=scope,
+            scope="auto",
             include_query_label="Query",
         )
 
@@ -2071,20 +2155,11 @@ class SelectCog(commands.Cog):
     )
     @app_commands.describe(
         prompt="Natural language request, e.g. i want to see this user's api keys",
-        scope="auto: mods query all, others query their own records only",
-    )
-    @app_commands.choices(
-        scope=[
-            app_commands.Choice(name="Auto", value="auto"),
-            app_commands.Choice(name="Mine only", value="mine"),
-            app_commands.Choice(name="All records", value="all"),
-        ]
     )
     async def ai_query(
         self,
         interaction: discord.Interaction,
         prompt: str,
-        scope: str = "auto",
     ) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await self._send_message(
@@ -2107,6 +2182,28 @@ class SelectCog(commands.Cog):
             ),
             ephemeral=True,
         )
+        is_authorised, effective_scope = await self._resolve_blanket_scope(
+            interaction, "auto"
+        )
+        if effective_scope == "all" and not is_authorised:
+            await self._edit_ai_status_embed(
+                interaction,
+                stage="Denied",
+                detail="All-record scope requested without permissions.",
+                prompt=prompt,
+                state="error",
+            )
+            return
+
+        user_id_filter = interaction.user.id if effective_scope == "mine" else None
+        scoped_records = self.bot.storage.query_api_keys(
+            guild_id=interaction.guild.id,
+            user_id=user_id_filter,
+        )
+        schema_context = self._build_ai_schema_context_from_records(
+            scoped_records,
+            scope=effective_scope,
+        )
         await self._edit_ai_status_embed(
             interaction,
             stage="Generate",
@@ -2114,7 +2211,10 @@ class SelectCog(commands.Cog):
             prompt=prompt,
         )
         try:
-            generated_query = await self._ai_generate_blanket_query(prompt)
+            generated_query = await self._ai_generate_blanket_query(
+                prompt,
+                schema_context=schema_context,
+            )
         except ValueError as exc:
             await self._edit_ai_status_embed(
                 interaction,
@@ -2124,6 +2224,11 @@ class SelectCog(commands.Cog):
                 state="error",
             )
             return
+
+        generated_query = self._coerce_query_to_full_rows(
+            prompt=prompt,
+            query=generated_query,
+        )
 
         await self._edit_ai_status_embed(
             interaction,
@@ -2152,7 +2257,7 @@ class SelectCog(commands.Cog):
         await self._run_blanket_query(
             interaction,
             query=generated_query,
-            scope=scope,
+            scope="auto",
             include_query_label="AI Query",
             progress_callback=_progress_callback,
             send_error_followups=False,
