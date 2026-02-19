@@ -4,6 +4,8 @@ import csv
 import io
 import json
 import logging
+import os
+import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -35,6 +37,13 @@ class _FilterSet:
         return bool(self.character_keys)
 
 
+@dataclass(frozen=True)
+class _BlanketCondition:
+    field: str
+    operator: str
+    value: str
+
+
 class SelectCog(commands.Cog):
     """Admin member lookup with selectable filters and grouping."""
 
@@ -47,6 +56,51 @@ class SelectCog(commands.Cog):
         # previously cached administrator-only defaults and surfaces the
         # command to authorised moderator roles governed by runtime checks.
         default_permissions=discord.Permissions(),
+    )
+    BLANKET_DEFAULT_FIELDS: Tuple[str, ...] = (
+        "user",
+        "api_keys",
+        "account_name",
+        "character_name",
+    )
+    BLANKET_FIELD_ALIASES: Dict[str, str] = {
+        "user": "user",
+        "users": "user",
+        "discord_user": "user",
+        "discord_name": "discord_name",
+        "user_id": "user_id",
+        "api_keys": "api_keys",
+        "api_key": "api_keys",
+        "key_name": "api_keys",
+        "account": "account_name",
+        "account_name": "account_name",
+        "character": "character_name",
+        "character_name": "character_name",
+        "guild": "guild_id",
+        "guild_id": "guild_id",
+        "permission": "permission",
+        "permissions": "permission",
+    }
+    BLANKET_FIELD_LABELS: Dict[str, str] = {
+        "user": "User",
+        "discord_name": "Discord Name",
+        "user_id": "User ID",
+        "api_keys": "API Key Name",
+        "account_name": "Account Name",
+        "character_name": "Character Names",
+        "guild_id": "Guild IDs",
+        "permission": "Permissions",
+    }
+    AI_FORBIDDEN_KEYWORDS: Tuple[str, ...] = (
+        "update",
+        "delete",
+        "insert",
+        "drop",
+        "alter",
+        "create",
+        "truncate",
+        "grant",
+        "revoke",
     )
 
     def __init__(self, bot: GW2ToolsBot) -> None:
@@ -516,6 +570,355 @@ class SelectCog(commands.Cog):
                     return False, matched_guilds, matched_roles
 
         return True, sorted(set(matched_guilds)), sorted(set(matched_roles))
+
+    @classmethod
+    def _normalise_blanket_field(cls, raw: str) -> Optional[str]:
+        value = raw.strip().casefold()
+        if not value:
+            return None
+        return cls.BLANKET_FIELD_ALIASES.get(value)
+
+    @staticmethod
+    def _strip_quotes(value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+            return cleaned[1:-1]
+        return cleaned
+
+    @classmethod
+    def _parse_blanket_query(
+        cls, query: str
+    ) -> tuple[List[str], List[_BlanketCondition]]:
+        cleaned = query.strip()
+        match = re.match(r"^\s*select\s+(.*)$", cleaned, flags=re.IGNORECASE)
+        if not match:
+            raise ValueError("Query must start with SELECT.")
+
+        remainder = match.group(1).strip()
+        where_clause = ""
+        where_match = re.search(r"\s+where\s+", remainder, flags=re.IGNORECASE)
+        if where_match:
+            where_clause = remainder[where_match.end() :].strip()
+            remainder = remainder[: where_match.start()].strip()
+        if not remainder:
+            raise ValueError("SELECT fields are required.")
+
+        from_match = re.search(r"\s+from\s+", remainder, flags=re.IGNORECASE)
+        select_part = remainder
+        if from_match:
+            select_part = remainder[: from_match.start()].strip()
+            from_part = remainder[from_match.end() :].strip()
+            if not from_part:
+                raise ValueError("FROM clause was provided without table names.")
+
+        raw_fields = [part.strip() for part in select_part.split(",") if part.strip()]
+        if not raw_fields:
+            raise ValueError("At least one SELECT field is required.")
+
+        selected_fields: List[str] = []
+        if len(raw_fields) == 1 and raw_fields[0] == "*":
+            selected_fields = list(cls.BLANKET_DEFAULT_FIELDS)
+        else:
+            for token in raw_fields:
+                normalised = cls._normalise_blanket_field(token)
+                if not normalised:
+                    raise ValueError(f"Unsupported SELECT field: `{token}`.")
+                if normalised not in selected_fields:
+                    selected_fields.append(normalised)
+
+        conditions: List[_BlanketCondition] = []
+        if where_clause:
+            parts = [part.strip() for part in re.split(r"\s+and\s+", where_clause, flags=re.IGNORECASE) if part.strip()]
+            for part in parts:
+                cond_match = re.match(
+                    r"^\s*([a-zA-Z_][\w]*)\s*(==|=|!=|~=)\s*(.+?)\s*$",
+                    part,
+                )
+                if not cond_match:
+                    raise ValueError(
+                        "Invalid WHERE condition. Use syntax like `account_name == Example.1234`."
+                    )
+                raw_field, operator, raw_value = cond_match.groups()
+                field = cls._normalise_blanket_field(raw_field)
+                if not field:
+                    raise ValueError(f"Unsupported WHERE field: `{raw_field}`.")
+                value = cls._strip_quotes(raw_value)
+                if not value:
+                    raise ValueError(f"Condition value for `{raw_field}` cannot be empty.")
+                normalised_operator = "==" if operator == "=" else operator
+                conditions.append(
+                    _BlanketCondition(field=field, operator=normalised_operator, value=value)
+                )
+        return selected_fields, conditions
+
+    @staticmethod
+    def _blanket_condition_matches(
+        condition: _BlanketCondition, row: Mapping[str, object]
+    ) -> bool:
+        value = condition.value.casefold()
+        raw_actual = row.get(condition.field)
+        if isinstance(raw_actual, list):
+            actual_values = [str(item).casefold() for item in raw_actual]
+        else:
+            actual_values = [str(raw_actual or "").casefold()]
+
+        if condition.operator == "==":
+            return any(item == value for item in actual_values)
+        if condition.operator == "!=":
+            return all(item != value for item in actual_values)
+        if condition.operator == "~=":
+            return any(value in item for item in actual_values)
+        return False
+
+    @staticmethod
+    def _build_blanket_rows(
+        guild: discord.Guild,
+        records: Sequence[Tuple[int, int, "ApiKeyRecord"]],
+    ) -> List[Dict[str, object]]:
+        rows: List[Dict[str, object]] = []
+        for _, user_id, record in records:
+            member = guild.get_member(user_id)
+            if member is not None:
+                user_label = f"{member.display_name} ({member.name})"
+                discord_name = member.name
+            else:
+                user_label = f"Unknown user ({user_id})"
+                discord_name = "Unknown"
+            rows.append(
+                {
+                    "user": user_label,
+                    "discord_name": discord_name,
+                    "user_id": str(user_id),
+                    "api_keys": record.name or "",
+                    "account_name": record.account_name or "",
+                    "character_name": list(record.characters or []),
+                    "guild_id": list(record.guild_ids or []),
+                    "permission": list(record.permissions or []),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _blanket_value_for_display(value: object) -> str:
+        if isinstance(value, list):
+            cleaned = [str(item) for item in value if str(item).strip()]
+            return ", ".join(cleaned) if cleaned else "-"
+        cleaned = str(value or "").strip()
+        return cleaned or "-"
+
+    @staticmethod
+    def _ai_response_text(payload: Mapping[str, object]) -> str:
+        output_text = payload.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text.strip()
+
+        output = payload.get("output")
+        if not isinstance(output, list):
+            return ""
+        chunks: List[str] = []
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    chunks.append(text.strip())
+        return "\n".join(chunks).strip()
+
+    @classmethod
+    def _is_read_only_select_query_text(cls, query: str) -> bool:
+        cleaned = query.strip()
+        if not cleaned:
+            return False
+        if not re.match(r"^\s*select\b", cleaned, flags=re.IGNORECASE):
+            return False
+        lowered = cleaned.casefold()
+        return not any(
+            re.search(rf"\b{re.escape(keyword)}\b", lowered)
+            for keyword in cls.AI_FORBIDDEN_KEYWORDS
+        )
+
+    async def _ai_generate_blanket_query(self, prompt: str) -> str:
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError(
+                "AI query generation is disabled. Set `OPENAI_API_KEY` to enable `/select ai`."
+            )
+
+        model = os.getenv("OPENAI_MODEL", "gpt-5-mini").strip() or "gpt-5-mini"
+        system_prompt = (
+            "You convert natural language into a single read-only query for this grammar: "
+            "SELECT <field[, field...]> [FROM <ignored>] [WHERE <field> <op> <value> [AND ...]]. "
+            "Allowed fields: user, discord_name, user_id, api_keys, account_name, character_name, guild_id, permission. "
+            "Allowed operators: ==, =, !=, ~=. "
+            "Return ONLY the query text, no markdown, no explanation."
+        )
+        payload = {
+            "model": model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": system_prompt}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                },
+            ],
+            "max_output_tokens": 180,
+        }
+
+        session = await self._get_session()
+        try:
+            async with session.post(
+                "https://api.openai.com/v1/responses",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload),
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                body = await read_response_text(response)
+                if response.status != 200:
+                    raise ValueError(
+                        f"AI query generation failed ({response.status}): {body[:200]}"
+                    )
+        except aiohttp.ClientError as exc:
+            raise ValueError(f"Failed to reach AI service: {exc}") from exc
+
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise ValueError("AI service returned an invalid response format.") from exc
+
+        generated = self._ai_response_text(parsed)
+        if not generated:
+            raise ValueError("AI did not return a query.")
+        return generated
+
+    async def _resolve_blanket_scope(
+        self, interaction: discord.Interaction, scope: str
+    ) -> tuple[bool, str]:
+        is_authorised = self.bot.is_authorised(
+            interaction.guild,
+            interaction.user,
+            permissions=getattr(interaction, "permissions", None),
+        )
+        scope_value = scope.lower()
+        if scope_value not in {"auto", "mine", "all"}:
+            scope_value = "auto"
+
+        if scope_value == "auto":
+            effective_scope = "all" if is_authorised else "mine"
+        else:
+            effective_scope = scope_value
+        return is_authorised, effective_scope
+
+    async def _run_blanket_query(
+        self,
+        interaction: discord.Interaction,
+        *,
+        query: str,
+        scope: str,
+        include_query_label: str,
+    ) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await self._send_message(
+                interaction,
+                content="Select: This command can only be used in a server.",
+            )
+            return
+
+        is_authorised, effective_scope = await self._resolve_blanket_scope(
+            interaction, scope
+        )
+        if effective_scope == "all" and not is_authorised:
+            await self._send_message(
+                interaction,
+                content="Select: You do not have permission to query all records. Use scope `mine` or `auto`.",
+            )
+            return
+
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        if not self._is_read_only_select_query_text(query):
+            await self._send_message(
+                interaction,
+                content="Select: Only read-only SELECT queries are allowed.",
+                use_followup=True,
+            )
+            return
+        try:
+            selected_fields, conditions = self._parse_blanket_query(query)
+        except ValueError as exc:
+            await self._send_message(
+                interaction,
+                content=f"Select: {exc}",
+                use_followup=True,
+            )
+            return
+
+        user_id_filter = interaction.user.id if effective_scope == "mine" else None
+        records = self.bot.storage.query_api_keys(
+            guild_id=interaction.guild.id,
+            user_id=user_id_filter,
+        )
+        if not records:
+            await self._send_message(
+                interaction,
+                content="Select: No stored API keys were found for this scope.",
+                use_followup=True,
+            )
+            return
+
+        rows = self._build_blanket_rows(interaction.guild, records)
+        matched_rows = [
+            row
+            for row in rows
+            if all(
+                self._blanket_condition_matches(condition, row)
+                for condition in conditions
+            )
+        ]
+        if not matched_rows:
+            await self._send_message(
+                interaction,
+                content="Select: No records matched the provided blanket query.",
+                use_followup=True,
+            )
+            return
+
+        headers = [self.BLANKET_FIELD_LABELS[field] for field in selected_fields]
+        table_rows = [
+            [self._blanket_value_for_display(row.get(field)) for field in selected_fields]
+            for row in matched_rows
+        ]
+        table = self._format_table(
+            headers=headers,
+            rows=table_rows,
+            code_block=False,
+        )
+        output = io.StringIO()
+        output.write("Select blanket query results\n")
+        output.write(f"Scope: {effective_scope}\n")
+        output.write(f"Matches: {len(matched_rows)}\n")
+        output.write(f"{include_query_label}: {query.strip()}\n\n")
+        output.write(table)
+        output.write("\n")
+        output.seek(0)
+
+        file = discord.File(fp=output, filename="select_blanket_results.txt")
+        await self._safe_followup_messages(
+            interaction,
+            contents=["Select blanket results attached."],
+            files=[file],
+        )
 
     # ------------------------------------------------------------------
     # Commands
@@ -1380,7 +1783,100 @@ class SelectCog(commands.Cog):
             inline=False,
         )
 
+        embed.add_field(
+            name="Blanket query",
+            value=self._format_list(
+                [
+                    "Use `/select blanket` with SQL-like syntax: `SELECT user, api_keys WHERE account_name == Name.1234 AND character_name == 'Char Name'`.",
+                    "Operators: `==`, `!=`, `~=` (contains).",
+                    "Use **scope=auto** to restrict non-mod users to their own data automatically.",
+                ]
+            ),
+            inline=False,
+        )
+
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @select.command(
+        name="blanket",
+        description="Run a SQL-like select query against stored account/API key data.",
+    )
+    @app_commands.describe(
+        query="Example: SELECT user, api_keys WHERE account_name == Example.1234 AND character_name == 'My Character'",
+        scope="auto: mods query all, others query their own records only",
+    )
+    @app_commands.choices(
+        scope=[
+            app_commands.Choice(name="Auto", value="auto"),
+            app_commands.Choice(name="Mine only", value="mine"),
+            app_commands.Choice(name="All records", value="all"),
+        ]
+    )
+    async def blanket_query(
+        self,
+        interaction: discord.Interaction,
+        query: str,
+        scope: str = "auto",
+    ) -> None:
+        await self._run_blanket_query(
+            interaction,
+            query=query,
+            scope=scope,
+            include_query_label="Query",
+        )
+
+    @select.command(
+        name="ai",
+        description="Use AI to convert freeform text into a safe read-only select query.",
+    )
+    @app_commands.describe(
+        prompt="Natural language request, e.g. i want to see this user's api keys",
+        scope="auto: mods query all, others query their own records only",
+    )
+    @app_commands.choices(
+        scope=[
+            app_commands.Choice(name="Auto", value="auto"),
+            app_commands.Choice(name="Mine only", value="mine"),
+            app_commands.Choice(name="All records", value="all"),
+        ]
+    )
+    async def ai_query(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+        scope: str = "auto",
+    ) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await self._send_message(
+                interaction,
+                content="Select: This command can only be used in a server.",
+            )
+            return
+        if not prompt.strip():
+            await self._send_message(
+                interaction,
+                content="Select: Please provide a prompt.",
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            generated_query = await self._ai_generate_blanket_query(prompt)
+        except ValueError as exc:
+            await self._send_message(
+                interaction,
+                content=f"Select: {exc}",
+                use_followup=True,
+            )
+            return
+
+        # Re-run execution through the same read-only parser and guild-scoped fetch path.
+        await self._run_blanket_query(
+            interaction,
+            query=generated_query,
+            scope=scope,
+            include_query_label="AI Query",
+        )
 
 
 async def setup(bot: GW2ToolsBot) -> None:
