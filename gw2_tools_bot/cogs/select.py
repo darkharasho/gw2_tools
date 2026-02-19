@@ -770,6 +770,21 @@ class SelectCog(commands.Cog):
 
     @staticmethod
     def _ai_response_text(payload: Mapping[str, object]) -> str:
+        def _collect_text(value: object, *, out: List[str]) -> None:
+            if isinstance(value, str):
+                text = value.strip()
+                if text:
+                    out.append(text)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    _collect_text(item, out=out)
+                return
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    if key in {"text", "output_text", "content"}:
+                        _collect_text(nested, out=out)
+
         output_text = payload.get("output_text")
         if isinstance(output_text, str) and output_text.strip():
             return output_text.strip()
@@ -826,7 +841,12 @@ class SelectCog(commands.Cog):
                                     fallback_parts.append(text.strip())
                         if fallback_parts:
                             return "\n".join(fallback_parts).strip()
-        return ""
+        deep_chunks: List[str] = []
+        _collect_text(payload, out=deep_chunks)
+        for chunk in deep_chunks:
+            if chunk and "select" in chunk.casefold():
+                return chunk
+        return "\n".join(deep_chunks).strip()
 
     @staticmethod
     def _extract_select_statement(text: str) -> str:
@@ -849,6 +869,23 @@ class SelectCog(commands.Cog):
         if ";" in candidate:
             candidate = candidate.split(";", 1)[0].strip()
         return candidate
+
+    @staticmethod
+    def _heuristic_query_from_prompt(prompt: str) -> str:
+        cleaned = prompt.strip()
+        if not cleaned:
+            return ""
+        account_match = re.search(
+            r"([A-Za-z0-9_.-]+\.\d{4})",
+            cleaned,
+        )
+        if account_match and re.search(r"\bapi\s*keys?\b", cleaned, flags=re.IGNORECASE):
+            account_name = account_match.group(1)
+            return f"SELECT user, api_keys WHERE account_name == {account_name}"
+        if account_match:
+            account_name = account_match.group(1)
+            return f"SELECT user, account_name, api_keys WHERE account_name == {account_name}"
+        return ""
 
     @classmethod
     def _is_read_only_select_query_text(cls, query: str) -> bool:
@@ -920,7 +957,11 @@ class SelectCog(commands.Cog):
         generated = self._ai_response_text(parsed)
         generated = self._extract_select_statement(generated)
         if not generated:
-            raise ValueError("AI did not return a query.")
+            generated = self._heuristic_query_from_prompt(prompt)
+        if not generated:
+            raise ValueError(
+                "AI did not return a usable query. Try including an account name like `Name.1234`."
+            )
         return generated
 
     async def _resolve_blanket_scope(
@@ -951,6 +992,7 @@ class SelectCog(commands.Cog):
         progress_callback: Optional[
             Callable[[str, str, Optional[str], str], Awaitable[None]]
         ] = None,
+        send_error_followups: bool = True,
     ) -> None:
         async def _progress(
             stage: str,
@@ -968,10 +1010,11 @@ class SelectCog(commands.Cog):
                 query,
                 "error",
             )
-            await self._send_message(
-                interaction,
-                content="Select: This command can only be used in a server.",
-            )
+            if send_error_followups:
+                await self._send_message(
+                    interaction,
+                    content="Select: This command can only be used in a server.",
+                )
             return
 
         await _progress("Scope", "Resolving query scope.", query)
@@ -985,10 +1028,11 @@ class SelectCog(commands.Cog):
                 query,
                 "error",
             )
-            await self._send_message(
-                interaction,
-                content="Select: You do not have permission to query all records. Use scope `mine` or `auto`.",
-            )
+            if send_error_followups:
+                await self._send_message(
+                    interaction,
+                    content="Select: You do not have permission to query all records. Use scope `mine` or `auto`.",
+                )
             return
 
         if not interaction.response.is_done():
@@ -1001,11 +1045,12 @@ class SelectCog(commands.Cog):
                 query,
                 "error",
             )
-            await self._send_message(
-                interaction,
-                content="Select: Only read-only SELECT queries are allowed.",
-                use_followup=True,
-            )
+            if send_error_followups:
+                await self._send_message(
+                    interaction,
+                    content="Select: Only read-only SELECT queries are allowed.",
+                    use_followup=True,
+                )
             return
         try:
             selected_fields, conditions = self._parse_blanket_query(query)
@@ -1016,11 +1061,12 @@ class SelectCog(commands.Cog):
                 query,
                 "error",
             )
-            await self._send_message(
-                interaction,
-                content=f"Select: {exc}",
-                use_followup=True,
-            )
+            if send_error_followups:
+                await self._send_message(
+                    interaction,
+                    content=f"Select: {exc}",
+                    use_followup=True,
+                )
             return
 
         await _progress(
@@ -1040,11 +1086,12 @@ class SelectCog(commands.Cog):
                 query,
                 "error",
             )
-            await self._send_message(
-                interaction,
-                content="Select: No stored API keys were found for this scope.",
-                use_followup=True,
-            )
+            if send_error_followups:
+                await self._send_message(
+                    interaction,
+                    content="Select: No stored API keys were found for this scope.",
+                    use_followup=True,
+                )
             return
 
         await _progress(
@@ -1068,11 +1115,12 @@ class SelectCog(commands.Cog):
                 query,
                 "done",
             )
-            await self._send_message(
-                interaction,
-                content="Select: No records matched the provided blanket query.",
-                use_followup=True,
-            )
+            if send_error_followups:
+                await self._send_message(
+                    interaction,
+                    content="Select: No records matched the provided blanket query.",
+                    use_followup=True,
+                )
             return
 
         await _progress(
@@ -2075,11 +2123,6 @@ class SelectCog(commands.Cog):
                 prompt=prompt,
                 state="error",
             )
-            await self._send_message(
-                interaction,
-                content=f"Select: {exc}",
-                use_followup=True,
-            )
             return
 
         await self._edit_ai_status_embed(
@@ -2112,6 +2155,7 @@ class SelectCog(commands.Cog):
             scope=scope,
             include_query_label="AI Query",
             progress_callback=_progress_callback,
+            send_error_followups=False,
         )
 
 
