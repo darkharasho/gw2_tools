@@ -1706,6 +1706,39 @@ class StorageManager:
             payload[guild_key] = key_value
         self._write_json(path, payload)
 
+    def get_audit_gw2_api_keys(self, guild_id: int) -> Dict[str, str]:
+        path = self._guild_path(guild_id) / "audit_gw2_api_keys.json"
+        payload = self._read_json(path, {})
+        if not isinstance(payload, dict):
+            return {}
+        cleaned: Dict[str, str] = {}
+        for raw_name, raw_key in payload.items():
+            if not isinstance(raw_name, str) or not isinstance(raw_key, str):
+                continue
+            name = raw_name.strip().casefold()
+            key_value = raw_key.strip()
+            if not name or not key_value:
+                continue
+            cleaned[name] = key_value
+        return cleaned
+
+    def save_audit_gw2_api_keys(self, guild_id: int, keys: Mapping[str, str]) -> None:
+        path = self._guild_path(guild_id) / "audit_gw2_api_keys.json"
+        payload: Dict[str, str] = {}
+        for raw_name, raw_key in keys.items():
+            if not isinstance(raw_name, str) or not isinstance(raw_key, str):
+                continue
+            name = raw_name.strip().casefold()
+            key_value = raw_key.strip()
+            if not name or not key_value:
+                continue
+            payload[name] = key_value
+        sorted_payload = {
+            name: payload[name]
+            for name in sorted(payload.keys(), key=lambda value: value.casefold())
+        }
+        self._write_json(path, sorted_payload)
+
     # ------------------------------------------------------------------
     # Composition presets
     # ------------------------------------------------------------------

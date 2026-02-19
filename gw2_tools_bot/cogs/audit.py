@@ -104,6 +104,11 @@ class AuditCog(commands.Cog):
     audit = app_commands.Group(
         name="audit", description="Configure and query audit logging."
     )
+    audit_gw2_key = app_commands.Group(
+        name="gw2_key",
+        description="Manage GW2 API keys used for audit syncing.",
+        parent=audit,
+    )
 
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
@@ -145,29 +150,177 @@ class AuditCog(commands.Cog):
         self.bot.save_config(interaction.guild.id, config)
         await interaction.response.send_message(message, ephemeral=True)
 
-    @audit.command(
-        name="gw2_key",
-        description="Set the admin GW2 API key for guild log syncing.",
+    @audit_gw2_key.command(
+        name="add",
+        description="Add or update a GW2 API key for guild log syncing.",
     )
-    @app_commands.describe(api_key="Guild Wars 2 API key with guild log access.")
-    async def audit_gw2_key_command(
-        self, interaction: discord.Interaction, api_key: Optional[str]
+    @app_commands.describe(
+        name="Label for this key (letters, numbers, spaces, _, -, .).",
+        api_key="Guild Wars 2 API key with guild log access.",
+    )
+    async def audit_gw2_key_add_command(
+        self, interaction: discord.Interaction, name: str, api_key: str
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
         if interaction.guild is None:
             return
 
-        config = self.bot.get_config(interaction.guild.id)
-        cleaned_key = api_key.strip() if api_key else ""
-        config.audit_gw2_admin_api_key = cleaned_key or None
-        self.bot.save_config(interaction.guild.id, config)
+        cleaned_name = self._normalise_key_name(name)
+        cleaned_key = api_key.strip()
+        if not cleaned_name:
+            await interaction.response.send_message(
+                "Key name cannot be empty and must contain letters, numbers, spaces, `_`, `-`, or `.`.",
+                ephemeral=True,
+            )
+            return
+        if not cleaned_key:
+            await interaction.response.send_message(
+                "API key cannot be empty.",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = interaction.guild.id
+        keys = self.bot.storage.get_audit_gw2_api_keys(guild_id)
+        existed = cleaned_name in keys
+        keys[cleaned_name] = cleaned_key
+        self.bot.storage.save_audit_gw2_api_keys(guild_id, keys)
         message = (
-            "Guild Wars 2 admin API key saved."
-            if cleaned_key
-            else "Guild Wars 2 admin API key cleared."
+            f"Updated GW2 audit key `{cleaned_name}`."
+            if existed
+            else f"Added GW2 audit key `{cleaned_name}`."
         )
         await interaction.response.send_message(message, ephemeral=True)
+
+    @audit_gw2_key.command(
+        name="list",
+        description="List configured GW2 API keys for audit syncing.",
+    )
+    async def audit_gw2_key_list_command(
+        self, interaction: discord.Interaction
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        if interaction.guild is None:
+            return
+
+        keys = self.bot.storage.get_audit_gw2_api_keys(interaction.guild.id)
+        if not keys:
+            await interaction.response.send_message(
+                "No managed GW2 audit keys configured.",
+                ephemeral=True,
+            )
+            return
+
+        lines = [
+            f"- `{name}`: `{self._mask_api_key(key)}`"
+            for name, key in sorted(keys.items(), key=lambda item: item[0].casefold())
+        ]
+        await interaction.response.send_message(
+            "Configured GW2 audit keys:\n" + "\n".join(lines),
+            ephemeral=True,
+        )
+
+    @audit_gw2_key.command(
+        name="remove",
+        description="Remove a stored GW2 API key used for audit syncing.",
+    )
+    @app_commands.describe(name="Label of the key to remove.")
+    async def audit_gw2_key_remove_command(
+        self, interaction: discord.Interaction, name: str
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        if interaction.guild is None:
+            return
+
+        cleaned_name = self._normalise_key_name(name)
+        if not cleaned_name:
+            await interaction.response.send_message(
+                "Please provide a key name to remove.",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = interaction.guild.id
+        keys = self.bot.storage.get_audit_gw2_api_keys(guild_id)
+        if cleaned_name not in keys:
+            await interaction.response.send_message(
+                f"No GW2 audit key named `{cleaned_name}` was found.",
+                ephemeral=True,
+            )
+            return
+        keys.pop(cleaned_name, None)
+        self.bot.storage.save_audit_gw2_api_keys(guild_id, keys)
+        await interaction.response.send_message(
+            f"Removed GW2 audit key `{cleaned_name}`.",
+            ephemeral=True,
+        )
+
+    @audit_gw2_key_remove_command.autocomplete("name")
+    async def audit_gw2_key_name_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        if interaction.guild is None:
+            return []
+        query = self._normalise_key_name(current)
+        keys = self.bot.storage.get_audit_gw2_api_keys(interaction.guild.id)
+        matches = [
+            app_commands.Choice(name=name, value=name)
+            for name in sorted(keys.keys(), key=str.casefold)
+            if not query or query in name
+        ]
+        return matches[:25]
+
+    @audit_gw2_key.command(
+        name="migrate",
+        description="Migrate the legacy single GW2 audit key into managed keys.",
+    )
+    @app_commands.describe(
+        name="Optional label for the migrated key.",
+    )
+    async def audit_gw2_key_migrate_command(
+        self, interaction: discord.Interaction, name: Optional[str] = None
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        if interaction.guild is None:
+            return
+
+        guild_id = interaction.guild.id
+        config = self.bot.get_config(guild_id)
+        legacy_key = (config.audit_gw2_admin_api_key or "").strip()
+        if not legacy_key:
+            await interaction.response.send_message(
+                "No legacy GW2 audit key is set in config, so there is nothing to migrate.",
+                ephemeral=True,
+            )
+            return
+
+        desired_name = self._normalise_key_name(name or "legacy")
+        if not desired_name:
+            desired_name = "legacy"
+
+        keys = self.bot.storage.get_audit_gw2_api_keys(guild_id)
+        if desired_name in keys and keys[desired_name] != legacy_key:
+            suffix = 2
+            while True:
+                candidate = f"{desired_name}-{suffix}"
+                if candidate not in keys:
+                    desired_name = candidate
+                    break
+                suffix += 1
+
+        keys[desired_name] = legacy_key
+        self.bot.storage.save_audit_gw2_api_keys(guild_id, keys)
+
+        config.audit_gw2_admin_api_key = None
+        self.bot.save_config(guild_id, config)
+        await interaction.response.send_message(
+            f"Migrated legacy GW2 audit key to managed key `{desired_name}` and cleared the legacy config key.",
+            ephemeral=True,
+        )
 
     @audit.command(
         name="gw2_guild",
@@ -764,13 +917,18 @@ class AuditCog(commands.Cog):
 
         for guild in self.bot.guilds:
             config = self.bot.get_config(guild.id)
-            if not config.audit_gw2_admin_api_key or not config.audit_gw2_guild_id:
+            if not config.audit_gw2_guild_id:
                 continue
-            await self._sync_gw2_guild_log(
-                guild.id,
-                config.audit_gw2_guild_id,
-                config.audit_gw2_admin_api_key,
-            )
+            api_keys = self._resolve_audit_gw2_api_keys(guild.id, config)
+            if not api_keys:
+                continue
+            for api_key in api_keys:
+                if await self._sync_gw2_guild_log(
+                    guild.id,
+                    config.audit_gw2_guild_id,
+                    api_key,
+                ):
+                    break
 
     @_poll_gw2_logs.before_loop
     async def _before_poll_gw2_logs(self) -> None:  # pragma: no cover - lifecycle
@@ -793,7 +951,7 @@ class AuditCog(commands.Cog):
 
     async def _sync_gw2_guild_log(
         self, guild_id: int, gw2_guild_id: str, api_key: str
-    ) -> None:
+    ) -> bool:
         store = self.bot.storage.get_audit_store(guild_id)
         last_log_id = store.get_gw2_last_log_id()
         params = {"access_token": api_key}
@@ -811,18 +969,18 @@ class AuditCog(commands.Cog):
                         response.status,
                         body,
                     )
-                    return
+                    return False
                 payload = await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError):
             LOGGER.exception("Failed to fetch GW2 guild log for %s", gw2_guild_id)
-            return
+            return False
         except Exception:
             LOGGER.exception("Unexpected error fetching GW2 guild log for %s", gw2_guild_id)
-            return
+            return False
 
         if not isinstance(payload, list):
             LOGGER.warning("Unexpected GW2 guild log payload for %s: %s", gw2_guild_id, payload)
-            return
+            return False
 
         max_log_id = last_log_id
         for entry in payload:
@@ -844,6 +1002,35 @@ class AuditCog(commands.Cog):
             )
 
         store.set_gw2_last_log_id(max_log_id, utcnow())
+        return True
+
+    @staticmethod
+    def _normalise_key_name(value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value.strip().casefold())
+        cleaned = re.sub(r"[^a-z0-9_.\- ]", "", cleaned)
+        return cleaned
+
+    @staticmethod
+    def _mask_api_key(value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) <= 8:
+            return "****"
+        return f"{cleaned[:4]}...{cleaned[-4:]}"
+
+    def _resolve_audit_gw2_api_keys(self, guild_id: int, config: Any) -> list[str]:
+        resolved: list[str] = []
+        seen: set[str] = set()
+
+        for value in self.bot.storage.get_audit_gw2_api_keys(guild_id).values():
+            cleaned = value.strip()
+            if cleaned and cleaned not in seen:
+                resolved.append(cleaned)
+                seen.add(cleaned)
+        if config.audit_gw2_admin_api_key:
+            cleaned = config.audit_gw2_admin_api_key.strip()
+            if cleaned and cleaned not in seen:
+                resolved.append(cleaned)
+        return resolved
 
     # ------------------------------------------------------------------
     # Helpers

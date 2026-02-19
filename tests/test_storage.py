@@ -48,3 +48,23 @@ def test_all_gw2_guild_ids(api_key_store):
     guilds = api_key_store.all_gw2_guild_ids()
     assert set(guilds) == {"aaaa-1111", "bbbb-2222", "cccc-3333"}
 
+
+def test_audit_gw2_api_key_storage_round_trip(tmp_path):
+    from gw2_tools_bot.storage import StorageManager
+
+    storage = StorageManager(tmp_path)
+    guild_id = 987654
+    storage.save_audit_gw2_api_keys(
+        guild_id,
+        {
+            " Main Key ": " KEY-ONE ",
+            "ALT.KEY": "KEY-TWO",
+            "": "ignored",
+        },
+    )
+
+    keys = storage.get_audit_gw2_api_keys(guild_id)
+    assert keys == {
+        "main key": "KEY-ONE",
+        "alt.key": "KEY-TWO",
+    }
