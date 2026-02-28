@@ -395,11 +395,11 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 best_match = (guild_id, label)
         return best_match
 
-    async def _fetch_guild_world_map(self, url: str) -> Dict[str, int]:
+    async def _fetch_guild_world_map(self, url: str, *, force_refresh: bool = False) -> Dict[str, int]:
         now = datetime.now(timezone.utc)
         cached = self._guild_world_cache.get(url)
         cached_at = self._guild_world_cache_at.get(url)
-        if cached and cached_at:
+        if not force_refresh and cached and cached_at:
             if (now - cached_at).total_seconds() < 3600:
                 return cached
         mapped: Dict[str, int] = {}
@@ -420,13 +420,13 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         self._guild_world_cache_at[url] = now
         return mapped
 
-    async def _resolve_guild_world(self, guild_id: str) -> Optional[int]:
+    async def _resolve_guild_world(self, guild_id: str, *, force_refresh: bool = False) -> Optional[int]:
         normalized = normalise_guild_id(guild_id)
         if not normalized:
             return None
         for url in GW2_GUILD_WVW_URLS:
             try:
-                mapped = await self._fetch_guild_world_map(url)
+                mapped = await self._fetch_guild_world_map(url, force_refresh=force_refresh)
             except ValueError:
                 continue
             world_id = mapped.get(normalized)
@@ -805,10 +805,10 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             return fetched
         return None
 
-    async def _refresh_guild_world(self, config: GuildConfig) -> Optional[int]:
+    async def _refresh_guild_world(self, config: GuildConfig, *, force_refresh: bool = False) -> Optional[int]:
         if not config.alliance_guild_id:
             return None
-        world_id = await self._resolve_guild_world(config.alliance_guild_id)
+        world_id = await self._resolve_guild_world(config.alliance_guild_id, force_refresh=force_refresh)
         if world_id:
             config.alliance_server_id = world_id
             config.alliance_server_name = WVW_SERVER_NAMES.get(world_id, str(world_id))
@@ -822,9 +822,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         config: GuildConfig,
         prediction: bool,
     ) -> bool:
-        world_id = config.alliance_server_id
-        if not world_id:
-            world_id = await self._refresh_guild_world(config)
+        refreshed_world_id = await self._refresh_guild_world(config, force_refresh=True)
+        world_id = refreshed_world_id or config.alliance_server_id
         if not world_id:
             LOGGER.warning("No WvW world configured for guild %s", guild.id)
             return False
