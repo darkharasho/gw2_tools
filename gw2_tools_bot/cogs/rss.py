@@ -15,6 +15,7 @@ import discord
 import feedparser
 from discord import app_commands
 from discord.ext import commands, tasks
+from markdownify import markdownify as html_to_markdown
 
 from ..bot import GW2ToolsBot
 from ..branding import BRAND_COLOUR
@@ -34,6 +35,48 @@ def _clean_summary(summary: str, *, max_length: int = 400) -> str:
     if len(text) <= max_length:
         return text
     return text[: max_length - 1].rstrip() + "…"
+
+
+def _clean_markdown(text: str) -> str:
+    lines = [line.rstrip() for line in text.splitlines()]
+    cleaned: List[str] = []
+    blank = False
+    for line in lines:
+        if line.strip():
+            cleaned.append(line)
+            blank = False
+            continue
+        if not blank:
+            cleaned.append("")
+        blank = True
+    result = "\n".join(cleaned).strip()
+    if not result:
+        return result
+    return _ensure_bullet_prefix(result)
+
+
+def _ensure_bullet_prefix(text: str) -> str:
+    bullet_pattern = re.compile(r"^(\s*)[\*\+]\s+")
+    adjusted: List[str] = []
+    for line in text.split("\n"):
+        match = bullet_pattern.match(line)
+        if match:
+            indent = match.group(1)
+            remainder = line[match.end() :]
+            adjusted.append(f"{indent}- {remainder}")
+        else:
+            adjusted.append(line)
+    return "\n".join(adjusted)
+
+
+def _render_html_summary(summary: str) -> str:
+    markdown = html_to_markdown(
+        summary,
+        heading_style="ATX",
+        bullets="-*+",
+        strip=["img"],
+    )
+    return _clean_markdown(markdown)
 
 
 def _entry_identifier(entry: feedparser.FeedParserDict) -> Optional[str]:
@@ -84,10 +127,16 @@ def _extract_entry_description(entry: feedparser.FeedParserDict, *, max_length: 
                 continue
             value = item.get("value")
             if value:
+                rendered = _render_html_summary(str(value))
+                if rendered:
+                    return _clean_summary(rendered, max_length=max_length) if len(rendered) > max_length else rendered
                 return _clean_summary(str(value), max_length=max_length)
 
     summary = entry.get("summary") or entry.get("description")
     if summary:
+        rendered = _render_html_summary(str(summary))
+        if rendered:
+            return _clean_summary(rendered, max_length=max_length) if len(rendered) > max_length else rendered
         return _clean_summary(str(summary), max_length=max_length)
     return None
 
@@ -947,4 +996,3 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
 
 async def setup(bot: GW2ToolsBot) -> None:
     await bot.add_cog(RssFeedsCog(bot))
-
