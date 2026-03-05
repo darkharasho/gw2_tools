@@ -705,15 +705,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         confidence = round(max(0.0, min(ratio, 1.0)) * 100)
         return confidence
 
-    def _calculate_confidence(self, teams: Sequence[MatchTeam], home_world_id: int) -> Optional[int]:
-        if len(teams) < 2:
-            return None
-        home_team = next((team for team in teams if home_world_id in team.world_ids), None)
-        if not home_team:
-            return None
-        remaining_swing = self._remaining_skirmish_swing()
-        return self._calculate_team_confidence(teams, home_team, remaining_swing)
-
     def _remaining_skirmish_swing(self, now: Optional[datetime] = None) -> int:
         current = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
         days_ahead = (4 - current.weekday()) % 7
@@ -742,6 +733,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         home_world_id: int,
         alliances: Dict[str, AllianceRoster],
         confidence: Optional[int] = None,
+        confidence_map: Optional[Dict[int, Optional[int]]] = None,
     ) -> discord.Embed:
         embed = discord.Embed(
             title="",
@@ -778,11 +770,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
 
         if confidence is not None:
             footer_parts = [f"Home: {confidence}%"]
-            remaining_swing = self._remaining_skirmish_swing()
             for team in teams:
                 if home_world_id in team.world_ids:
                     continue
-                opponent_confidence = self._calculate_team_confidence(teams, team, remaining_swing)
+                if confidence_map is not None:
+                    opponent_confidence = next(
+                        (confidence_map.get(wid) for wid in team.world_ids if wid in confidence_map),
+                        None,
+                    )
+                else:
+                    remaining_swing = self._remaining_skirmish_swing()
+                    opponent_confidence = self._calculate_team_confidence(teams, team, remaining_swing)
                 if opponent_confidence is None:
                     continue
                 footer_parts.append(f"{team.color.capitalize()}: {opponent_confidence}%")
@@ -847,7 +845,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             teams = tier_match.teams
             tier = tier_match.tier
             title = "Predictive WvW Matchup"
-            confidence = self._calculate_confidence(teams, world_id)
+            # Calculate confidence per team based on their CURRENT match standings,
+            # not the predicted cross-match teams (whose VPs are not comparable).
+            remaining_swing = self._remaining_skirmish_swing()
+            team_confidence_map: Dict[int, Optional[int]] = {}
+            for match in matches:
+                match_teams = self._extract_match_teams(match)
+                for team in match_teams:
+                    tc = self._calculate_team_confidence(match_teams, team, remaining_swing)
+                    for wid in team.world_ids:
+                        team_confidence_map[wid] = tc
+            confidence = team_confidence_map.get(world_id)
         else:
             try:
                 match = await self._fetch_match_for_world(world_id)
@@ -875,6 +883,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             home_world_id=world_id,
             alliances=alliances,
             confidence=confidence,
+            confidence_map=team_confidence_map if prediction else None,
         )
 
         try:
