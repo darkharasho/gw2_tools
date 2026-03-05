@@ -5,7 +5,6 @@ import calendar
 import csv
 import io
 import logging
-import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
@@ -546,14 +545,14 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             return " ".join(filtered.split()).casefold()
 
         def _is_solo_header(value: str) -> bool:
-            return bool(re.search(r"\bsolo\b", _normalized_text(value)))
+            return _normalized_text(value) == "solo guilds"
 
         for row in rows[1:]:
             first = row[0].strip() if len(row) > 0 and row[0] else ""
             second = row[1].strip() if len(row) > 1 and row[1] else ""
             if not first and not second:
                 continue
-            if (first and _is_solo_header(first)) or (second and _is_solo_header(second)):
+            if (first and _is_solo_header(first)) or (not first and second and _is_solo_header(second)):
                 in_solo = True
                 continue
             if in_solo:
