@@ -5,6 +5,7 @@ import calendar
 import csv
 import io
 import logging
+import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
@@ -595,6 +596,71 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                     solo_guilds.append(guild)
         return AllianceRoster(alliances=list(alliance_map.items()), solo_guilds=solo_guilds)
 
+    def _normalize_guild_token(self, value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", value)
+        filtered = "".join(char for char in normalized if char.isalnum())
+        return filtered.casefold()
+
+    def _parse_guild_identity(self, guild_label: str) -> tuple[Optional[str], Optional[str], str]:
+        cleaned = guild_label.strip()
+        full_token = self._normalize_guild_token(cleaned)
+        bracketed = re.search(r"\[([^\]]+)\]", cleaned)
+        if not bracketed:
+            return None, full_token or None, full_token
+
+        tag = self._normalize_guild_token(bracketed.group(1)) or None
+        prefix = cleaned[: bracketed.start()].strip()
+        suffix = cleaned[bracketed.end() :].strip()
+        name_only = f"{prefix} {suffix}".strip()
+        name_token = self._normalize_guild_token(name_only) or None
+        return tag, name_token, full_token
+
+    def _guild_matches_target(self, guild_entry: str, target_label: str) -> bool:
+        if not guild_entry or not target_label:
+            return False
+
+        target_tag, target_name, target_full = self._parse_guild_identity(target_label)
+        entry_tag, entry_name, entry_full = self._parse_guild_identity(guild_entry)
+        if not entry_full:
+            return False
+
+        # If target includes a tag, require exact tag match to avoid false positives.
+        if target_tag:
+            if not entry_tag or entry_tag != target_tag:
+                return False
+            if target_name and entry_name:
+                return entry_name == target_name
+            return True
+
+        # No target tag available: use exact normalized name/full equality only.
+        if target_name and entry_name:
+            return entry_name == target_name
+        return entry_full == target_full
+
+    async def _resolve_prediction_world_from_sheet(self, config: GuildConfig) -> Optional[int]:
+        target_label = (config.alliance_guild_name or "").strip()
+        if not target_label:
+            return None
+
+        matched_worlds: List[int] = []
+        for world_id, sheet_name in WVW_ALLIANCE_SHEET_TABS.items():
+            roster = await self._fetch_alliances(sheet_name)
+            all_guilds: List[str] = []
+            for alliance_name, guilds in roster.alliances:
+                all_guilds.append(alliance_name)
+                all_guilds.extend(guilds)
+            all_guilds.extend(roster.solo_guilds)
+            if any(self._guild_matches_target(guild_name, target_label) for guild_name in all_guilds):
+                matched_worlds.append(world_id)
+
+        if not matched_worlds:
+            return None
+        if len(matched_worlds) == 1:
+            return matched_worlds[0]
+        if config.alliance_server_id in matched_worlds:
+            return config.alliance_server_id
+        return matched_worlds[0]
+
     def _format_worlds(self, world_ids: Sequence[int]) -> str:
         names: List[str] = []
         for world_id in world_ids:
@@ -820,8 +886,19 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         config: GuildConfig,
         prediction: bool,
     ) -> bool:
-        refreshed_world_id = await self._refresh_guild_world(config, force_refresh=True)
-        world_id = refreshed_world_id or config.alliance_server_id
+        world_id: Optional[int] = None
+        if prediction:
+            sheet_world_id = await self._resolve_prediction_world_from_sheet(config)
+            if sheet_world_id:
+                config.alliance_server_id = sheet_world_id
+                config.alliance_server_name = WVW_SERVER_NAMES.get(sheet_world_id, str(sheet_world_id))
+                world_id = sheet_world_id
+            else:
+                refreshed_world_id = await self._refresh_guild_world(config, force_refresh=True)
+                world_id = refreshed_world_id or config.alliance_server_id
+        else:
+            refreshed_world_id = await self._refresh_guild_world(config, force_refresh=True)
+            world_id = refreshed_world_id or config.alliance_server_id
         if not world_id:
             LOGGER.warning("No WvW world configured for guild %s", guild.id)
             return False
