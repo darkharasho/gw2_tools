@@ -691,37 +691,15 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         combined = "\n".join(lines)
         if len(combined) <= 1000:
             return combined
-        trimmed: List[str] = []
         max_length = 980
-
-        def _lines_length(items: List[str]) -> int:
-            if not items:
-                return 0
-            return sum(len(item) for item in items) + (len(items) - 1)
-
-        def _trim_lines(items: List[str], limit: int) -> List[str]:
-            kept: List[str] = []
-            total = 0
-            for line in items:
-                next_total = total + len(line) + (1 if kept else 0)
-                if next_total > limit:
-                    break
-                kept.append(line)
-                total = next_total
-            return kept
-
-        if solo_lines:
-            solo_length = _lines_length(solo_lines)
-            if solo_length > max_length:
-                trimmed = _trim_lines(solo_lines, max_length)
-                return "\n".join(trimmed) + "\n…"
-            remaining = max_length - solo_length
-            trimmed = _trim_lines(alliances_lines, remaining)
-            if not trimmed and solo_lines and solo_lines[0] == "":
-                solo_lines = solo_lines[1:]
-            return "\n".join(trimmed + solo_lines) + "\n…"
-
-        trimmed = _trim_lines(lines, max_length)
+        trimmed: List[str] = []
+        total = 0
+        for line in lines:
+            next_total = total + len(line) + (1 if trimmed else 0)
+            if next_total > max_length:
+                break
+            trimmed.append(line)
+            total = next_total
         return "\n".join(trimmed) + "\n…"
 
     def _trim_field_value(self, value: str, max_length: int = 1024) -> str:
