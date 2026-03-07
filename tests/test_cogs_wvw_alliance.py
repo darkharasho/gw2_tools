@@ -165,3 +165,75 @@ async def test_prediction_world_resolver_matches_alliance_name_rows(mock_bot_all
 
     world_id = await cog._resolve_prediction_world_from_sheet(config)
     assert world_id == 11006
+
+
+@pytest.mark.asyncio
+async def test_format_alliance_list_trims_in_display_order(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    roster = AllianceRoster(
+        alliances=[
+            (
+                "[DFVG] Dire Fang Vanguard",
+                [
+                    "[DWLC] - Devonas Legendary Wvw Champions",
+                    "[FANG] - Onlyfangs",
+                    "[KFT] - Killz For Thrillz",
+                    "[LLVG] - Leather And Lace Vanguard (NA)",
+                ],
+            ),
+            (
+                "[OCD] Organized Chaos By Design",
+                [
+                    "[AIR] - The Order Of Storms",
+                    "[CA] - Central Anime",
+                    "[CH] - Contemporary Heroes",
+                    "[PAIN] - Brethren",
+                    "[solo] - Together Yet usually",
+                    "[STAR] - Glory to the Stars",
+                    "[WAR] - The Sons Of Tzu (NA)",
+                ],
+            ),
+            (
+                "[OINK] Respectfully",
+                [
+                    "[BS] - Washed Up (Innactive)",
+                    "[DIS] - Dissentient (NA)",
+                    "[HEX] Sisterhood Of Thugs",
+                    "[PIG] - Pretty Insensitive Girl (NA)",
+                ],
+            ),
+            (
+                "[PALS] Quick Build Siege",
+                [
+                    "[Grim] - The Charr Empire (NA)",
+                    "[SoX] - Standard of Heroes (OCX)",
+                ],
+            ),
+            (
+                "[SA] Seriously Annoying",
+                [
+                    "[BADA] - Bad Aces",
+                    "[BANE] - Nightmares Bane (NA)",
+                    "[PACK] - Wölves Of Wär",
+                ],
+            ),
+            ("[ZERO] Roll Tha Dice", ["[DPS] - Dodged"]),
+        ],
+        solo_guilds=[
+            "[Bana] - Bellicose Banana Club (SEA)",
+            "[Crew] - The Tides Of Tyria",
+            "[DFR] - Devonas Final Rest",
+            "[LH] - Long Horizon (NA)",
+            "[Mist] - Phantoms Of The",
+            "[MoB] - Invictus Nox",
+            "[TEAM] - Operation Get Em",
+            "[UA] - The Underachíevers (NA)",
+        ],
+    )
+
+    value = cog._format_alliance_list(roster)
+
+    assert value.endswith("…")
+    assert "[PACK] - Wölves Of Wär" in value
