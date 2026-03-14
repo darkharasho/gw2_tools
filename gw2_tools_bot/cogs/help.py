@@ -26,6 +26,7 @@ PUBLIC_COMMANDS = {
     "guildrole set",
     "gw2guild search",
     "help",
+    "reset",
 }
 
 
