@@ -14,24 +14,15 @@ from ..branding import BRAND_COLOUR
 LOGGER = logging.getLogger(__name__)
 
 
-def _next_daily_reset() -> int:
-    """Return the Unix timestamp for the next daily reset (00:00 UTC)."""
+def _next_wvw_reset() -> int:
+    """Return the Unix timestamp for the next WvW reset (Saturday 00:00 UTC)."""
     now = datetime.now(timezone.utc)
-    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    if now.hour == 0 and now.minute == 0 and now.second == 0:
-        return int(now.timestamp())
-    return int(tomorrow.timestamp())
-
-
-def _next_weekly_reset() -> int:
-    """Return the Unix timestamp for the next weekly reset (Monday 07:30 UTC)."""
-    now = datetime.now(timezone.utc)
-    # Monday is weekday 0
-    days_until_monday = (0 - now.weekday()) % 7
-    next_monday = now.replace(hour=7, minute=30, second=0, microsecond=0) + timedelta(days=days_until_monday)
-    if next_monday <= now:
-        next_monday += timedelta(weeks=1)
-    return int(next_monday.timestamp())
+    # Saturday is weekday 5
+    days_until_saturday = (5 - now.weekday()) % 7
+    next_saturday = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=days_until_saturday)
+    if next_saturday <= now:
+        next_saturday += timedelta(weeks=1)
+    return int(next_saturday.timestamp())
 
 
 class ResetCog(commands.Cog):
@@ -40,28 +31,23 @@ class ResetCog(commands.Cog):
     def __init__(self, bot: GW2ToolsBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="reset", description="Show upcoming Guild Wars 2 reset times.")
+    @app_commands.command(name="reset", description="Show the next WvW weekly reset time.")
     async def reset_command(self, interaction: discord.Interaction) -> None:
-        daily_ts = _next_daily_reset()
-        weekly_ts = _next_weekly_reset()
+        wvw_ts = _next_wvw_reset()
 
         embed = discord.Embed(
-            title="Guild Wars 2 Reset Times",
+            title="WvW Weekly Reset",
             colour=BRAND_COLOUR,
         )
-        embed.add_field(
-            name="Daily Reset",
-            value=(
-                f"<t:{daily_ts}:F>\n"
-                f"<t:{daily_ts}:t> — <t:{daily_ts}:R>"
-            ),
-            inline=False,
+        embed.set_thumbnail(
+            url="https://wiki.guildwars2.com/images/thumb/9/97/"
+            "Tyria_%28world%29_map_2.jpg/240px-Tyria_%28world%29_map_2.jpg"
         )
         embed.add_field(
-            name="Weekly Reset",
+            name="Next Reset",
             value=(
-                f"<t:{weekly_ts}:F>\n"
-                f"<t:{weekly_ts}:t> — <t:{weekly_ts}:R>"
+                f"<t:{wvw_ts}:F>\n"
+                f"<t:{wvw_ts}:t> — <t:{wvw_ts}:R>"
             ),
             inline=False,
         )
