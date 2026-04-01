@@ -695,7 +695,26 @@ class AccountsCog(commands.Cog):
 
         guild_memberships: set[str] = set()
         for record in self.bot.storage.get_user_api_keys(guild.id, member.id):
-            guild_memberships.update(self._normalise_guild_id(gid) for gid in record.guild_ids)
+            try:
+                account = await self._fetch_json(
+                    "https://api.guildwars2.com/v2/account", api_key=record.key
+                )
+                live_guild_ids = sorted(
+                    {
+                        self._normalise_guild_id(gid)
+                        for gid in (account.get("guilds") or [])
+                        if isinstance(gid, str) and gid.strip()
+                    }
+                )
+                if live_guild_ids != sorted(record.guild_ids):
+                    record.guild_ids = live_guild_ids
+                    record.updated_at = utcnow()
+                    self.bot.storage.upsert_api_key(guild.id, member.id, record)
+                guild_memberships.update(live_guild_ids)
+            except Exception:
+                guild_memberships.update(
+                    self._normalise_guild_id(gid) for gid in record.guild_ids
+                )
 
         normalized_role_map = {
             self._normalise_guild_id(guild_id): role_id
