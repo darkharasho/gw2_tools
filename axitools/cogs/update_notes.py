@@ -18,6 +18,7 @@ from markdownify import markdownify as html_to_markdown
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..rendering import clean_markdown
 from ..storage import UpdateNotesStatus
 
 LOGGER = logging.getLogger(__name__)
@@ -338,37 +339,8 @@ class UpdateNotesCog(commands.Cog):
         markdown = html_to_markdown(
             str(content), heading_style="ATX", bullets="-*+", strip=["img"]
         )
-        return self._clean_markdown(markdown)
+        return clean_markdown(markdown)
 
-    def _clean_markdown(self, text: str) -> str:
-        lines = [line.rstrip() for line in text.splitlines()]
-        cleaned: List[str] = []
-        blank = False
-        for line in lines:
-            if line.strip():
-                cleaned.append(line)
-                blank = False
-                continue
-            if not blank:
-                cleaned.append("")
-            blank = True
-        result = "\n".join(cleaned).strip()
-        if not result:
-            return result
-        return self._ensure_bullet_prefix(result)
-
-    def _ensure_bullet_prefix(self, text: str) -> str:
-        bullet_pattern = re.compile(r"^(\s*)[\*\+]\s+")
-        adjusted: List[str] = []
-        for line in text.split("\n"):
-            match = bullet_pattern.match(line)
-            if match:
-                indent = match.group(1)
-                remainder = line[match.end() :]
-                adjusted.append(f"{indent}- {remainder}")
-            else:
-                adjusted.append(line)
-        return "\n".join(adjusted)
 
     async def _fetch_url(self, url: str, retries: int = 3) -> Optional[str]:
         last_error: Optional[BaseException] = None
