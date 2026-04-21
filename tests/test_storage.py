@@ -49,6 +49,10 @@ def test_all_gw2_guild_ids(api_key_store):
     assert set(guilds) == {"aaaa-1111", "bbbb-2222", "cccc-3333"}
 
 
+def test_count_api_keys_returns_zero_for_empty_guild(api_key_store):
+    assert api_key_store.count_api_keys(guild_id=999) == 0
+
+
 def test_audit_gw2_api_key_storage_round_trip(tmp_path):
     from axitools.storage import StorageManager
 
