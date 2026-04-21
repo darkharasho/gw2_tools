@@ -15,6 +15,7 @@ from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
 from ..storage import ArcDpsStatus
 from ..http_utils import read_response_text
 
@@ -384,6 +385,27 @@ class ArcDpsUpdatesCog(commands.Cog):
                 f"Sent a test ArcDPS notification to {channel.mention}.",
                 ephemeral=True,
             )
+
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        config = self.bot.get_config(guild_id)
+        if config.arcdps_channel_id:
+            field = StatusField(
+                label="ArcDPS Channel",
+                value=f"<#{config.arcdps_channel_id}>",
+                state="ok",
+            )
+        else:
+            field = StatusField(
+                label="ArcDPS Channel",
+                value="Not configured — use /config",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="ArcDPS Updates",
+            fields=[field],
+            setup_command="/config",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:

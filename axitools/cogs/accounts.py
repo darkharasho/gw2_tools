@@ -16,6 +16,7 @@ from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
 from ..http_utils import read_response_text
 from ..storage import ApiKeyRecord, GuildConfig, normalise_guild_id, utcnow
 
@@ -2367,6 +2368,27 @@ class AccountsCog(commands.Cog):
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
         return await self._autocomplete_key_names(interaction, current)
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        n = self.bot.storage.count_api_keys(guild_id)
+        if n > 0:
+            field = StatusField(
+                label="Linked Accounts",
+                value=f"{n} account{'s' if n != 1 else ''}",
+                state="ok",
+            )
+        else:
+            field = StatusField(
+                label="Linked Accounts",
+                value="None linked — use /apikey add",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="GW2 Accounts",
+            fields=[field],
+            setup_command="/apikey add",
+        )
+
 
 async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(AccountsCog(bot))

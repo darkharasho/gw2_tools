@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .. import constants
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
 from ..storage import CompClassConfig, CompConfig, CompSchedule, CompPreset, GuildConfig, normalise_timezone
 
 LOGGER = logging.getLogger(__name__)
@@ -2362,6 +2363,28 @@ class CompCog(commands.GroupCog, name="comp"):
         embed.set_footer(text="Select the dropdown again to remove yourself from a class.")
         embed.timestamp = discord.utils.utcnow()
         return embed
+
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        config = self.bot.get_config(guild_id)
+        n = len(config.comp_schedules)
+        if n > 0:
+            schedule_field = StatusField(
+                label="Compositions",
+                value=f"{n} schedule{'s' if n != 1 else ''} configured",
+                state="ok",
+            )
+        else:
+            schedule_field = StatusField(
+                label="Compositions",
+                value="None — use /comp schedule manage",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="Guild Compositions",
+            fields=[schedule_field],
+            setup_command="/comp schedule manage",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:  # pragma: no cover - discord.py lifecycle

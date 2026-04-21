@@ -18,6 +18,7 @@ from markdownify import markdownify as html_to_markdown
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
 from ..rendering import clean_markdown
 from ..storage import UpdateNotesStatus
 
@@ -418,6 +419,27 @@ class UpdateNotesCog(commands.Cog):
                 f"Posted the latest game update notes in {channel.mention}.",
                 ephemeral=True,
             )
+
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        config = self.bot.get_config(guild_id)
+        if config.update_notes_channel_id:
+            field = StatusField(
+                label="Update Notes Channel",
+                value=f"<#{config.update_notes_channel_id}>",
+                state="ok",
+            )
+        else:
+            field = StatusField(
+                label="Update Notes Channel",
+                value="Not configured — use /config",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="GW2 Update Notes",
+            fields=[field],
+            setup_command="/config",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:
