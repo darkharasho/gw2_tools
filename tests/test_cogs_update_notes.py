@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from gw2_tools_bot.cogs.update_notes import UpdateNotesCog
+from axitools.cogs.update_notes import UpdateNotesCog
 
 @pytest.fixture
 def mock_bot_update_notes():

@@ -2,7 +2,7 @@
 import pytest
 import sqlite3
 from unittest.mock import MagicMock
-from gw2_tools_bot.storage import ApiKeyStore
+from axitools.storage import ApiKeyStore
 
 @pytest.fixture
 def mock_db():

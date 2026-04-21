@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..storage import ArcDpsStatus
 from ..http_utils import read_response_text
@@ -33,7 +33,7 @@ class ArcDpsUpdatesCog(commands.Cog):
     CHANGELOG_URL = "https://www.deltaconnected.com/arcdps/"
     PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self.arcdps_check.start()
@@ -386,5 +386,5 @@ class ArcDpsUpdatesCog(commands.Cog):
             )
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(ArcDpsUpdatesCog(bot))

@@ -2,8 +2,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 import discord
-from gw2_tools_bot.cogs.config import ConfigCog, ConfigView
-from gw2_tools_bot.storage import GuildConfig
+from axitools.cogs.config import ConfigCog, ConfigView
+from axitools.storage import GuildConfig
 
 @pytest.fixture
 def mock_bot_config():

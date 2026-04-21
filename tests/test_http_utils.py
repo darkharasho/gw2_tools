@@ -5,7 +5,7 @@ import zlib
 import brotli
 import zstandard as zstd
 from unittest.mock import AsyncMock, MagicMock
-from gw2_tools_bot import http_utils
+from axitools import http_utils
 
 @pytest.mark.asyncio
 async def test_read_response_text_gzip():

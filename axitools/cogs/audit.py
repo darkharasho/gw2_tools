@@ -1,4 +1,4 @@
-"""Audit logging and query tooling for GW2 Tools."""
+"""Audit logging and query tooling for AxiTools."""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
 from ..storage import normalise_guild_id, utcnow
@@ -110,7 +110,7 @@ class AuditCog(commands.Cog):
         parent=audit,
     )
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
         self._session = aiohttp.ClientSession(timeout=GW2_LOG_FETCH_TIMEOUT)
         self._poll_gw2_logs.start()
@@ -1402,5 +1402,5 @@ class AuditCog(commands.Cog):
 
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(AuditCog(bot))

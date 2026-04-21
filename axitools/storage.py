@@ -1,4 +1,4 @@
-"""Persistent storage utilities for the GW2 Tools bot."""
+"""Persistent storage utilities for the AxiTools bot."""
 from __future__ import annotations
 
 import json
@@ -1939,4 +1939,4 @@ class StorageManager:
         return True
 
 
-DEFAULT_STORAGE_ROOT = Path("gw2_tools_bot") / "data"
+DEFAULT_STORAGE_ROOT = Path("axitools") / "data"

@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
 from ..storage import normalise_guild_id
@@ -129,7 +129,7 @@ class SelectCog(commands.Cog):
         "revoke",
     )
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         super().__init__()
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
@@ -2310,7 +2310,7 @@ class SelectCog(commands.Cog):
         )
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     for stale_cog in ("MemberQueryCog", "SelectCog"):
         if bot.get_cog(stale_cog):
             LOGGER.info("Removing stale %s during cog load", stale_cog)

@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from gw2_tools_bot.cogs.comps import CompCog
+from axitools.cogs.comps import CompCog
 
 @pytest.fixture
 def mock_bot_comps():

@@ -16,7 +16,7 @@ from discord.ext import commands, tasks
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import constants
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..storage import CompClassConfig, CompConfig, CompSchedule, CompPreset, GuildConfig, normalise_timezone
 
@@ -1425,7 +1425,7 @@ class CompCog(commands.GroupCog, name="comp"):
         name="schedule", description="Manage scheduled composition posts."
     )
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         super().__init__()
         self.bot = bot
         self.poster_loop.start()
@@ -2364,5 +2364,5 @@ class CompCog(commands.GroupCog, name="comp"):
         return embed
 
 
-async def setup(bot: GW2ToolsBot) -> None:  # pragma: no cover - discord.py lifecycle
+async def setup(bot: AxiToolsBot) -> None:  # pragma: no cover - discord.py lifecycle
     await bot.add_cog(CompCog(bot))

@@ -17,7 +17,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from markdownify import markdownify as html_to_markdown
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..storage import RssFeedConfig
 
@@ -181,7 +181,7 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
     EMBED_COLOR = BRAND_COLOUR
     PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._feed_poll.start()
@@ -994,5 +994,5 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
             )
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(RssFeedsCog(bot))

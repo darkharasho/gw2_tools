@@ -2,12 +2,12 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import discord
-from gw2_tools_bot.cogs.help import HelpCog
-from gw2_tools_bot.bot import GW2ToolsBot
+from axitools.cogs.help import HelpCog
+from axitools.bot import AxiToolsBot
 
 @pytest.fixture
 def mock_bot_help():
-    bot = MagicMock(spec=GW2ToolsBot)
+    bot = MagicMock(spec=AxiToolsBot)
     bot.tree = MagicMock()
     # Mocking get_commands
     bot.tree.get_commands.return_value = []

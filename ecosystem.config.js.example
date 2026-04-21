@@ -1,12 +1,12 @@
 module.exports = {
   apps: [
     {
-      name: "gw2-tools-bot",
+      name: "axitools-bot",
       cwd: "/path/to/gw2_tools",
       script: "/path/to/venv/bin/python",   // Use the real interpreter binary
       interpreter: "none",                  // Prevent PM2 from wrapping the binary in Node.js
       // If you use pyenv, prefer `pyenv which python` over the shim in ~/.pyenv/shims
-      args: "-m gw2_tools_bot",
+      args: "-m axitools",
       env: {
         DISCORD_TOKEN: "your-real-token"    // omit if you rely on .env loading
       },

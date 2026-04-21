@@ -1,6 +1,6 @@
-# GW2 Tools Discord Bot
+# AxiTools Discord Bot
 
-GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organise and share build information while respecting each server's privacy requirements. The bot is composed of modular cogs so you can easily extend or maintain specific slash-command behaviours.
+AxiTools is a multi-guild Discord bot that helps Guild Wars 2 communities organise and share build information while respecting each server's privacy requirements. The bot is composed of modular cogs so you can easily extend or maintain specific slash-command behaviours.
 
 ## Features
 
@@ -10,7 +10,7 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
 - **Game update notes notifications** – Subscribe a channel to the official forum's dev tracker so the latest Guild Wars 2 patch notes appear automatically, complete with timestamps and summaries.
 - **Scheduled compositions** – `/comp manage` lets moderators schedule recurring composition posts, choose the destination channel, maintain dropdown signups that keep headcounts per profession in sync with reactions, and swap between saved presets for different activities.
 - **Rich embeds and forum integration** – Build posts automatically use the profession's colour palette and icon from `media/gw2classicons`, include the chat code in a code block, and update or create forum threads when the configured channel is a forum.
-- **Isolated storage** – Configuration and build data are written to `gw2_tools_bot/data/guild_<guild_id>/` so that each Discord server's information is kept separate.
+- **Isolated storage** – Configuration and build data are written to `axitools/data/guild_<guild_id>/` so that each Discord server's information is kept separate.
 
 ## Development setup
 
@@ -37,14 +37,14 @@ GW2 Tools is a multi-guild Discord bot that helps Guild Wars 2 communities organ
 1. Ensure the virtual environment is activated and `DISCORD_TOKEN` is set (either exported in your shell or defined in `.env`).
 2. Start the bot:
    ```bash
-   python -m gw2_tools_bot
+   python -m axitools
    ```
 3. Invite the bot to your Discord server with the necessary permissions (application commands, manage messages/threads for forum posting, etc.). Once guild commands finish syncing, use `/config` to set moderator roles and the build posting channel.
 
 ## Project structure
 
 ```
-gw2_tools_bot/
+axitools/
 ├── bot.py          # Bot bootstrapper and shared helpers
 ├── cogs/           # Slash-command implementations (config, builds, RSS, ArcDPS)
 ├── constants.py    # Profession/specialisation metadata and icon paths
@@ -54,7 +54,7 @@ media/
 └── gw2classicons/  # Profession and elite spec icons used for embeds
 ```
 
-Persistent data (configurations and builds) will appear under `gw2_tools_bot/data/` after you run the bot locally.
+Persistent data (configurations and builds) will appear under `axitools/data/` after you run the bot locally.
 
 ## Posting game update notes automatically
 
@@ -88,7 +88,7 @@ Guild moderators can organise strike, raid, or WvW squad signups through the `/c
 5. Use the schedule dropdown to review, edit, or delete schedules. **Post now** sends the currently selected schedule immediately.
 6. If you need to adjust a roster, load the preset, update the classes/overview, and save the preset again. Edit the schedule if you need to change its timing.
 
-Presets can be renamed, overwritten, or deleted through the same management view, and each guild's presets are stored separately under `gw2_tools_bot/data/guild_<guild_id>/comp_presets.json` so servers only see their own rosters.
+Presets can be renamed, overwritten, or deleted through the same management view, and each guild's presets are stored separately under `axitools/data/guild_<guild_id>/comp_presets.json` so servers only see their own rosters.
 
 ## Running the bot with PM2
 
@@ -101,12 +101,12 @@ From the repository root, the following command starts the bot under PM2 with yo
 
 ```bash
 pm2 start $(pyenv which python) \
-  --name gw2-tools-bot \
+  --name axitools-bot \
   --cwd $(pwd) \
   --interpreter none \
-  -- -m gw2_tools_bot
+  -- -m axitools
 ```
 
-The command after `--` is forwarded to Python, so the module executes exactly as `python -m gw2_tools_bot` would. Once you verify the process stays online you can run `pm2 save` so it restarts on boot.
+The command after `--` is forwarded to Python, so the module executes exactly as `python -m axitools` would. Once you verify the process stays online you can run `pm2 save` so it restarts on boot.
 
 If you prefer an ecosystem configuration file, copy `ecosystem.config.js.example`, update the `script`, `cwd`, and environment variables, and then start it with `pm2 start ecosystem.config.js`.

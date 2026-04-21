@@ -1,4 +1,4 @@
-"""Configuration cog for GW2 Tools."""
+"""Configuration cog for AxiTools."""
 from __future__ import annotations
 
 from typing import Optional
@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..storage import GuildConfig
 
 
@@ -136,7 +136,7 @@ class CloseButton(discord.ui.Button["ConfigView"]):
 
 
 class ConfigView(discord.ui.View):
-    def __init__(self, bot: GW2ToolsBot, guild: discord.Guild, config: GuildConfig):
+    def __init__(self, bot: AxiToolsBot, guild: discord.Guild, config: GuildConfig):
         super().__init__(timeout=300)
         self.bot = bot
         self.guild = guild
@@ -169,12 +169,12 @@ class ConfigView(discord.ui.View):
 
 
 class ConfigCog(commands.Cog):
-    """Manage server configuration for GW2 Tools."""
+    """Manage server configuration for AxiTools."""
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="config", description="Configure GW2 Tools settings for this server.")
+    @app_commands.command(name="config", description="Configure AxiTools settings for this server.")
     async def config_command(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used inside a server.", ephemeral=True)
@@ -187,18 +187,18 @@ class ConfigCog(commands.Cog):
             interaction.user,
             permissions=getattr(interaction, "permissions", None),
         ):
-            await interaction.response.send_message("You do not have permission to configure GW2 Tools.", ephemeral=True)
+            await interaction.response.send_message("You do not have permission to configure AxiTools.", ephemeral=True)
             return
 
         config = self.bot.get_config(interaction.guild.id)
         view = ConfigView(self.bot, interaction.guild, config)
 
         await interaction.response.send_message(
-            "Use the selectors below to update the GW2 Tools configuration.",
+            "Use the selectors below to update the AxiTools configuration.",
             view=view,
             ephemeral=True,
         )
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(ConfigCog(bot))

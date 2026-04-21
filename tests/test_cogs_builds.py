@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from gw2_tools_bot.cogs.builds import BuildsCog
+from axitools.cogs.builds import BuildsCog
 
 @pytest.fixture
 def mock_bot_builds():

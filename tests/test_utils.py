@@ -2,7 +2,7 @@
 import pytest
 import discord
 from unittest.mock import Mock
-from gw2_tools_bot import utils, constants
+from axitools import utils, constants
 
 def test_resolve_profession_valid():
     prof, spec = utils.resolve_profession("Guardian")

@@ -2,8 +2,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import discord
-from gw2_tools_bot.cogs.accounts import AccountsCog, ApiKeyRecord
-from gw2_tools_bot.storage import utcnow
+from axitools.cogs.accounts import AccountsCog, ApiKeyRecord
+from axitools.storage import utcnow
 
 @pytest.fixture
 def mock_bot_accounts():
