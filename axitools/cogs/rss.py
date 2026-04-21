@@ -16,6 +16,7 @@ from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
 from ..rendering import clean_html, html_to_discord_markdown, truncate_embed_field
 from ..storage import RssFeedConfig
 
@@ -935,6 +936,28 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
                 view=view,
                 ephemeral=True,
             )
+
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        feeds = self.bot.storage.get_rss_feeds(guild_id)
+        n = len(feeds)
+        if n > 0:
+            field = StatusField(
+                label="RSS Feeds",
+                value=f"{n} feed{'s' if n != 1 else ''} configured",
+                state="ok",
+            )
+        else:
+            field = StatusField(
+                label="RSS Feeds",
+                value="None configured — use /rss set",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="RSS Feeds",
+            fields=[field],
+            setup_command="/rss set",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:
