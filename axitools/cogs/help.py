@@ -1,4 +1,4 @@
-"""Help command for GW2 Tools."""
+"""Help command for AxiTools."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 
 
@@ -45,10 +45,10 @@ def _collect_commands(
 class HelpCog(commands.Cog):
     """Provide a permissions-aware help command."""
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="help", description="Show available GW2 Tools commands.")
+    @app_commands.command(name="help", description="Show available AxiTools commands.")
     async def help_command(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         member = interaction.user if isinstance(interaction.user, discord.Member) else None
@@ -93,7 +93,7 @@ class HelpCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="GW2 Tools commands",
+            title="AxiTools commands",
             description=(
                 "Commands you can access based on your permissions."
                 if is_authorised
@@ -111,5 +111,5 @@ class HelpCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(HelpCog(bot))

@@ -1,7 +1,7 @@
 import pytest
 
-from gw2_tools_bot.cogs.select import SelectCog, _BlanketCondition
-from gw2_tools_bot.storage import ApiKeyRecord
+from axitools.cogs.select import SelectCog, _BlanketCondition
+from axitools.storage import ApiKeyRecord
 
 
 def test_parse_blanket_query_basic():

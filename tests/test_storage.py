@@ -1,6 +1,6 @@
 
 import pytest
-from gw2_tools_bot.storage import ApiKeyStore, ApiKeyRecord
+from axitools.storage import ApiKeyStore, ApiKeyRecord
 
 def test_api_key_store_init(api_key_store):
     assert api_key_store.path.exists()
@@ -50,7 +50,7 @@ def test_all_gw2_guild_ids(api_key_store):
 
 
 def test_audit_gw2_api_key_storage_round_trip(tmp_path):
-    from gw2_tools_bot.storage import StorageManager
+    from axitools.storage import StorageManager
 
     storage = StorageManager(tmp_path)
     guild_id = 987654

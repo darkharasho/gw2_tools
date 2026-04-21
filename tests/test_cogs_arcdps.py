@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from gw2_tools_bot.cogs.arcdps import ArcDpsUpdatesCog
+from axitools.cogs.arcdps import ArcDpsUpdatesCog
 
 @pytest.fixture
 def mock_bot_arcdps():

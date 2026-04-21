@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..http_utils import read_response_text
 from ..storage import ApiKeyRecord, GuildConfig, normalise_guild_id, utcnow
@@ -45,7 +45,7 @@ class AccountsCog(commands.Cog):
         name="gw2guild", description="Look up Guild Wars 2 guild information."
     )
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._refresh_task: Optional[asyncio.Task] = None
@@ -2368,5 +2368,5 @@ class AccountsCog(commands.Cog):
     ) -> List[app_commands.Choice[str]]:
         return await self._autocomplete_key_names(interaction, current)
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(AccountsCog(bot))

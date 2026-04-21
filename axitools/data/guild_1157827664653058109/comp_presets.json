@@ -1,0 +1,54 @@
+[
+  {
+    "name": "Test #1",
+    "config": {
+      "channel_id": 1157827783360254012,
+      "ping_role_id": null,
+      "post_days": [],
+      "post_time": null,
+      "timezone": "UTC",
+      "overview": "# COMP #1",
+      "classes": [
+        {
+          "name": "Firebrand",
+          "required": 2,
+          "emoji_id": 1436422568172196027
+        },
+        {
+          "name": "Druid",
+          "required": 2,
+          "emoji_id": 1160627118099677425
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  },
+  {
+    "name": "Test #2",
+    "config": {
+      "channel_id": 1157827783360254012,
+      "ping_role_id": null,
+      "post_days": [],
+      "post_time": null,
+      "timezone": "UTC",
+      "overview": "# COMP #2",
+      "classes": [
+        {
+          "name": "Firebrand",
+          "required": 4,
+          "emoji_id": 1436422568172196027
+        },
+        {
+          "name": "Druid",
+          "required": 4,
+          "emoji_id": 1160627118099677425
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  }
+]

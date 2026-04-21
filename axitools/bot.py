@@ -1,4 +1,4 @@
-"""Bot setup for GW2 Tools."""
+"""Bot setup for AxiTools."""
 from __future__ import annotations
 
 import logging
@@ -16,8 +16,8 @@ from .storage import DEFAULT_STORAGE_ROOT, GuildConfig, StorageManager
 LOGGER = logging.getLogger(__name__)
 
 
-class GW2ToolsBot(commands.Bot):
-    """Discord bot implementation for GW2 Tools."""
+class AxiToolsBot(commands.Bot):
+    """Discord bot implementation for AxiTools."""
 
     def __init__(self, *, storage_root=DEFAULT_STORAGE_ROOT) -> None:
         intents = discord.Intents.default()
@@ -38,24 +38,24 @@ class GW2ToolsBot(commands.Bot):
     async def setup_hook(self) -> None:
         """Load cogs on startup."""
 
-        await self.load_extension("gw2_tools_bot.cogs.config")
-        await self.load_extension("gw2_tools_bot.cogs.audit")
-        await self.load_extension("gw2_tools_bot.cogs.help")
-        await self.load_extension("gw2_tools_bot.cogs.accounts")
-        await self.load_extension("gw2_tools_bot.cogs.select")
-        await self.load_extension("gw2_tools_bot.cogs.builds")
-        await self.load_extension("gw2_tools_bot.cogs.arcdps")
-        await self.load_extension("gw2_tools_bot.cogs.update_notes")
-        await self.load_extension("gw2_tools_bot.cogs.rss")
-        await self.load_extension("gw2_tools_bot.cogs.comps")
-        await self.load_extension("gw2_tools_bot.cogs.wvw_alliance")
-        await self.load_extension("gw2_tools_bot.cogs.reset")
+        await self.load_extension("axitools.cogs.config")
+        await self.load_extension("axitools.cogs.audit")
+        await self.load_extension("axitools.cogs.help")
+        await self.load_extension("axitools.cogs.accounts")
+        await self.load_extension("axitools.cogs.select")
+        await self.load_extension("axitools.cogs.builds")
+        await self.load_extension("axitools.cogs.arcdps")
+        await self.load_extension("axitools.cogs.update_notes")
+        await self.load_extension("axitools.cogs.rss")
+        await self.load_extension("axitools.cogs.comps")
+        await self.load_extension("axitools.cogs.wvw_alliance")
+        await self.load_extension("axitools.cogs.reset")
 
     async def on_ready(self) -> None:
         await self._sync_global_commands()
         for guild in self.guilds:
             await self._sync_guild_commands(guild)
-        LOGGER.info("GW2 Tools is ready. Logged in as %s (%s)", self.user, getattr(self.user, "id", "unknown"))
+        LOGGER.info("AxiTools is ready. Logged in as %s (%s)", self.user, getattr(self.user, "id", "unknown"))
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         await self._sync_global_commands()
@@ -161,13 +161,13 @@ class GW2ToolsBot(commands.Bot):
 # Public helpers
 # ----------------------------------------------------------------------
 
-def create_bot() -> GW2ToolsBot:
+def create_bot() -> AxiToolsBot:
     logging.basicConfig(level=logging.INFO)
-    return GW2ToolsBot()
+    return AxiToolsBot()
 
 
 def run() -> None:
-    """Entry point for running the bot via ``python -m gw2_tools_bot``."""
+    """Entry point for running the bot via ``python -m axitools``."""
 
     token = os.getenv("DISCORD_TOKEN")
     if not token:
@@ -176,4 +176,4 @@ def run() -> None:
     bot.run(token)
 
 
-__all__ = ["GW2ToolsBot", "create_bot", "run"]
+__all__ = ["AxiToolsBot", "create_bot", "run"]

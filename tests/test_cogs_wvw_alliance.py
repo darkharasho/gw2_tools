@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from gw2_tools_bot.storage import GuildConfig
-from gw2_tools_bot.cogs.wvw_alliance import AllianceMatchupCog, AllianceRoster, MatchTeam
+from axitools.storage import GuildConfig
+from axitools.cogs.wvw_alliance import AllianceMatchupCog, AllianceRoster, MatchTeam
 
 @pytest.fixture
 def mock_bot_alliance():

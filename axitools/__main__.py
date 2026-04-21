@@ -1,11 +1,11 @@
-"""Module entry point for ``python -m gw2_tools_bot``."""
+"""Module entry point for ``python -m axitools``."""
 from __future__ import annotations
 
 from .bot import run
 
 
 def main() -> None:
-    """Run the GW2 Tools bot."""
+    """Run the AxiTools bot."""
 
     run()
 

@@ -18,7 +18,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..constants import WVW_ALLIANCE_SHEET_GIDS, WVW_ALLIANCE_SHEET_TABS, WVW_SERVER_NAMES
 from ..storage import GuildConfig, normalise_guild_id, utcnow
@@ -280,7 +280,7 @@ class _AllianceCloseButton(discord.ui.Button[AllianceScheduleView]):
 class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     """Configure and post WvW matchup summaries for alliance guilds."""
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._guild_world_cache: Dict[str, Dict[str, int]] = {}
@@ -1124,5 +1124,5 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             )
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(AllianceMatchupCog(bot))

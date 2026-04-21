@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from gw2_tools_bot.cogs.rss import RssFeedsCog, _extract_entry_description
+from axitools.cogs.rss import RssFeedsCog, _extract_entry_description
 
 @pytest.fixture
 def mock_bot_rss():

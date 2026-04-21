@@ -1,4 +1,4 @@
-"""Reset timer command for GW2 Tools."""
+"""Reset timer command for AxiTools."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 
 LOGGER = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ def _next_wvw_reset(*, eu: bool) -> int:
 class ResetCog(commands.Cog):
     """Show upcoming WvW reset time."""
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
 
     @app_commands.command(name="reset", description="Show the next WvW weekly reset time.")
@@ -88,5 +88,5 @@ class ResetCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(ResetCog(bot))

@@ -1,8 +1,8 @@
 # Database schema
 
-The bot stores persistent data in SQLite at `gw2_tools_bot/data/api_keys.sqlite`. The tables below outline the current schema.
+The bot stores persistent data in SQLite at `axitools/data/api_keys.sqlite`. The tables below outline the current schema.
 
-Audit logging data is stored per Discord guild in `gw2_tools_bot/data/guild_<guild_id>/audit.sqlite`.
+Audit logging data is stored per Discord guild in `axitools/data/guild_<guild_id>/audit.sqlite`.
 
 ## Tables
 

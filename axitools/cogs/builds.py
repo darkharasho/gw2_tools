@@ -1,4 +1,4 @@
-"""Build management cog for GW2 Tools."""
+"""Build management cog for AxiTools."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..bot import GW2ToolsBot
+from ..bot import AxiToolsBot
 from ..storage import ISOFORMAT, BuildRecord, utcnow
 from ..utils import build_embed, get_icon_and_color, resolve_profession
 from .. import constants
@@ -164,7 +164,7 @@ class BuildsCog(commands.GroupCog, name="builds"):
 
     description = "Manage Guild Wars 2 builds."
 
-    def __init__(self, bot: GW2ToolsBot) -> None:
+    def __init__(self, bot: AxiToolsBot) -> None:
         super().__init__()
         self.bot = bot
 
@@ -634,5 +634,5 @@ class BuildsCog(commands.GroupCog, name="builds"):
         await interaction.response.send_modal(modal)
 
 
-async def setup(bot: GW2ToolsBot) -> None:
+async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(BuildsCog(bot))

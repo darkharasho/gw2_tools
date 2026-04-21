@@ -1,4 +1,4 @@
-"""Utility helpers for the GW2 Tools bot."""
+"""Utility helpers for the AxiTools bot."""
 from __future__ import annotations
 
 from typing import Optional, Tuple

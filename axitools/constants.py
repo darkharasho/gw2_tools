@@ -1,4 +1,4 @@
-"""Constant values used across the GW2 Tools bot."""
+"""Constant values used across the AxiTools bot."""
 from __future__ import annotations
 
 from dataclasses import dataclass
