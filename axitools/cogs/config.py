@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..bot import AxiToolsBot
+from ..config_status import ConfigStatus, StatusField
 from ..storage import GuildConfig
 
 
@@ -168,6 +169,20 @@ class ConfigView(discord.ui.View):
             item.disabled = True
 
 
+STATE_EMOJI = {"ok": "✅", "warn": "⚠️", "missing": "❌"}
+
+
+class StatusView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=120)
+
+    @discord.ui.button(label="Open Config", style=discord.ButtonStyle.primary)
+    async def open_config(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.send_message(
+            "Use `/config` to update your server settings.", ephemeral=True
+        )
+
+
 class ConfigCog(commands.Cog):
     """Manage server configuration for AxiTools."""
 
@@ -197,6 +212,105 @@ class ConfigCog(commands.Cog):
             "Use the selectors below to update the AxiTools configuration.",
             view=view,
             ephemeral=True,
+        )
+
+    def _is_first_run(self, guild_id: int) -> bool:
+        """Return True if no meaningful config has been set for this guild."""
+        config = self.bot.get_config(guild_id)
+        return not any([
+            config.build_channel_id,
+            config.arcdps_channel_id,
+            config.update_notes_channel_id,
+            config.moderator_role_ids,
+            config.comp_schedules,
+        ])
+
+    def _build_status_embed(self, guild: discord.Guild) -> discord.Embed:
+        """Build a rich embed showing config status across all feature cogs."""
+        cog_names = [
+            "BuildsCog",
+            "RssFeedsCog",
+            "ArcDpsUpdatesCog",
+            "UpdateNotesCog",
+            "SelectCog",
+            "CompCog",
+            "AccountsCog",
+            "AuditCog",
+        ]
+
+        statuses: list[ConfigStatus] = []
+        for name in cog_names:
+            cog = self.bot.get_cog(name)
+            if cog is not None and hasattr(cog, "get_config_status"):
+                statuses.append(cog.get_config_status(guild.id))
+
+        any_missing = any(
+            f.state == "missing"
+            for s in statuses
+            for f in s.fields
+        )
+        colour = discord.Colour.red() if any_missing else discord.Colour.green()
+
+        embed = discord.Embed(
+            title="AxiTools Configuration Status",
+            colour=colour,
+        )
+
+        for status in statuses:
+            lines = []
+            for field in status.fields:
+                emoji = STATE_EMOJI.get(field.state, "•")
+                lines.append(f"{emoji} **{field.label}:** {field.value}")
+            value = "\n".join(lines) or "No fields reported."
+            embed.add_field(name=status.title, value=value, inline=False)
+
+        return embed
+
+    @app_commands.command(name="status", description="View AxiTools configuration status for this server.")
+    async def status_command(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used inside a server.", ephemeral=True)
+            return
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Unable to resolve your server membership.", ephemeral=True)
+            return
+        if not self.bot.is_authorised(
+            interaction.guild,
+            interaction.user,
+            permissions=getattr(interaction, "permissions", None),
+        ):
+            await interaction.response.send_message("You do not have permission to view AxiTools status.", ephemeral=True)
+            return
+
+        embed = self._build_status_embed(interaction.guild)
+
+        if self._is_first_run(interaction.guild.id):
+            embed.description = (
+                "Looks like AxiTools hasn't been configured yet. "
+                "Use `/config` to get started!"
+            )
+
+        await interaction.response.send_message(embed=embed, view=StatusView(), ephemeral=True)
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        config = self.bot.get_config(guild_id)
+        fields = []
+        if config.moderator_role_ids:
+            fields.append(StatusField(
+                label="Moderator Roles",
+                value=f"{len(config.moderator_role_ids)} role(s) configured",
+                state="ok",
+            ))
+        else:
+            fields.append(StatusField(
+                label="Moderator Roles",
+                value="Defaults to server administrators",
+                state="warn",
+            ))
+        return ConfigStatus(
+            title="Bot Configuration",
+            fields=fields,
+            setup_command="/config",
         )
 
 
