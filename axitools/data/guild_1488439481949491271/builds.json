@@ -1,0 +1,50 @@
+[
+  {
+    "build_id": "power-scrapper",
+    "name": "Power Scrapper",
+    "profession": "Engineer",
+    "specialization": "Scrapper",
+    "url": "https://en.gw2skills.net/editor/?PehEQjW2AzjBx6Yp4Yv816B-DWZYBBZIGVdZzBBeINJUqVCUhqwsnFCQA7nXjGmBAA-w",
+    "chat_code": "[&DQMGOyYfKz2EAIQArhJeAZUBBwGTAY0B+RKJAQAAAAAAAAAAAAAAAAAAAAABMwAA]",
+    "description": null,
+    "created_by": 195646626092548096,
+    "created_at": "2026-03-31T08:44:47.829243Z",
+    "updated_by": 195646626092548096,
+    "updated_at": "2026-03-31T08:44:47.829387Z",
+    "message_id": 1488459034448363530,
+    "channel_id": 1488457639183777792,
+    "thread_id": 1488459034448363530
+  },
+  {
+    "build_id": "divine-harbinger",
+    "name": "Divine Harbinger",
+    "profession": "Necromancer",
+    "specialization": "Harbinger",
+    "url": "https://en.gw2skills.net/editor/?PSwAc2FlRwQYYsVWLO8LaxUA-DWRYiR3FUDcI/kLlmigoCyKSs0LB1eGEgA+rRDnRAA-w",
+    "chat_code": "[&DQg1PicaQCkoD5sAdgGBAHMBdwHXGgAA6BqVAAAAAAAAAAAAAAAAAAAAAAADBQAxADIAAA==]",
+    "description": null,
+    "created_by": 195646626092548096,
+    "created_at": "2026-03-31T08:56:24.168507Z",
+    "updated_by": 195646626092548096,
+    "updated_at": "2026-03-31T08:56:24.168643Z",
+    "message_id": 1488461954900037683,
+    "channel_id": 1488457639183777792,
+    "thread_id": 1488461954900037683
+  },
+  {
+    "build_id": "wanderer-fb",
+    "name": "Wanderer FB",
+    "profession": "Guardian",
+    "specialization": "Firebrand",
+    "url": "https://gw2skills.net/editor/?PWwEQ7srMC2DDjxxMxx6q6pC-DWRYghL4MqX+nSTigGlAZKoSXJ4xXDhIM/1ohLNAA-w",
+    "chat_code": "[&DQEqKy4VPipLF0sXehZ6Fi0BLQE2ATYBGBYYFgAAAAAAAAAAAAAAAAAAAAADCQEFAFcAAA==]",
+    "description": null,
+    "created_by": 195646626092548096,
+    "created_at": "2026-03-31T08:58:18.104177Z",
+    "updated_by": 195646626092548096,
+    "updated_at": "2026-03-31T08:58:18.104316Z",
+    "message_id": 1488462433046630460,
+    "channel_id": 1488457639183777792,
+    "thread_id": 1488462433046630460
+  }
+]

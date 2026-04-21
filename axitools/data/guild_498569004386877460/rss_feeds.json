@@ -1,0 +1,86 @@
+[
+  {
+    "name": "Drevarr ArcDPS Top Stats Parser",
+    "url": "https://github.com/Drevarr/arcdps_top_stats_parser/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/459872793/v3.6.6.0-TW",
+    "last_entry_published_at": "2025-11-17T19:54:33Z"
+  },
+  {
+    "name": "baaron4 GW2 Elite Insights Parser",
+    "url": "https://github.com/baaron4/GW2-Elite-Insights-Parser/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/129437289/v3.21.1.0",
+    "last_entry_published_at": "2026-04-20T10:31:00Z"
+  },
+  {
+    "name": "Harasho TopStatsAIO",
+    "url": "https://github.com/darkharasho/TopStatsAIO/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/954501083/v3.4.4",
+    "last_entry_published_at": "2026-02-07T19:34:20Z"
+  },
+  {
+    "name": "Bear on the job PlenBot Log Uploader",
+    "url": "https://github.com/bear-on-the-job/PlenBotLogUploader/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/664919782/v97.Bear.1",
+    "last_entry_published_at": "2025-02-24T02:38:31Z"
+  },
+  {
+    "name": "Drevarr GW2 EI log combiner",
+    "url": "https://github.com/Drevarr/GW2_EI_log_combiner/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/870185212/v1.6.3",
+    "last_entry_published_at": "2026-03-29T00:44:07Z"
+  },
+  {
+    "name": "Zerthox ArcDPS Food Reminder",
+    "url": "https://github.com/Zerthox/arcdps-food-reminder/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/386933226/0.6.5",
+    "last_entry_published_at": "2025-04-11T23:03:08Z"
+  },
+  {
+    "name": "Krappa322 ArcDPS Unofficial Extras",
+    "url": "https://github.com/Krappa322/arcdps_unofficial_extras_releases/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/404442062/v1.35.1",
+    "last_entry_published_at": "2026-03-18T22:24:14Z"
+  },
+  {
+    "name": "Krappa322 ArcDPS Healing Stats",
+    "url": "https://github.com/Krappa322/arcdps_healing_stats/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/336379174/v2.17.3",
+    "last_entry_published_at": "2026-03-10T22:04:10Z"
+  },
+  {
+    "name": "Guild Wars 2 RSS",
+    "url": "https://www.guildwars2.com/en/feed/",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "https://www.guildwars2.com/?p=59602",
+    "last_entry_published_at": "Tue, 14 Apr 2026 16:00:18 +0000"
+  },
+  {
+    "name": "jake-greygoose Commander Tag Accessibility",
+    "url": "https://github.com/jake-greygoose/Commander-Tag-Accessibility-releases/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/1063477288/v2026.4.16.1340",
+    "last_entry_published_at": "2026-04-16T22:22:30Z"
+  },
+  {
+    "name": "darkharasho GW2 arc log uploader",
+    "url": "https://github.com/darkharasho/gw2_arc_log_uploader/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/1136587562/v2.5.10",
+    "last_entry_published_at": "2026-04-20T21:32:10Z"
+  },
+  {
+    "name": "darkharasho AxiPulse",
+    "url": "https://github.com/darkharasho/axipulse/releases.atom",
+    "channel_id": 1222407634410278994,
+    "last_entry_id": "tag:github.com,2008:Repository/1211291795/v0.1.10",
+    "last_entry_published_at": "2026-04-20T02:42:41Z"
+  }
+]

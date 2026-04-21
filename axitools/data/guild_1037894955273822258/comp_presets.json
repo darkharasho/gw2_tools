@@ -1,0 +1,190 @@
+[
+  {
+    "name": "VoE Comp",
+    "config": {
+      "channel_id": null,
+      "ping_role_id": null,
+      "post_days": [],
+      "post_time": null,
+      "timezone": "UTC",
+      "overview": "https://discord.com/channels/1037894955273822258/1435025973773996042/1435025973773996042\n\n:Troubadour: :Druid: :Amalgam: :Scourge: :Luminary:\n:Troubadour: :Druid: :Amalgam: :Scourge: :Paragon: \n:Troubadour: :Druid: :Conduit: :Scourge: :Luminary: \n:Troubadour: :Evoker: :Amalgam: :Scourge: :Paragon:",
+      "classes": [
+        {
+          "name": "Firebrand",
+          "required": 10,
+          "emoji_id": 1360055683600613396
+        },
+        {
+          "name": "Luminary",
+          "required": 10,
+          "emoji_id": 1411120187004031047
+        },
+        {
+          "name": "Troubadour",
+          "required": 10,
+          "emoji_id": 1411120191961694229
+        },
+        {
+          "name": "Paragon",
+          "required": 10,
+          "emoji_id": 1411120188811907182
+        },
+        {
+          "name": "Scourge",
+          "required": 10,
+          "emoji_id": 1360056129761185993
+        },
+        {
+          "name": "Reaper",
+          "required": 10,
+          "emoji_id": 1360055705003884604
+        },
+        {
+          "name": "Ritualist",
+          "required": 10,
+          "emoji_id": 1411120190862921852
+        },
+        {
+          "name": "Druid",
+          "required": 10,
+          "emoji_id": 1360055679062249624
+        },
+        {
+          "name": "Evoker",
+          "required": 3,
+          "emoji_id": 1411143408072003725
+        },
+        {
+          "name": "Conduit",
+          "required": 3,
+          "emoji_id": 1411120197397647380
+        },
+        {
+          "name": "Amalgam",
+          "required": 10,
+          "emoji_id": 1411120193341624390
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  },
+  {
+    "name": "VoE v2",
+    "config": {
+      "channel_id": 1128946208774295602,
+      "ping_role_id": 1128121434561060865,
+      "post_days": [
+        0,
+        3,
+        4,
+        5
+      ],
+      "post_time": "16:00",
+      "timezone": "PST",
+      "overview": "https://discord.com/channels/1037894955273822258/1443737886246567948\n\n# :stab: :Regen: :strips: :Utility: :might: \n\n:Luminary: :Druid: :Ritualist: :Troubadour: :Spellbreaker: \n---\n:Luminary: :Evoker: :Ritualist: :Paragon: :Amalgam: \n:Luminary: :Evoker: :Ritualist: :Paragon: :Amalgam: \n:Luminary: :Druid: :Ritualist: :Troubadour: :Spellbreaker:",
+      "classes": [
+        {
+          "name": "Luminary",
+          "required": 10,
+          "emoji_id": 1411120187004031047
+        },
+        {
+          "name": "Troubadour",
+          "required": 5,
+          "emoji_id": 1411120191961694229
+        },
+        {
+          "name": "Paragon",
+          "required": 5,
+          "emoji_id": 1411120188811907182
+        },
+        {
+          "name": "Ritualist",
+          "required": 20,
+          "emoji_id": 1411120190862921852
+        },
+        {
+          "name": "Druid",
+          "required": 5,
+          "emoji_id": 1360055679062249624
+        },
+        {
+          "name": "Evoker",
+          "required": 5,
+          "emoji_id": 1411143408072003725
+        },
+        {
+          "name": "Amalgam",
+          "required": 5,
+          "emoji_id": 1411120193341624390
+        },
+        {
+          "name": "Spellbreaker",
+          "required": 5,
+          "emoji_id": 1360055718035722472
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  },
+  {
+    "name": "VoE v3",
+    "config": {
+      "channel_id": 1128946208774295602,
+      "ping_role_id": 1128121434561060865,
+      "post_days": [
+        0,
+        3,
+        4,
+        5
+      ],
+      "post_time": "16:00",
+      "timezone": "PST",
+      "overview": "https://discord.com/channels/1037894955273822258/1461158792954904759\n\n:Luminary: :Druid: :Troubadour: :Virtuoso: :Virtuoso: \n---\n:Luminary: :Druid: :Reaper: :Troubadour: :Amalgam: \n:Luminary: :Druid: :Reaper: :Troubadour: :Amalgam: \n:Luminary: :Druid: :Reaper: :Troubadour: :Amalgam:",
+      "classes": [
+        {
+          "name": "Luminary",
+          "required": 10,
+          "emoji_id": 1411120187004031047
+        },
+        {
+          "name": "Troubadour",
+          "required": 10,
+          "emoji_id": 1411120191961694229
+        },
+        {
+          "name": "Druid",
+          "required": 10,
+          "emoji_id": 1360055679062249624
+        },
+        {
+          "name": "Amalgam",
+          "required": 10,
+          "emoji_id": 1411120193341624390
+        },
+        {
+          "name": "Reaper",
+          "required": 10,
+          "emoji_id": 1360055705003884604
+        },
+        {
+          "name": "Virtuoso",
+          "required": 2,
+          "emoji_id": 1360056193514475548
+        },
+        {
+          "name": "Untamed",
+          "required": 2,
+          "emoji_id": 1360055724876497007
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Top Stats AIO",
+    "url": "https://github.com/darkharasho/TopStatsAIO/releases.atom",
+    "channel_id": 1134534124443533443,
+    "last_entry_id": "tag:github.com,2008:Repository/954501083/v3.4.4",
+    "last_entry_published_at": "2026-02-07T19:34:20Z"
+  },
+  {
+    "name": "ArcDPS Heal Stats",
+    "url": "https://github.com/Krappa322/arcdps_healing_stats/releases.atom",
+    "channel_id": 1134534124443533443,
+    "last_entry_id": "tag:github.com,2008:Repository/336379174/v2.17.3",
+    "last_entry_published_at": "2026-03-10T22:04:10Z"
+  },
+  {
+    "name": "WvW Fight Analysis",
+    "url": "https://github.com/jake-greygoose/WvW-Fight-Analysis-Addon/releases.atom",
+    "channel_id": 1134534124443533443,
+    "last_entry_id": "tag:github.com,2008:Repository/866800554/v2025.11.27.1047",
+    "last_entry_published_at": "2025-11-27T17:28:26Z"
+  },
+  {
+    "name": "Commander Tag Accessibility",
+    "url": "https://github.com/jake-greygoose/Commander-Tag-Accessibility-releases/releases.atom",
+    "channel_id": 1134534124443533443,
+    "last_entry_id": "tag:github.com,2008:Repository/1063477288/v2026.4.16.1340",
+    "last_entry_published_at": "2026-04-16T22:22:30Z"
+  }
+]

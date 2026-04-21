@@ -1,0 +1,43 @@
+[
+  {
+    "name": "main comp",
+    "config": {
+      "channel_id": 1361580607179587684,
+      "ping_role_id": null,
+      "post_days": [],
+      "post_time": null,
+      "timezone": "UTC",
+      "overview": "",
+      "classes": [
+        {
+          "name": "Firebrand",
+          "required": 1,
+          "emoji_id": 1472731858981879880
+        },
+        {
+          "name": "Reaper",
+          "required": 1,
+          "emoji_id": 1469132671056875570
+        },
+        {
+          "name": "Troubadour",
+          "required": 1,
+          "emoji_id": 1469132796151726182
+        },
+        {
+          "name": "Druid",
+          "required": 1,
+          "emoji_id": 1469132398514933975
+        },
+        {
+          "name": "Scrapper",
+          "required": 1,
+          "emoji_id": 1469132764883452070
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  }
+]

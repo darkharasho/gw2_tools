@@ -1,0 +1,22 @@
+{
+  "moderator_role_ids": [
+    498571301510971403,
+    498570661116116997,
+    1414097969480994886
+  ],
+  "build_channel_id": 1152416283451736084,
+  "arcdps_channel_id": 1222407634410278994,
+  "update_notes_channel_id": 1222407634410278994,
+  "comp": {
+    "channel_id": 998816673777852467,
+    "post_days": [],
+    "post_time": null,
+    "timezone": "UTC",
+    "overview": "",
+    "classes": [],
+    "signups": {},
+    "message_id": null,
+    "last_post_at": null
+  },
+  "comp_active_preset": null
+}

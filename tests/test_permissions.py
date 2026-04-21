@@ -1,12 +1,12 @@
 
 import pytest
 from unittest.mock import MagicMock
-from axitools.bot import AxiToolsBot
+from axitools.bot import GW2ToolsBot
 from axitools.storage import GuildConfig
 
 @pytest.fixture
 def mock_bot():
-    bot = MagicMock(spec=AxiToolsBot)
+    bot = MagicMock(spec=GW2ToolsBot)
     # We want to test the actual is_authorised method, so we assign it back to the mock
     # or better, use a real instance with mocked storage.
     # However, inheriting from commands.Bot makes instantiation heavy.
@@ -14,7 +14,7 @@ def mock_bot():
     
     # Actually, is_authorised is an instance method that calls self.get_config.
     # We can just mock get_config on the instance.
-    bot.is_authorised = AxiToolsBot.is_authorised.__get__(bot, AxiToolsBot)
+    bot.is_authorised = GW2ToolsBot.is_authorised.__get__(bot, GW2ToolsBot)
     return bot
 
 def test_is_authorised_admin(mock_bot):

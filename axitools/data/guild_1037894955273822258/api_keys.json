@@ -1,0 +1,25 @@
+{
+  "201537071804973056": [
+    {
+      "name": "harasho.4281",
+      "key": "BD1F4E7A-BB77-0749-A7B3-18EF33B3F37656F23524-191A-4281-B6B4-5DC46F0AFBDF",
+      "account_name": "harasho.4281",
+      "permissions": [
+        "account",
+        "characters",
+        "guilds",
+        "wvw"
+      ],
+      "guild_ids": [
+        "23b352fb-9c18-ef11-81a9-8fb5cfbe7766",
+        "4335b905-59ce-f011-bb1d-12683e7b69eb",
+        "480b8944-4e66-ee11-81ac-95dfe50946eb",
+        "aba11ba1-e321-e611-80d4-e4115be8e905",
+        "d30ed367-8fad-4648-bdf1-7c6a9f44e36d",
+        "ea176dd1-f15b-ed11-81a9-8fb5cfbe7766"
+      ],
+      "created_at": "2025-12-10T03:29:33.254590Z",
+      "updated_at": "2025-12-10T03:29:33.254800Z"
+    }
+  ]
+}

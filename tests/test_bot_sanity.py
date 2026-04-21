@@ -1,7 +1,7 @@
 
 import pytest
-from axitools.bot import AxiToolsBot
+from axitools.bot import GW2ToolsBot
 
 def test_bot_class_exists():
     """Simple smoke test to ensure the bot class is importable."""
-    assert AxiToolsBot is not None
+    assert GW2ToolsBot is not None

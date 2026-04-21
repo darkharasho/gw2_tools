@@ -1,0 +1,118 @@
+{
+  "moderator_role_ids": [
+    1100475971162877992,
+    1049531419753459732
+  ],
+  "guild_role_ids": {
+    "ea176dd1-f15b-ed11-81a9-8fb5cfbe7766": 1128121434561060865
+  },
+  "preferred_guild_role_allowlist": [],
+  "build_channel_id": null,
+  "arcdps_channel_id": 1134534124443533443,
+  "update_notes_channel_id": 1134534124443533443,
+  "audit_channel_id": null,
+  "audit_gw2_admin_api_key": null,
+  "audit_gw2_guild_id": null,
+  "alliance_channel_id": null,
+  "alliance_guild_id": null,
+  "alliance_guild_name": null,
+  "alliance_server_id": null,
+  "alliance_server_name": null,
+  "alliance_last_prediction_at": null,
+  "alliance_last_actual_at": null,
+  "alliance_prediction_time": null,
+  "alliance_current_time": null,
+  "alliance_prediction_day": null,
+  "alliance_current_day": null,
+  "comp": {
+    "channel_id": 1128946208774295602,
+    "ping_role_id": 1128121434561060865,
+    "post_days": [
+      0,
+      3,
+      4,
+      5
+    ],
+    "post_time": "16:00",
+    "timezone": "PST",
+    "overview": "https://discord.com/channels/1037894955273822258/1461158792954904759\n\n:Luminary: :Druid: :Troubadour: :Virtuoso: :Virtuoso: \n---\n:Luminary: :Druid: :Reaper: :Troubadour: :Amalgam: \n:Luminary: :Druid: :Reaper: :Troubadour: :Amalgam: \n:Luminary: :Druid: :Reaper: :Troubadour: :Amalgam:",
+    "classes": [
+      {
+        "name": "Luminary",
+        "required": 10,
+        "emoji_id": 1411120187004031047
+      },
+      {
+        "name": "Troubadour",
+        "required": 10,
+        "emoji_id": 1411120191961694229
+      },
+      {
+        "name": "Druid",
+        "required": 10,
+        "emoji_id": 1360055679062249624
+      },
+      {
+        "name": "Amalgam",
+        "required": 10,
+        "emoji_id": 1411120193341624390
+      },
+      {
+        "name": "Reaper",
+        "required": 10,
+        "emoji_id": 1360055705003884604
+      },
+      {
+        "name": "Virtuoso",
+        "required": 2,
+        "emoji_id": 1360056193514475548
+      },
+      {
+        "name": "Untamed",
+        "required": 2,
+        "emoji_id": 1360055724876497007
+      }
+    ],
+    "signups": {},
+    "message_id": null,
+    "last_post_at": null
+  },
+  "comp_active_preset": "VoE v3",
+  "comp_schedules": [
+    {
+      "schedule_id": "1e740ca3a6d24945862d1ce879c17986",
+      "name": "Default schedule",
+      "preset_name": "VoE v3",
+      "post_days": [
+        0,
+        3,
+        4,
+        5
+      ],
+      "post_time": "16:00",
+      "timezone": "PST",
+      "signups": {
+        "Luminary": [],
+        "Troubadour": [
+          287490287444426773
+        ],
+        "Druid": [],
+        "Amalgam": [
+          338744095591759874,
+          339206142787977218
+        ],
+        "Reaper": [
+          548815995737866251,
+          438172599785357313
+        ],
+        "Virtuoso": [],
+        "Untamed": [],
+        "Absent": [
+          262018127439724546
+        ]
+      },
+      "message_id": 1468033269168865366,
+      "last_post_at": "2026-02-03T00:00:07.030496+00:00"
+    }
+  ]
+}

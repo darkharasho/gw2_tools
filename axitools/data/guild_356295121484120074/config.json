@@ -1,0 +1,99 @@
+{
+  "moderator_role_ids": [],
+  "guild_role_ids": {},
+  "preferred_guild_role_allowlist": [],
+  "build_channel_id": null,
+  "arcdps_channel_id": null,
+  "update_notes_channel_id": null,
+  "audit_channel_id": null,
+  "audit_gw2_admin_api_key": null,
+  "audit_gw2_guild_id": null,
+  "alliance_channel_id": 1356459872169889912,
+  "alliance_guild_id": "4cda6f12-5c8c-e311-941e-ac162dae5ad5",
+  "alliance_guild_name": "Honestly Everyones Welcome [HEW]",
+  "alliance_server_id": 11006,
+  "alliance_server_name": "Hall of Judgment",
+  "alliance_last_prediction_at": "2026-04-17T09:04:18.588886Z",
+  "alliance_last_actual_at": "2026-04-18T02:34:17.604139Z",
+  "alliance_prediction_time": "02:00",
+  "alliance_current_time": null,
+  "alliance_prediction_day": null,
+  "alliance_current_day": null,
+  "comp": {
+    "channel_id": 1347649317845860405,
+    "ping_role_id": null,
+    "post_days": [],
+    "post_time": null,
+    "timezone": "UTC",
+    "overview": "",
+    "classes": [
+      {
+        "name": "Firebrand",
+        "required": 4,
+        "emoji_id": 1128890858373140620
+      },
+      {
+        "name": "Druid",
+        "required": 3,
+        "emoji_id": 1469132398514933975
+      },
+      {
+        "name": "Troubadour",
+        "required": 3,
+        "emoji_id": 1469132796151726182
+      },
+      {
+        "name": "Conduit",
+        "required": 1,
+        "emoji_id": 1470998795901992990
+      },
+      {
+        "name": "Dragonhunter",
+        "required": 1,
+        "emoji_id": 1469132397252575292
+      },
+      {
+        "name": "Evoker",
+        "required": 1,
+        "emoji_id": 1432799644982706317
+      },
+      {
+        "name": "Luminary",
+        "required": 2,
+        "emoji_id": 1432799638267887698
+      },
+      {
+        "name": "Reaper",
+        "required": 4,
+        "emoji_id": 1469132671056875570
+      },
+      {
+        "name": "Untamed",
+        "required": 4,
+        "emoji_id": 1469132799696175288
+      },
+      {
+        "name": "Paragon",
+        "required": 2,
+        "emoji_id": 1432799642118127786
+      }
+    ],
+    "signups": {
+      "Firebrand": [],
+      "Druid": [],
+      "Troubadour": [],
+      "Conduit": [],
+      "Dragonhunter": [],
+      "Evoker": [],
+      "Luminary": [],
+      "Reaper": [],
+      "Untamed": [],
+      "Paragon": [],
+      "Absent": []
+    },
+    "message_id": null,
+    "last_post_at": null
+  },
+  "comp_active_preset": null,
+  "comp_schedules": []
+}

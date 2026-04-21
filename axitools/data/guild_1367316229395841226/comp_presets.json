@@ -1,0 +1,43 @@
+[
+  {
+    "name": "arki comp",
+    "config": {
+      "channel_id": 1431730589610021115,
+      "ping_role_id": 1367321736688701544,
+      "post_days": [],
+      "post_time": null,
+      "timezone": "UTC",
+      "overview": "",
+      "classes": [
+        {
+          "name": "Firebrand",
+          "required": 5,
+          "emoji_id": 1472731858981879880
+        },
+        {
+          "name": "Reaper",
+          "required": 5,
+          "emoji_id": 1469132671056875570
+        },
+        {
+          "name": "Scrapper",
+          "required": 5,
+          "emoji_id": 1469132764883452070
+        },
+        {
+          "name": "Druid",
+          "required": 5,
+          "emoji_id": 1469132398514933975
+        },
+        {
+          "name": "Troubadour",
+          "required": 5,
+          "emoji_id": 1469132796151726182
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  }
+]

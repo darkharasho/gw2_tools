@@ -1,0 +1,86 @@
+{
+  "moderator_role_ids": [],
+  "guild_role_ids": {},
+  "preferred_guild_role_allowlist": [],
+  "build_channel_id": null,
+  "arcdps_channel_id": null,
+  "update_notes_channel_id": null,
+  "audit_channel_id": null,
+  "audit_gw2_admin_api_key": null,
+  "audit_gw2_guild_id": null,
+  "alliance_channel_id": null,
+  "alliance_guild_id": "5cc92a59-ea18-f011-8465-0228f2fb5e53",
+  "alliance_guild_name": "Lets Get Bags Together [LGBT]",
+  "alliance_server_id": 11001,
+  "alliance_server_name": "Moogooloo",
+  "alliance_last_prediction_at": null,
+  "alliance_last_actual_at": null,
+  "alliance_prediction_time": null,
+  "alliance_current_time": null,
+  "alliance_prediction_day": null,
+  "alliance_current_day": null,
+  "comp": {
+    "channel_id": 1431730589610021115,
+    "ping_role_id": 1367321736688701544,
+    "post_days": [],
+    "post_time": null,
+    "timezone": "UTC",
+    "overview": "",
+    "classes": [
+      {
+        "name": "Firebrand",
+        "required": 5,
+        "emoji_id": 1472731858981879880
+      },
+      {
+        "name": "Reaper",
+        "required": 5,
+        "emoji_id": 1469132671056875570
+      },
+      {
+        "name": "Scrapper",
+        "required": 5,
+        "emoji_id": 1469132764883452070
+      },
+      {
+        "name": "Druid",
+        "required": 5,
+        "emoji_id": 1469132398514933975
+      },
+      {
+        "name": "Troubadour",
+        "required": 5,
+        "emoji_id": 1469132796151726182
+      },
+      {
+        "name": "Spellbreaker",
+        "required": 1,
+        "emoji_id": 1469132769459175445
+      }
+    ],
+    "signups": {
+      "Firebrand": [
+        189184496808099841
+      ],
+      "Reaper": [],
+      "Scrapper": [
+        1132073159672217742,
+        290381040722378753
+      ],
+      "Druid": [],
+      "Troubadour": [
+        358611275707842573
+      ],
+      "Spellbreaker": [
+        1463339201360560128
+      ],
+      "Absent": [
+        300738604257247233
+      ]
+    },
+    "message_id": 1495618213721935963,
+    "last_post_at": "2026-04-20T02:52:50.107739+00:00"
+  },
+  "comp_active_preset": null,
+  "comp_schedules": []
+}

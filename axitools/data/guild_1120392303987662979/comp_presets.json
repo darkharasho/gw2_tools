@@ -1,0 +1,68 @@
+[
+  {
+    "name": "Monday Fight Squad",
+    "config": {
+      "channel_id": 1120392304574877708,
+      "ping_role_id": 1254082051850899466,
+      "post_days": [
+        0
+      ],
+      "post_time": "13:00",
+      "timezone": "EST",
+      "overview": "",
+      "classes": [
+        {
+          "name": "Firebrand",
+          "required": 6,
+          "emoji_id": 1360055683600613396
+        },
+        {
+          "name": "Troubadour",
+          "required": 6,
+          "emoji_id": 1411120191961694229
+        },
+        {
+          "name": "Scourge",
+          "required": 3,
+          "emoji_id": 1360056129761185993
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  },
+  {
+    "name": "Sunday Fight Squad",
+    "config": {
+      "channel_id": 1120392304574877708,
+      "ping_role_id": 1254082051850899466,
+      "post_days": [
+        6
+      ],
+      "post_time": "18:00",
+      "timezone": "EST",
+      "overview": "",
+      "classes": [
+        {
+          "name": "Firebrand",
+          "required": 6,
+          "emoji_id": 1360055683600613396
+        },
+        {
+          "name": "Troubadour",
+          "required": 6,
+          "emoji_id": 1411120191961694229
+        },
+        {
+          "name": "Scourge",
+          "required": 3,
+          "emoji_id": 1360056129761185993
+        }
+      ],
+      "signups": {},
+      "message_id": null,
+      "last_post_at": null
+    }
+  }
+]

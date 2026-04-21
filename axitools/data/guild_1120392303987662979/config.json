@@ -1,0 +1,100 @@
+{
+  "moderator_role_ids": [
+    1467707117602476158
+  ],
+  "guild_role_ids": {},
+  "preferred_guild_role_allowlist": [],
+  "build_channel_id": 1120392304574877708,
+  "arcdps_channel_id": 1468895275975315459,
+  "update_notes_channel_id": 1468895734807007323,
+  "audit_channel_id": null,
+  "audit_gw2_admin_api_key": null,
+  "audit_gw2_guild_id": "7cafdb3a-e4f1-ef11-8465-0228f2fb5e53",
+  "alliance_channel_id": 1120392304574877708,
+  "alliance_guild_id": "7cafdb3a-e4f1-ef11-8465-0228f2fb5e53",
+  "alliance_guild_name": "Operation Get Em [TEAM]",
+  "alliance_server_id": 11009,
+  "alliance_server_name": "Abaddon's Prison",
+  "alliance_last_prediction_at": "2026-04-17T16:04:20.517689Z",
+  "alliance_last_actual_at": "2026-04-18T02:34:20.745735Z",
+  "alliance_prediction_time": null,
+  "alliance_current_time": null,
+  "alliance_prediction_day": null,
+  "alliance_current_day": null,
+  "comp": {
+    "channel_id": 1120392304574877708,
+    "ping_role_id": 1254082051850899466,
+    "post_days": [
+      6
+    ],
+    "post_time": "18:00",
+    "timezone": "EST",
+    "overview": "",
+    "classes": [
+      {
+        "name": "Firebrand",
+        "required": 6,
+        "emoji_id": 1360055683600613396
+      },
+      {
+        "name": "Troubadour",
+        "required": 6,
+        "emoji_id": 1411120191961694229
+      },
+      {
+        "name": "Scourge",
+        "required": 3,
+        "emoji_id": 1360056129761185993
+      }
+    ],
+    "signups": {
+      "Firebrand": [
+        221840898634285056
+      ],
+      "Troubadour": [],
+      "Scourge": [],
+      "Absent": []
+    },
+    "message_id": 1467709771586207785,
+    "last_post_at": "2026-02-02T02:34:38.495620+00:00"
+  },
+  "comp_active_preset": "Sunday Fight Squad",
+  "comp_schedules": [
+    {
+      "schedule_id": "29a17036d406458c8736a4ea87c8ad61",
+      "name": "Default schedule",
+      "preset_name": null,
+      "post_days": [
+        0
+      ],
+      "post_time": "13:00",
+      "timezone": "EST",
+      "signups": {
+        "Firebrand": [],
+        "Troubadour": [],
+        "Scourge": [],
+        "Absent": []
+      },
+      "message_id": 1467942667903303955,
+      "last_post_at": "2026-02-02T18:00:05.514166+00:00"
+    },
+    {
+      "schedule_id": "c65f3a7568424a0db730bd1e84cadc5d",
+      "name": "Qwertze's Sunday Rumble",
+      "preset_name": "Sunday Fight Squad",
+      "post_days": [
+        6
+      ],
+      "post_time": "18:00",
+      "timezone": "EST",
+      "signups": {
+        "Firebrand": [],
+        "Troubadour": [],
+        "Scourge": [],
+        "Absent": []
+      },
+      "message_id": 1467710387037143262,
+      "last_post_at": "2026-02-02T02:37:05.258140+00:00"
+    }
+  ]
+}
