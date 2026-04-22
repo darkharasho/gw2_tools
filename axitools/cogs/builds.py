@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..bot import AxiToolsBot
+from ..config_status import ConfigStatus, StatusField
 from ..storage import ISOFORMAT, BuildRecord, utcnow
 from ..utils import build_embed, get_icon_and_color, resolve_profession
 from .. import constants
@@ -632,6 +633,27 @@ class BuildsCog(commands.GroupCog, name="builds"):
 
         modal = BuildDeleteModal(self, record)
         await interaction.response.send_modal(modal)
+
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        config = self.bot.get_config(guild_id)
+        if config.build_channel_id:
+            field = StatusField(
+                label="Build Channel",
+                value=f"<#{config.build_channel_id}>",
+                state="ok",
+            )
+        else:
+            field = StatusField(
+                label="Build Channel",
+                value="Not configured — use /config",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="GW2 Builds",
+            fields=[field],
+            setup_command="/config",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:
