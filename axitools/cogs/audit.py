@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
 from ..http_utils import read_response_text
 from ..storage import normalise_guild_id, utcnow
 
@@ -1400,6 +1401,40 @@ class AuditCog(commands.Cog):
             parts.append(f"{key}={formatted}")
         return ", ".join(parts) if parts else "No extra details"
 
+
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        config = self.bot.get_config(guild_id)
+        fields = []
+        if config.audit_channel_id:
+            fields.append(StatusField(
+                label="Audit Channel",
+                value=f"<#{config.audit_channel_id}>",
+                state="ok",
+            ))
+        else:
+            fields.append(StatusField(
+                label="Audit Channel",
+                value="Not configured — use /audit channel",
+                state="missing",
+            ))
+        if config.audit_gw2_guild_id:
+            fields.append(StatusField(
+                label="GW2 Guild",
+                value=config.audit_gw2_guild_id,
+                state="ok",
+            ))
+        else:
+            fields.append(StatusField(
+                label="GW2 Guild",
+                value="Not configured — use /audit gw2_guild",
+                state="missing",
+            ))
+        return ConfigStatus(
+            title="Audit Logging",
+            fields=fields,
+            setup_command="/audit channel",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:
