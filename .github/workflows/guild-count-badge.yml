@@ -33,7 +33,11 @@ jobs:
                   "User-Agent": "AxiTools/1.0 (https://github.com/darkharasho/axitools)",
               })
               with urllib.request.urlopen(req) as resp:
-                  guilds = json.loads(resp.read())
+                  raw = resp.read()
+                  guilds = json.loads(raw)
+              print(f"Response type: {type(guilds).__name__}, value: {guilds}")
+              if not isinstance(guilds, list):
+                  raise ValueError(f"Expected list, got: {guilds}")
               count += len(guilds)
               if len(guilds) < 200:
                   break
