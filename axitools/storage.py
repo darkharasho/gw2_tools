@@ -1054,6 +1054,15 @@ class ApiKeyStore:
 
         return [row["guild_id"] for row in rows if row["guild_id"]]
 
+    def count_api_keys(self, guild_id: int) -> int:
+        """Return the number of API keys registered for the given guild."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM api_keys WHERE guild_id = ?",
+                (guild_id,),
+            ).fetchone()
+            return row[0] if row else 0
+
     def clear_guild_details(self) -> None:
         """Remove all cached guild details."""
 
@@ -1844,6 +1853,9 @@ class StorageManager:
 
     def all_gw2_guild_ids(self) -> List[str]:
         return self.api_key_store.all_gw2_guild_ids()
+
+    def count_api_keys(self, guild_id: int) -> int:
+        return self.api_key_store.count_api_keys(guild_id)
 
     def clear_guild_details(self) -> None:
         self.api_key_store.clear_guild_details()
