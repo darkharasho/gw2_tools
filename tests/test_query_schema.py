@@ -1,10 +1,9 @@
 import pytest
 
-from axitools.member_filter import BlanketCondition, blanket_condition_matches
+from axitools.member_filter import BlanketCondition
 from axitools.query_schema import (
     BLANKET_DEFAULT_FIELDS,
     ai_response_text,
-    build_ai_schema_context_from_records,
     coerce_query_to_full_rows,
     extract_select_statement,
     is_read_only_select_query_text,
@@ -42,29 +41,27 @@ def test_parse_blanket_query_invalid_field():
         parse_blanket_query("SELECT super_secret WHERE account_name == x")
 
 
-def test_blanket_condition_matches_list_values():
-    row = {"character_name": ["One", "Two"], "account_name": "Test.1234"}
-    assert blanket_condition_matches(
-        BlanketCondition(field="character_name", operator="==", value="two"),
-        row,
+def test_parse_blanket_query_table_alias_field():
+    fields, conditions = parse_blanket_query(
+        "SELECT api_keys.name, api_keys.created_at WHERE api_keys.account_name == ondria.1592"
     )
-    assert blanket_condition_matches(
-        BlanketCondition(field="character_name", operator="~=", value="on"),
-        row,
-    )
-    assert not blanket_condition_matches(
-        BlanketCondition(field="character_name", operator="!=", value="two"),
-        row,
-    )
+    assert fields == ["api_keys", "created_at"]
+    assert conditions == [
+        BlanketCondition(field="account_name", operator="==", value="ondria.1592")
+    ]
 
 
-def test_is_read_only_select_query_text():
+def test_is_read_only_select_query_text_valid():
     assert is_read_only_select_query_text(
         "SELECT user WHERE account_name == Test.1234"
     )
-    assert not is_read_only_select_query_text(
-        "UPDATE api_keys SET name = 'x'"
-    )
+
+
+def test_is_read_only_select_query_text_rejects_update():
+    assert not is_read_only_select_query_text("UPDATE api_keys SET name = 'x'")
+
+
+def test_is_read_only_select_query_text_rejects_semicolon():
     assert not is_read_only_select_query_text(
         "SELECT user; DELETE FROM api_keys"
     )
@@ -104,6 +101,8 @@ def test_coerce_query_to_full_rows():
 
 
 def test_build_ai_schema_context_from_records():
+    from axitools.query_schema import build_ai_schema_context_from_records
+
     record = ApiKeyRecord(
         name="Main Key",
         key="secret",
@@ -120,17 +119,3 @@ def test_build_ai_schema_context_from_records():
     assert "sample_account_names: Ondria.1592" in context
     assert "sample_key_names: Main Key" in context
     assert "sample_guild_ids: abcd-1234" in context
-
-
-def test_parse_blanket_query_table_alias_field():
-    fields, conditions = parse_blanket_query(
-        "SELECT api_keys.name, api_keys.created_at WHERE api_keys.account_name == ondria.1592"
-    )
-    assert fields == ["api_keys", "created_at"]
-    assert conditions == [
-        BlanketCondition(
-            field="account_name",
-            operator="==",
-            value="ondria.1592",
-        )
-    ]

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import csv
 import io
 import json
 import logging
 import os
 import re
-from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import aiohttp
@@ -16,32 +14,25 @@ from discord.ext import commands
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
+from ..export import MemberExportRow, members_to_csv
 from ..http_utils import read_response_text
+from ..member_filter import BlanketCondition, FilterSet, blanket_condition_matches
+from ..query_schema import (
+    AI_FORBIDDEN_KEYWORDS,
+    BLANKET_DEFAULT_FIELDS,
+    BLANKET_FIELD_ALIASES,
+    BLANKET_FIELD_LABELS,
+    ai_response_text,
+    build_ai_schema_context_from_records,
+    coerce_query_to_full_rows,
+    extract_select_statement,
+    is_read_only_select_query_text,
+    parse_blanket_query,
+)
 from ..storage import normalise_guild_id
 
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass
-class _FilterSet:
-    guilds: List[str]
-    roles: List[discord.Role]
-    accounts: List[str]
-    character_keys: List[str]
-    character_labels: List[str]
-    discord_members: List[discord.Member]
-    filters: List[Tuple[str, str]]
-
-    @property
-    def character_provided(self) -> bool:
-        return bool(self.character_keys)
-
-
-@dataclass(frozen=True)
-class _BlanketCondition:
-    field: str
-    operator: str
-    value: str
 
 
 class SelectCog(commands.Cog):
@@ -56,77 +47,6 @@ class SelectCog(commands.Cog):
         # previously cached administrator-only defaults and surfaces the
         # command to authorised moderator roles governed by runtime checks.
         default_permissions=discord.Permissions(),
-    )
-    BLANKET_DEFAULT_FIELDS: Tuple[str, ...] = (
-        "discord_guild_id",
-        "api_keys",
-        "api_key",
-        "user",
-        "user_id",
-        "account_name",
-        "permission",
-        "guild_id",
-        "character_name",
-        "created_at",
-        "updated_at",
-    )
-    BLANKET_FIELD_ALIASES: Dict[str, str] = {
-        "user": "user",
-        "users": "user",
-        "discord_user": "user",
-        "discord_name": "discord_name",
-        "discord_guild_id": "discord_guild_id",
-        "user_id": "user_id",
-        "api_keys": "api_keys",
-        "api_key": "api_keys",
-        "api_key_name": "api_keys",
-        "key_name": "api_keys",
-        "api_key_value": "api_key",
-        "api_keys.key": "api_key",
-        "api_keys.name": "api_keys",
-        "api_keys.account_name": "account_name",
-        "api_keys.permissions": "permission",
-        "api_keys.guild_ids": "guild_id",
-        "api_keys.characters": "character_name",
-        "api_keys.created_at": "created_at",
-        "api_keys.updated_at": "updated_at",
-        "api_keys.user_id": "user_id",
-        "api_keys.discord_guild_id": "discord_guild_id",
-        "account": "account_name",
-        "account_name": "account_name",
-        "character": "character_name",
-        "character_name": "character_name",
-        "guild": "guild_id",
-        "guild_id": "guild_id",
-        "permission": "permission",
-        "permissions": "permission",
-        "created_at": "created_at",
-        "updated_at": "updated_at",
-    }
-    BLANKET_FIELD_LABELS: Dict[str, str] = {
-        "discord_guild_id": "Discord Guild ID",
-        "user": "User",
-        "discord_name": "Discord Name",
-        "user_id": "User ID",
-        "api_keys": "API Key Name",
-        "api_key": "API Key",
-        "account_name": "Account Name",
-        "character_name": "Character Names",
-        "guild_id": "Guild IDs",
-        "permission": "Permissions",
-        "created_at": "Created At",
-        "updated_at": "Updated At",
-    }
-    AI_FORBIDDEN_KEYWORDS: Tuple[str, ...] = (
-        "update",
-        "delete",
-        "insert",
-        "drop",
-        "alter",
-        "create",
-        "truncate",
-        "grant",
-        "revoke",
     )
 
     def __init__(self, bot: AxiToolsBot) -> None:
@@ -533,7 +453,7 @@ class SelectCog(commands.Cog):
         accounts: Sequence[Optional[str]],
         characters: Sequence[Optional[str]],
         discord_members: Sequence[Optional[discord.Member]],
-    ) -> _FilterSet:
+    ) -> FilterSet:
         guild_values: List[str] = []
         for value in guilds:
             if isinstance(value, str):
@@ -585,7 +505,7 @@ class SelectCog(commands.Cog):
         for member in discord_values:
             filters.append(("discord", str(member.id)))
 
-        return _FilterSet(
+        return FilterSet(
             guilds=guild_values,
             roles=role_values,
             accounts=account_values,
@@ -659,105 +579,6 @@ class SelectCog(commands.Cog):
 
         return True, sorted(set(matched_guilds)), sorted(set(matched_roles))
 
-    @classmethod
-    def _normalise_blanket_field(cls, raw: str) -> Optional[str]:
-        value = raw.strip().casefold()
-        if not value:
-            return None
-        return cls.BLANKET_FIELD_ALIASES.get(value)
-
-    @staticmethod
-    def _strip_quotes(value: str) -> str:
-        cleaned = value.strip()
-        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
-            return cleaned[1:-1]
-        return cleaned
-
-    @classmethod
-    def _parse_blanket_query(
-        cls, query: str
-    ) -> tuple[List[str], List[_BlanketCondition]]:
-        cleaned = query.strip()
-        match = re.match(r"^\s*select\s+(.*)$", cleaned, flags=re.IGNORECASE)
-        if not match:
-            raise ValueError("Query must start with SELECT.")
-
-        remainder = match.group(1).strip()
-        where_clause = ""
-        where_match = re.search(r"\s+where\s+", remainder, flags=re.IGNORECASE)
-        if where_match:
-            where_clause = remainder[where_match.end() :].strip()
-            remainder = remainder[: where_match.start()].strip()
-        if not remainder:
-            raise ValueError("SELECT fields are required.")
-
-        from_match = re.search(r"\s+from\s+", remainder, flags=re.IGNORECASE)
-        select_part = remainder
-        if from_match:
-            select_part = remainder[: from_match.start()].strip()
-            from_part = remainder[from_match.end() :].strip()
-            if not from_part:
-                raise ValueError("FROM clause was provided without table names.")
-
-        raw_fields = [part.strip() for part in select_part.split(",") if part.strip()]
-        if not raw_fields:
-            raise ValueError("At least one SELECT field is required.")
-
-        selected_fields: List[str] = []
-        if len(raw_fields) == 1 and raw_fields[0] == "*":
-            selected_fields = list(cls.BLANKET_DEFAULT_FIELDS)
-        else:
-            for token in raw_fields:
-                normalised = cls._normalise_blanket_field(token)
-                if not normalised:
-                    raise ValueError(f"Unsupported SELECT field: `{token}`.")
-                if normalised not in selected_fields:
-                    selected_fields.append(normalised)
-
-        conditions: List[_BlanketCondition] = []
-        if where_clause:
-            parts = [part.strip() for part in re.split(r"\s+and\s+", where_clause, flags=re.IGNORECASE) if part.strip()]
-            for part in parts:
-                cond_match = re.match(
-                    r"^\s*([a-zA-Z_][\w.]*)\s*(==|=|!=|~=)\s*(.+?)\s*$",
-                    part,
-                )
-                if not cond_match:
-                    raise ValueError(
-                        "Invalid WHERE condition. Use syntax like `account_name == Example.1234`."
-                    )
-                raw_field, operator, raw_value = cond_match.groups()
-                field = cls._normalise_blanket_field(raw_field)
-                if not field:
-                    raise ValueError(f"Unsupported WHERE field: `{raw_field}`.")
-                value = cls._strip_quotes(raw_value)
-                if not value:
-                    raise ValueError(f"Condition value for `{raw_field}` cannot be empty.")
-                normalised_operator = "==" if operator == "=" else operator
-                conditions.append(
-                    _BlanketCondition(field=field, operator=normalised_operator, value=value)
-                )
-        return selected_fields, conditions
-
-    @staticmethod
-    def _blanket_condition_matches(
-        condition: _BlanketCondition, row: Mapping[str, object]
-    ) -> bool:
-        value = condition.value.casefold()
-        raw_actual = row.get(condition.field)
-        if isinstance(raw_actual, list):
-            actual_values = [str(item).casefold() for item in raw_actual]
-        else:
-            actual_values = [str(raw_actual or "").casefold()]
-
-        if condition.operator == "==":
-            return any(item == value for item in actual_values)
-        if condition.operator == "!=":
-            return all(item != value for item in actual_values)
-        if condition.operator == "~=":
-            return any(value in item for item in actual_values)
-        return False
-
     @staticmethod
     def _build_blanket_rows(
         guild: discord.Guild,
@@ -799,108 +620,6 @@ class SelectCog(commands.Cog):
         return cleaned or "-"
 
     @staticmethod
-    def _ai_response_text(payload: Mapping[str, object]) -> str:
-        def _collect_text(value: object, *, out: List[str]) -> None:
-            if isinstance(value, str):
-                text = value.strip()
-                if text:
-                    out.append(text)
-                return
-            if isinstance(value, list):
-                for item in value:
-                    _collect_text(item, out=out)
-                return
-            if isinstance(value, dict):
-                for key, nested in value.items():
-                    if key in {"text", "output_text", "content"}:
-                        _collect_text(nested, out=out)
-
-        output_text = payload.get("output_text")
-        if isinstance(output_text, str) and output_text.strip():
-            return output_text.strip()
-        if isinstance(output_text, list):
-            parts: List[str] = []
-            for item in output_text:
-                if isinstance(item, str) and item.strip():
-                    parts.append(item.strip())
-                elif isinstance(item, dict):
-                    text = item.get("text")
-                    if isinstance(text, str) and text.strip():
-                        parts.append(text.strip())
-            if parts:
-                return "\n".join(parts).strip()
-
-        output = payload.get("output")
-        if not isinstance(output, list):
-            output = []
-        chunks: List[str] = []
-        for item in output:
-            if not isinstance(item, dict):
-                continue
-            content = item.get("content")
-            if not isinstance(content, list):
-                continue
-            for part in content:
-                if not isinstance(part, dict):
-                    continue
-                text = part.get("text")
-                if isinstance(text, str) and text.strip():
-                    chunks.append(text.strip())
-                output_text_value = part.get("output_text")
-                if isinstance(output_text_value, str) and output_text_value.strip():
-                    chunks.append(output_text_value.strip())
-        if chunks:
-            return "\n".join(chunks).strip()
-
-        # Compatibility fallback for Chat Completions-like payloads.
-        choices = payload.get("choices")
-        if isinstance(choices, list):
-            choice = choices[0] if choices else None
-            if isinstance(choice, dict):
-                message = choice.get("message")
-                if isinstance(message, dict):
-                    content = message.get("content")
-                    if isinstance(content, str) and content.strip():
-                        return content.strip()
-                    if isinstance(content, list):
-                        fallback_parts: List[str] = []
-                        for part in content:
-                            if isinstance(part, dict):
-                                text = part.get("text")
-                                if isinstance(text, str) and text.strip():
-                                    fallback_parts.append(text.strip())
-                        if fallback_parts:
-                            return "\n".join(fallback_parts).strip()
-        deep_chunks: List[str] = []
-        _collect_text(payload, out=deep_chunks)
-        for chunk in deep_chunks:
-            if chunk and "select" in chunk.casefold():
-                return chunk
-        return "\n".join(deep_chunks).strip()
-
-    @staticmethod
-    def _extract_select_statement(text: str) -> str:
-        cleaned = text.strip()
-        if not cleaned:
-            return ""
-
-        if "```" in cleaned:
-            blocks = re.findall(r"```(?:\w+)?\s*(.*?)```", cleaned, flags=re.DOTALL)
-            for block in blocks:
-                candidate = block.strip()
-                if re.match(r"^\s*select\b", candidate, flags=re.IGNORECASE):
-                    return candidate
-
-        match = re.search(r"(select\b.+)", cleaned, flags=re.IGNORECASE | re.DOTALL)
-        if not match:
-            return cleaned
-        candidate = match.group(1).strip()
-        # Keep the first statement if extra prose trails the query.
-        if ";" in candidate:
-            candidate = candidate.split(";", 1)[0].strip()
-        return candidate
-
-    @staticmethod
     def _heuristic_query_from_prompt(prompt: str) -> str:
         cleaned = prompt.strip()
         if not cleaned:
@@ -916,47 +635,6 @@ class SelectCog(commands.Cog):
             account_name = account_match.group(1)
             return f"SELECT user, account_name, api_keys WHERE account_name == {account_name}"
         return ""
-
-    @staticmethod
-    def _prompt_requests_full_rows(prompt: str) -> bool:
-        lowered = prompt.casefold()
-        markers = (
-            "full row",
-            "full rows",
-            "all fields",
-            "all columns",
-            "complete row",
-            "everything",
-            "entire row",
-        )
-        return any(marker in lowered for marker in markers)
-
-    @classmethod
-    def _coerce_query_to_full_rows(cls, *, prompt: str, query: str) -> str:
-        if not cls._prompt_requests_full_rows(prompt):
-            return query
-        match = re.match(r"^\s*select\s+(.+)$", query, flags=re.IGNORECASE | re.DOTALL)
-        if not match:
-            return query
-        tail = match.group(1).strip()
-        where_match = re.search(r"\s+where\s+", tail, flags=re.IGNORECASE)
-        if where_match:
-            where_clause = tail[where_match.start() :].strip()
-            return f"SELECT * {where_clause}"
-        return "SELECT *"
-
-    @classmethod
-    def _is_read_only_select_query_text(cls, query: str) -> bool:
-        cleaned = query.strip()
-        if not cleaned:
-            return False
-        if not re.match(r"^\s*select\b", cleaned, flags=re.IGNORECASE):
-            return False
-        lowered = cleaned.casefold()
-        return not any(
-            re.search(rf"\b{re.escape(keyword)}\b", lowered)
-            for keyword in cls.AI_FORBIDDEN_KEYWORDS
-        )
 
     async def _ai_generate_blanket_query(
         self, prompt: str, *, schema_context: Optional[str] = None
@@ -1026,8 +704,8 @@ class SelectCog(commands.Cog):
         except json.JSONDecodeError as exc:
             raise ValueError("AI service returned an invalid response format.") from exc
 
-        generated = self._ai_response_text(parsed)
-        generated = self._extract_select_statement(generated)
+        generated = ai_response_text(parsed)
+        generated = extract_select_statement(generated)
         if not generated:
             generated = self._heuristic_query_from_prompt(prompt)
         if not generated:
@@ -1035,61 +713,6 @@ class SelectCog(commands.Cog):
                 "AI did not return a usable query. Try including an account name like `Name.1234`."
             )
         return generated
-
-    @classmethod
-    def _build_ai_schema_context_from_records(
-        cls,
-        records: Sequence[Tuple[int, int, "ApiKeyRecord"]],
-        *,
-        scope: str,
-    ) -> str:
-        account_names: List[str] = []
-        key_names: List[str] = []
-        guild_ids: List[str] = []
-        permissions: List[str] = []
-
-        def _append_unique(bucket: List[str], value: str, *, limit: int = 25) -> None:
-            cleaned = value.strip()
-            if not cleaned or cleaned in bucket:
-                return
-            if len(bucket) >= limit:
-                return
-            bucket.append(cleaned)
-
-        for _guild_id, _user_id, record in records:
-            _append_unique(key_names, record.name)
-            _append_unique(account_names, record.account_name)
-            for gid in record.guild_ids or []:
-                _append_unique(guild_ids, gid)
-            for perm in record.permissions or []:
-                _append_unique(permissions, perm)
-
-        lines = [
-            f"- scope: {scope}",
-            f"- records_in_scope: {len(records)}",
-            "- fields:",
-            "  - discord_guild_id: Discord server ID for the stored key row",
-            "  - user: Discord display label",
-            "  - discord_name: Discord username",
-            "  - user_id: Discord ID string",
-            "  - api_keys: stored key name",
-            "  - api_key: full API key value",
-            "  - account_name: GW2 account name (e.g. Name.1234)",
-            "  - character_name: list of GW2 character names",
-            "  - guild_id: list of GW2 guild UUIDs",
-            "  - permission: list of GW2 API key permissions",
-            "  - created_at: row creation timestamp",
-            "  - updated_at: row update timestamp",
-            "- operator_notes:",
-            "  - use == for exact value matches",
-            "  - use ~= for partial/contains matches",
-            "  - combine filters with AND only",
-            f"- sample_account_names: {', '.join(account_names) if account_names else '(none)'}",
-            f"- sample_key_names: {', '.join(key_names) if key_names else '(none)'}",
-            f"- sample_guild_ids: {', '.join(guild_ids) if guild_ids else '(none)'}",
-            f"- sample_permissions: {', '.join(permissions) if permissions else '(none)'}",
-        ]
-        return "\n".join(lines)
 
     async def _resolve_blanket_scope(
         self, interaction: discord.Interaction, scope: str
@@ -1175,7 +798,7 @@ class SelectCog(commands.Cog):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
         await _progress("Validate", "Validating read-only SELECT query.", query)
-        if not self._is_read_only_select_query_text(query):
+        if not is_read_only_select_query_text(query):
             await _progress(
                 "Failed",
                 "Rejected non-read-only query text.",
@@ -1190,7 +813,7 @@ class SelectCog(commands.Cog):
                 )
             return
         try:
-            selected_fields, conditions = self._parse_blanket_query(query)
+            selected_fields, conditions = parse_blanket_query(query)
         except ValueError as exc:
             await _progress(
                 "Failed",
@@ -1241,7 +864,7 @@ class SelectCog(commands.Cog):
             row
             for row in rows
             if all(
-                self._blanket_condition_matches(condition, row)
+                blanket_condition_matches(condition, row)
                 for condition in conditions
             )
         ]
@@ -1433,7 +1056,7 @@ class SelectCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         *,
-        filter_sets: Sequence[_FilterSet],
+        filter_sets: Sequence[FilterSet],
         group_by: Optional[str],
         as_csv: bool,
         count_only: bool,
@@ -1586,7 +1209,7 @@ class SelectCog(commands.Cog):
                 List[str],
                 List[str],
                 List[str],
-                _FilterSet,
+                FilterSet,
             ]
         ] = []
         for bundle in bundles.values():
@@ -1668,7 +1291,7 @@ class SelectCog(commands.Cog):
                     List[str],
                     List[str],
                     List[str],
-                    _FilterSet,
+                    FilterSet,
                 ]
             ],
         ] = {}
@@ -1759,20 +1382,7 @@ class SelectCog(commands.Cog):
 
         files: List[discord.File] = []
         if as_csv:
-            buffer = io.StringIO()
-            writer = csv.writer(buffer)
-            writer.writerow(
-                [
-                    "Discord ID",
-                    "Discord Name",
-                    "Account Name",
-                    "Guild IDs",
-                    "Guild Names",
-                    "Roles",
-                    "Characters",
-                ]
-            )
-
+            export_rows = []
             for (
                 member,
                 account_names,
@@ -1784,32 +1394,25 @@ class SelectCog(commands.Cog):
                 guild_ids,
                 filter_set,
             ) in matched:
-                guild_labels = [guild_details.get(gid, gid) for gid in guild_ids]
+                guild_names = [guild_details.get(gid, gid) for gid in guild_ids]
                 roles = [role.name for role in member.roles if not role.is_default()]
                 characters_for_csv = (
                     [name for name, _ in character_entries]
                     if filter_set.character_provided
                     else characters
                 )
-                writer.writerow(
-                    [
-                        member.id,
-                        f"{member.display_name} ({member.name})",
-                        "; ".join(account_names),
-                        "; ".join(guild_ids),
-                        "; ".join(guild_labels or ["No guilds"]),
-                        "; ".join(roles),
-                        "; ".join(characters_for_csv),
-                    ]
+                export_rows.append(
+                    MemberExportRow(
+                        member_id=member.id,
+                        member_display=f"{member.display_name} ({member.name})",
+                        account_names=account_names,
+                        guild_ids=guild_ids,
+                        guild_names=guild_names or ["No guilds"],
+                        roles=roles,
+                        characters=characters_for_csv,
+                    )
                 )
-
-            buffer.seek(0)
-            files = [
-                discord.File(
-                    fp=io.BytesIO(buffer.getvalue().encode("utf-8")),
-                    filename="select_query.csv",
-                )
-            ]
+            files = [members_to_csv(export_rows)]
 
         match_blocks: List[str] = []
 
@@ -2246,7 +1849,7 @@ class SelectCog(commands.Cog):
             guild_id=interaction.guild.id,
             user_id=user_id_filter,
         )
-        schema_context = self._build_ai_schema_context_from_records(
+        schema_context = build_ai_schema_context_from_records(
             scoped_records,
             scope=effective_scope,
         )
@@ -2271,7 +1874,7 @@ class SelectCog(commands.Cog):
             )
             return
 
-        generated_query = self._coerce_query_to_full_rows(
+        generated_query = coerce_query_to_full_rows(
             prompt=prompt,
             query=generated_query,
         )
@@ -2307,6 +1910,19 @@ class SelectCog(commands.Cog):
             include_query_label="AI Query",
             progress_callback=_progress_callback,
             send_error_followups=False,
+        )
+
+    def get_config_status(self) -> ConfigStatus:
+        return ConfigStatus(
+            title="Member Search",
+            fields=[
+                StatusField(
+                    label="API Keys",
+                    value="Linked via /account add",
+                    state="ok",
+                )
+            ],
+            setup_command=None,
         )
 
 

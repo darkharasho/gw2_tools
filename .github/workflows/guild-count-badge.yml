@@ -1,0 +1,65 @@
+name: Update Guild Count Badge
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # every hour
+  workflow_dispatch:
+
+jobs:
+  update-badge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch guild count and update gist
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+        run: |
+          python3 << 'EOF'
+          import os, json, urllib.request
+
+          token = os.environ["DISCORD_BOT_TOKEN"]
+          gist_token = os.environ["GIST_TOKEN"]
+          gist_id = os.environ["GIST_ID"]
+
+          count = 0
+          after = None
+          while True:
+              url = "https://discord.com/api/v10/users/@me/guilds?limit=200"
+              if after:
+                  url += f"&after={after}"
+              req = urllib.request.Request(url, headers={"Authorization": f"Bot {token}"})
+              with urllib.request.urlopen(req) as resp:
+                  guilds = json.loads(resp.read())
+              count += len(guilds)
+              if len(guilds) < 200:
+                  break
+              after = guilds[-1]["id"]
+
+          payload = json.dumps({
+              "schemaVersion": 1,
+              "label": "servers",
+              "message": str(count),
+              "color": "blueviolet",
+          })
+
+          body = json.dumps({
+              "files": {
+                  "axitools-guild-count.json": {"content": payload}
+              }
+          }).encode()
+          req = urllib.request.Request(
+              f"https://api.github.com/gists/{gist_id}",
+              data=body,
+              method="PATCH",
+              headers={
+                  "Authorization": f"token {gist_token}",
+                  "Content-Type": "application/json",
+              },
+          )
+          with urllib.request.urlopen(req) as resp:
+              result = json.loads(resp.read())
+              file = result["files"]["axitools-guild-count.json"]
+              print(f"Guild count: {count}")
+              print(f"Raw URL: {file['raw_url']}")
+          EOF

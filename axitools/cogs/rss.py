@@ -4,10 +4,8 @@ from __future__ import annotations
 import calendar
 import logging
 import os
-import re
 from dataclasses import replace
 from datetime import datetime, timezone
-from html import unescape
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import aiohttp
@@ -15,68 +13,14 @@ import discord
 import feedparser
 from discord import app_commands
 from discord.ext import commands, tasks
-from markdownify import markdownify as html_to_markdown
 
 from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
+from ..config_status import ConfigStatus, StatusField
+from ..rendering import clean_html, html_to_discord_markdown, truncate_embed_field
 from ..storage import RssFeedConfig
 
 LOGGER = logging.getLogger(__name__)
-
-
-SUMMARY_REGEX = re.compile(r"<[^>]+>")
-
-
-def _clean_summary(summary: str, *, max_length: int = 400) -> str:
-    """Return a sanitised version of an RSS entry summary."""
-
-    text = SUMMARY_REGEX.sub("", summary)
-    text = unescape(text).strip()
-    if len(text) <= max_length:
-        return text
-    return text[: max_length - 1].rstrip() + "…"
-
-
-def _clean_markdown(text: str) -> str:
-    lines = [line.rstrip() for line in text.splitlines()]
-    cleaned: List[str] = []
-    blank = False
-    for line in lines:
-        if line.strip():
-            cleaned.append(line)
-            blank = False
-            continue
-        if not blank:
-            cleaned.append("")
-        blank = True
-    result = "\n".join(cleaned).strip()
-    if not result:
-        return result
-    return _ensure_bullet_prefix(result)
-
-
-def _ensure_bullet_prefix(text: str) -> str:
-    bullet_pattern = re.compile(r"^(\s*)[\*\+]\s+")
-    adjusted: List[str] = []
-    for line in text.split("\n"):
-        match = bullet_pattern.match(line)
-        if match:
-            indent = match.group(1)
-            remainder = line[match.end() :]
-            adjusted.append(f"{indent}- {remainder}")
-        else:
-            adjusted.append(line)
-    return "\n".join(adjusted)
-
-
-def _render_html_summary(summary: str) -> str:
-    markdown = html_to_markdown(
-        summary,
-        heading_style="ATX",
-        bullets="-*+",
-        strip=["img"],
-    )
-    return _clean_markdown(markdown)
 
 
 def _entry_identifier(entry: feedparser.FeedParserDict) -> Optional[str]:
@@ -127,17 +71,17 @@ def _extract_entry_description(entry: feedparser.FeedParserDict, *, max_length: 
                 continue
             value = item.get("value")
             if value:
-                rendered = _render_html_summary(str(value))
+                rendered = html_to_discord_markdown(str(value))
                 if rendered:
-                    return _clean_summary(rendered, max_length=max_length) if len(rendered) > max_length else rendered
-                return _clean_summary(str(value), max_length=max_length)
+                    return truncate_embed_field(rendered, max_length) if len(rendered) > max_length else rendered
+                return clean_html(str(value), max_length=max_length)
 
     summary = entry.get("summary") or entry.get("description")
     if summary:
-        rendered = _render_html_summary(str(summary))
+        rendered = html_to_discord_markdown(str(summary))
         if rendered:
-            return _clean_summary(rendered, max_length=max_length) if len(rendered) > max_length else rendered
-        return _clean_summary(str(summary), max_length=max_length)
+            return truncate_embed_field(rendered, max_length) if len(rendered) > max_length else rendered
+        return clean_html(str(summary), max_length=max_length)
     return None
 
 
@@ -992,6 +936,28 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
                 view=view,
                 ephemeral=True,
             )
+
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        feeds = self.bot.storage.get_rss_feeds(guild_id)
+        n = len(feeds)
+        if n > 0:
+            field = StatusField(
+                label="RSS Feeds",
+                value=f"{n} feed{'s' if n != 1 else ''} configured",
+                state="ok",
+            )
+        else:
+            field = StatusField(
+                label="RSS Feeds",
+                value="None configured — use /rss set",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="RSS Feeds",
+            fields=[field],
+            setup_command="/rss set",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:
