@@ -1097,6 +1097,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
+        name="refresh",
+        description="Clear cached alliance sheet data and re-fetch from the source.",
+    )
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        self._sheet_cache.clear()
+        self._sheet_cache_at.clear()
+        await interaction.response.send_message("Alliance sheet cache cleared.", ephemeral=True)
+
+    @app_commands.command(
         name="postnow",
         description="Post the WvW matchup summary immediately (admin only).",
     )
