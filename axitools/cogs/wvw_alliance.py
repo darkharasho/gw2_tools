@@ -1103,9 +1103,19 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     async def refresh(self, interaction: discord.Interaction) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
+        assert interaction.guild is not None
         self._sheet_cache.clear()
         self._sheet_cache_at.clear()
-        await interaction.response.send_message("Alliance sheet cache cleared.", ephemeral=True)
+        config = self.bot.get_config(interaction.guild.id)
+        world_id = await self._refresh_guild_world(config, force_refresh=True)
+        if world_id:
+            self.bot.save_config(interaction.guild.id, config)
+            world_name = WVW_SERVER_NAMES.get(world_id, str(world_id))
+            await interaction.response.send_message(
+                f"Cache cleared and server updated to **{world_name}**.", ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("Cache cleared but could not resolve server.", ephemeral=True)
 
     @app_commands.command(
         name="postnow",
