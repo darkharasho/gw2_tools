@@ -306,21 +306,31 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
 
     async def _fetch_json(self, url: str, *, params: Optional[Dict[str, str]] = None) -> object:
         session = await self._get_session()
-        try:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                response.raise_for_status()
-                return await response.json(content_type=None)
-        except aiohttp.ClientError as exc:
-            raise ValueError(f"Request failed: {exc}") from exc
+        for attempt in range(3):
+            try:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 429:
+                        await asyncio.sleep(2 * (attempt + 1))
+                        continue
+                    response.raise_for_status()
+                    return await response.json(content_type=None)
+            except aiohttp.ClientError as exc:
+                raise ValueError(f"Request failed: {exc}") from exc
+        raise ValueError("Guild Wars 2 API returned 429: too many requests")
 
     async def _fetch_text(self, url: str, *, params: Optional[Dict[str, str]] = None) -> str:
         session = await self._get_session()
-        try:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                response.raise_for_status()
-                return await response.text()
-        except aiohttp.ClientError as exc:
-            raise ValueError(f"Request failed: {exc}") from exc
+        for attempt in range(3):
+            try:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 429:
+                        await asyncio.sleep(2 * (attempt + 1))
+                        continue
+                    response.raise_for_status()
+                    return await response.text()
+            except aiohttp.ClientError as exc:
+                raise ValueError(f"Request failed: {exc}") from exc
+        raise ValueError("Guild Wars 2 API returned 429: too many requests")
 
     def _parse_timestamp(self, value: Optional[str]) -> Optional[datetime]:
         if not value:

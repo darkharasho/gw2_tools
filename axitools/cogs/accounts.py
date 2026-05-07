@@ -52,6 +52,7 @@ class AccountsCog(commands.Cog):
         self._refresh_task: Optional[asyncio.Task] = None
         self._audit_key_cache: Dict[Tuple[int, str], str] = {}
         self._audit_key_cache_loaded: Set[int] = set()
+        self._guild_detail_cache: Dict[str, str] = {}
 
     async def cog_load(self) -> None:
         self._member_cache_refresher.start()
@@ -294,26 +295,34 @@ class AccountsCog(commands.Cog):
         headers = {"Accept": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        try:
-            async with session.get(
-                url,
-                headers=headers,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as response:
-                text = await read_response_text(response)
-        except aiohttp.ClientError as exc:
-            raise ValueError(f"Failed to reach the Guild Wars 2 API: {exc}") from exc
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response:
+                    text = await read_response_text(response)
+            except aiohttp.ClientError as exc:
+                raise ValueError(f"Failed to reach the Guild Wars 2 API: {exc}") from exc
 
-        if response.status != 200:
-            raise ValueError(
-                f"Guild Wars 2 API returned {response.status}: {text[:200]}"
-            )
+            if response.status == 429:
+                last_exc = ValueError(f"Guild Wars 2 API returned 429: {text[:200]}")
+                await asyncio.sleep(2 * (attempt + 1))
+                continue
 
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-            raise ValueError("Unexpected response format from the Guild Wars 2 API") from exc
+            if response.status != 200:
+                raise ValueError(
+                    f"Guild Wars 2 API returned {response.status}: {text[:200]}"
+                )
+
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+                raise ValueError("Unexpected response format from the Guild Wars 2 API") from exc
+        raise last_exc  # type: ignore[misc]
 
     async def _fetch_guild_details(
         self, guild_ids: Iterable[str], *, api_key: Optional[str] = None
@@ -322,6 +331,10 @@ class AccountsCog(commands.Cog):
         cache_payload: Dict[str, Tuple[str, Optional[str]]] = {}
         for guild_id in guild_ids:
             if not guild_id:
+                continue
+            cached = self._guild_detail_cache.get(guild_id)
+            if cached is not None:
+                details[guild_id] = cached
                 continue
             try:
                 payload = await self._fetch_json(
@@ -332,10 +345,13 @@ class AccountsCog(commands.Cog):
             name = payload.get("name")
             tag = payload.get("tag")
             if isinstance(name, str) and isinstance(tag, str):
-                details[guild_id] = f"{name} [{tag}]"
+                label = f"{name} [{tag}]"
+                details[guild_id] = label
+                self._guild_detail_cache[guild_id] = label
                 cache_payload[guild_id] = (name, tag)
             elif isinstance(name, str):
                 details[guild_id] = name
+                self._guild_detail_cache[guild_id] = name
                 cache_payload[guild_id] = (name, None)
         if cache_payload:
             self.bot.storage.upsert_guild_details(cache_payload)
@@ -423,6 +439,7 @@ class AccountsCog(commands.Cog):
             )
             self.bot.storage.upsert_api_key(guild_id, user_id, refreshed)
             users_to_sync.add((guild_id, user_id))
+            await asyncio.sleep(1)
 
         for guild_id, user_id in users_to_sync:
             guild = self.bot.get_guild(guild_id)
