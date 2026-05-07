@@ -286,6 +286,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         self._guild_world_cache: Dict[str, Dict[str, int]] = {}
         self._guild_world_cache_at: Dict[str, datetime] = {}
         self._sheet_cache: Dict[str, AllianceRoster] = {}
+        self._sheet_cache_at: Dict[str, datetime] = {}
         self._poster_loop.start()
 
     async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -525,13 +526,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         return sorted(predictions, key=lambda item: item.tier)
 
     async def _fetch_alliances(self, sheet_name: str) -> AllianceRoster:
-        if sheet_name in self._sheet_cache:
-            return self._sheet_cache[sheet_name]
+        now = datetime.now(timezone.utc)
+        cached = self._sheet_cache.get(sheet_name)
+        cached_at = self._sheet_cache_at.get(sheet_name)
+        if cached is not None and cached_at and (now - cached_at).total_seconds() < 21600:
+            return cached
         try:
             text = await self._fetch_text(SHEET_URL, params={"tqx": "out:csv", "sheet": sheet_name})
         except ValueError:
             roster = AllianceRoster(alliances=[], solo_guilds=[])
             self._sheet_cache[sheet_name] = roster
+            self._sheet_cache_at[sheet_name] = now
             return roster
 
         reader = csv.reader(io.StringIO(text))
@@ -574,6 +579,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
 
         roster = AllianceRoster(alliances=alliances, solo_guilds=solo_guilds)
         self._sheet_cache[sheet_name] = roster
+        self._sheet_cache_at[sheet_name] = now
         return roster
 
     async def _resolve_team_alliances(self, world_ids: Sequence[int]) -> AllianceRoster:
