@@ -1,6 +1,7 @@
 # Local environment configuration
 .env
 .env.release
+release.json
 
 # PM2
 ecosystem.config.js
