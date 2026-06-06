@@ -110,9 +110,26 @@ class UpdateNotesCog(commands.Cog):
                 )
                 continue
 
-            new_entries = self._resolve_new_entries(
+            new_entries, boundary_found = self._resolve_new_entries(
                 entries, status.last_entry_id, status.last_entry_published_at
             )
+
+            if not boundary_found:
+                # The recorded update scrolled off the wiki page, so we can no
+                # longer tell what was already posted. Re-anchor silently to the
+                # latest entry instead of re-posting the whole page (spam).
+                latest = entries[0]
+                status.last_entry_id = latest.entry_id
+                status.last_entry_published_at = latest.published_at
+                self.bot.storage.save_update_notes_status(guild.id, status)
+                LOGGER.info(
+                    "Update notes boundary for guild %s scrolled off the page; "
+                    "re-anchored to %s without posting",
+                    guild.id,
+                    latest.entry_id,
+                )
+                continue
+
             if not new_entries:
                 continue
 
@@ -238,26 +255,39 @@ class UpdateNotesCog(commands.Cog):
         entries: Sequence[PatchNotesEntry],
         last_entry_id: Optional[str],
         last_entry_published_at: Optional[str],
-    ) -> List[PatchNotesEntry]:
+    ) -> "tuple[List[PatchNotesEntry], bool]":
+        """Return ``(new_entries_oldest_first, boundary_found)``.
+
+        ``boundary_found`` is ``False`` when the previously recorded entry can no
+        longer be located on the page (it scrolled off). The wiki "Game updates"
+        page only lists the most recent handful of updates, so an old boundary
+        eventually disappears. When that happens we cannot tell which entries
+        were already posted, and returning the whole page would re-post every
+        visible update — the caller re-anchors instead.
+        """
         if not entries:
-            return []
+            return [], True
 
         collected: List[PatchNotesEntry] = []
         cutoff = self._parse_timestamp(last_entry_published_at)
+        # With no recorded boundary there is nothing to locate (fresh seed).
+        boundary_found = not last_entry_id
         for entry in entries:
             if last_entry_id and (
                 entry.entry_id == last_entry_id
                 or last_entry_id in entry.legacy_entry_ids
             ):
+                boundary_found = True
                 break
 
             entry_timestamp = self._parse_timestamp(entry.published_at)
             if cutoff and entry_timestamp and entry_timestamp <= cutoff:
+                boundary_found = True
                 break
 
             collected.append(entry)
 
-        return list(reversed(collected))
+        return list(reversed(collected)), boundary_found
 
     async def _resolve_channel(
         self, guild: discord.Guild, channel_id: int
