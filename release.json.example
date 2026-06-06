@@ -1,0 +1,23 @@
+{
+  "hosts": [
+    {
+      "name": "piclock",
+      "ssh_host": "piclock.local",
+      "ssh_user": "piclock",
+      "remote_dir": "/home/piclock/gw2_tools",
+      "pm2_app": "axitools-bot",
+      "ssh_auth_mode": "onepassword",
+      "ssh_key_path": "~/.ssh/id_ed25519",
+      "onepassword_agent_sock": "~/.1password/agent.sock"
+    },
+    {
+      "name": "backup",
+      "ssh_host": "backup.local",
+      "ssh_user": "deploy",
+      "remote_dir": "/home/deploy/gw2_tools",
+      "pm2_app": "axitools-bot",
+      "ssh_auth_mode": "key",
+      "ssh_key_path": "~/.ssh/id_ed25519"
+    }
+  ]
+}
