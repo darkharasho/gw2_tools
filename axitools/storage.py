@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import unicodedata
 import uuid
@@ -1951,4 +1952,10 @@ class StorageManager:
         return True
 
 
-DEFAULT_STORAGE_ROOT = Path("axitools") / "data"
+# Runtime state must live OUTSIDE the repository so it is not reset to a stale
+# committed snapshot on each deploy. Set AXITOOLS_DATA_DIR to a persistent path
+# in production; the relative fallback is for local development only.
+_DATA_DIR_ENV = os.getenv("AXITOOLS_DATA_DIR")
+DEFAULT_STORAGE_ROOT = (
+    Path(_DATA_DIR_ENV) if _DATA_DIR_ENV else Path("axitools") / "data"
+)

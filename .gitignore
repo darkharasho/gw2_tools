@@ -165,8 +165,9 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-# Project data storage
+# Project data storage (runtime per-guild state — must never be committed)
 gw2_tools_bot/data/
+axitools/data/
 /data/
 
 # Pyre type checker
