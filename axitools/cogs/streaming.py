@@ -134,7 +134,7 @@ async def _resolve_youtube_channel(
     """Resolve channel input to (channel_id, display_name). Returns None if not found."""
     # Strip protocol/domain
     cleaned = channel_input.strip()
-    for prefix in ("https://", "http://", "www.", "youtube.com/", "youtu.be/"):
+    for prefix in ("https://", "http://", "www.", "m.youtube.com/", "youtube.com/", "youtu.be/"):
         if cleaned.startswith(prefix):
             cleaned = cleaned[len(prefix):]
 

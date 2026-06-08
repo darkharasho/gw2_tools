@@ -274,6 +274,7 @@ async def test_resolve_youtube_channel_from_uc_id():
     assert result is not None
     channel_id, display_name = result
     assert channel_id == "UCvC_LIfovqvkalSolejNlrQ"
+    assert display_name == "ArenaNet"  # add this line
 
 
 @pytest.mark.asyncio
