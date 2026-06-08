@@ -104,7 +104,7 @@ async def _fetch_twitch_stream(
     return None
 
 
-def _build_twitch_live_embed(stream: dict) -> discord.Embed:
+def _build_twitch_live_embed(stream: dict, *, avatar_url: Optional[str] = None) -> discord.Embed:
     login = stream["user_login"]
     display_name = stream["user_name"]
     title = stream["title"]
@@ -120,6 +120,8 @@ def _build_twitch_live_embed(stream: dict) -> discord.Embed:
     )
     embed.add_field(name="Game", value=game, inline=True)
     embed.add_field(name="Viewers", value=f"{viewers:,}", inline=True)
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     if thumbnail:
         embed.set_image(url=thumbnail)
     embed.set_footer(text="Twitch", icon_url=TWITCH_ICON_URL)
@@ -237,7 +239,9 @@ def _build_youtube_live_embed(details: dict, *, avatar_url: Optional[str] = None
         url=f"https://youtube.com/watch?v={video_id}",
         color=YOUTUBE_COLOUR,
     )
-    embed.set_author(name=f"🔴 {channel_name} is live on YouTube!", icon_url=avatar_url or YOUTUBE_ICON_URL)
+    embed.set_author(name=f"🔴 {channel_name} is live on YouTube!", icon_url=YOUTUBE_ICON_URL)
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     embed.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
     embed.set_footer(text="YouTube", icon_url=YOUTUBE_ICON_URL)
     return embed
@@ -258,7 +262,9 @@ def _build_youtube_video_embed(details: dict, *, is_vod: bool = False, avatar_ur
         url=f"https://youtube.com/watch?v={video_id}",
         color=YOUTUBE_COLOUR,
     )
-    embed.set_author(name=f"📺 {channel_name} {label}", icon_url=avatar_url or YOUTUBE_ICON_URL)
+    embed.set_author(name=f"📺 {channel_name} {label}", icon_url=YOUTUBE_ICON_URL)
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     if published_at:
         embed.add_field(name="Published", value=published_at[:10], inline=True)
     embed.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
@@ -333,7 +339,8 @@ class StreamingCog(commands.GroupCog, name="stream"):
         if is_now_live and not sub.is_live:
             channel = guild.get_channel(sub.discord_channel_id)
             if channel and isinstance(channel, discord.TextChannel):
-                embed = _build_twitch_live_embed(stream)
+                avatar = await self._fetch_twitch_avatar(session, sub.channel_id)
+                embed = _build_twitch_live_embed(stream, avatar_url=avatar)
                 content = f"<@&{sub.ping_role_id}>" if sub.ping_role_id else None
                 await channel.send(content=content, embed=embed)
             return replace(sub, is_live=True, last_live_at=utcnow())
@@ -594,9 +601,10 @@ class StreamingCog(commands.GroupCog, name="stream"):
         session = await self._get_session()
 
         if sub.platform == "twitch":
+            avatar = await self._fetch_twitch_avatar(session, sub.channel_id)
             stream = await _fetch_twitch_stream(session, self._twitch_tokens, sub.channel_id)
             if stream:
-                embed = _build_twitch_live_embed(stream)
+                embed = _build_twitch_live_embed(stream, avatar_url=avatar)
             else:
                 embed = _build_twitch_live_embed({
                     "user_login": sub.channel_id,
@@ -605,7 +613,7 @@ class StreamingCog(commands.GroupCog, name="stream"):
                     "game_name": "Test Game",
                     "viewer_count": 0,
                     "thumbnail_url": "",
-                })
+                }, avatar_url=avatar)
         else:
             avatar = await self._fetch_youtube_avatar(session, sub.channel_id)
             entries = await _fetch_youtube_rss(session, sub.channel_id)
