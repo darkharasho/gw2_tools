@@ -340,7 +340,14 @@ class StreamingCog(commands.GroupCog, name="stream"):
         # Check if a tracked live stream has ended
         if sub.is_live and sub.last_vod_id:
             video_id = _youtube_video_id(sub.last_vod_id)
-            if video_id and YOUTUBE_API_KEY:
+            if not YOUTUBE_API_KEY:
+                LOGGER.warning(
+                    "YouTube subscription '%s' in guild %s is marked live but YOUTUBE_API_KEY is not set; "
+                    "cannot detect stream end",
+                    sub.name,
+                    getattr(sub, "channel_id", "?"),
+                )
+            elif video_id:
                 details = await _fetch_youtube_video_details(session, video_id, YOUTUBE_API_KEY)
                 if details:
                     broadcast_content = details["snippet"].get("liveBroadcastContent", "none")
@@ -373,7 +380,7 @@ class StreamingCog(commands.GroupCog, name="stream"):
 
         channel = guild.get_channel(sub.discord_channel_id)
         if channel and isinstance(channel, discord.TextChannel):
-            is_live = details and details["snippet"].get("liveBroadcastContent") == "live" if details else False
+            is_live = bool(details and details["snippet"].get("liveBroadcastContent") == "live")
             embed = _build_youtube_live_embed(details) if is_live else _build_youtube_video_embed(
                 details or {"id": video_id, "snippet": {"title": latest_entry.get("title", ""), "channelTitle": sub.channel_display_name, "publishedAt": ""}},
                 is_vod=False,
