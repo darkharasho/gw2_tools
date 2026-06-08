@@ -425,6 +425,31 @@ async def test_relink_enable_requires_guild_and_channel(mock_bot_alliance):
 
 
 @pytest.mark.asyncio
+async def test_relink_enable_requires_guild_name(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_id = "abc123"
+    config.alliance_channel_id = 999
+    # alliance_guild_name is None
+
+    mock_bot_alliance.ensure_authorised = AsyncMock(return_value=True)
+    mock_bot_alliance.get_config = MagicMock(return_value=config)
+
+    interaction = MagicMock()
+    interaction.guild = MagicMock()
+    interaction.guild.id = 1
+    interaction.response.send_message = AsyncMock()
+
+    await cog.relink_enable.callback(cog, interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    _, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
 async def test_relink_enable_primes_last_server(mock_bot_alliance):
     cog = AllianceMatchupCog(mock_bot_alliance)
     cog._poster_loop.cancel()

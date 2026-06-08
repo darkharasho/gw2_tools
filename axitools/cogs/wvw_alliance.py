@@ -1228,7 +1228,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             return
         assert interaction.guild is not None
         config = self.bot.get_config(interaction.guild.id)
-        if not config.alliance_guild_id or not config.alliance_channel_id:
+        if not config.alliance_guild_id or not config.alliance_channel_id or not config.alliance_guild_name:
             await interaction.response.send_message(
                 "Set the alliance guild (`/alliance setguild`) and channel (`/alliance setchannel`) first.",
                 ephemeral=True,
