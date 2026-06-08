@@ -65,6 +65,67 @@ class _TwitchTokenManager:
         }
 
 
+async def _fetch_twitch_user(
+    session: aiohttp.ClientSession,
+    tokens: _TwitchTokenManager,
+    login: str,
+) -> Optional[dict]:
+    token = await tokens.get_token(session)
+    async with session.get(
+        "https://api.twitch.tv/helix/users",
+        params={"login": login},
+        headers=tokens.auth_headers(token),
+    ) as resp:
+        resp.raise_for_status()
+        data = await resp.json()
+        items = data.get("data", [])
+        return items[0] if items else None
+
+
+async def _fetch_twitch_stream(
+    session: aiohttp.ClientSession,
+    tokens: _TwitchTokenManager,
+    login: str,
+) -> Optional[dict]:
+    token = await tokens.get_token(session)
+    for attempt in range(2):
+        async with session.get(
+            "https://api.twitch.tv/helix/streams",
+            params={"user_login": login},
+            headers=tokens.auth_headers(token),
+        ) as resp:
+            if resp.status == 401 and attempt == 0:
+                token = await tokens.refresh_token(session)
+                continue
+            resp.raise_for_status()
+            data = await resp.json()
+            items = data.get("data", [])
+            return items[0] if items else None
+    return None
+
+
+def _build_twitch_live_embed(stream: dict) -> discord.Embed:
+    login = stream["user_login"]
+    display_name = stream["user_name"]
+    title = stream["title"]
+    game = stream.get("game_name", "Unknown")
+    viewers = stream.get("viewer_count", 0)
+    thumbnail = stream.get("thumbnail_url", "").replace("{width}", "1280").replace("{height}", "720")
+
+    embed = discord.Embed(
+        title=f"🔴 {display_name} is live on Twitch!",
+        description=title,
+        url=f"https://twitch.tv/{login}",
+        color=TWITCH_COLOUR,
+    )
+    embed.add_field(name="Game", value=game, inline=True)
+    embed.add_field(name="Viewers", value=f"{viewers:,}", inline=True)
+    if thumbnail:
+        embed.set_image(url=thumbnail)
+    embed.set_footer(text="Twitch", icon_url=TWITCH_ICON_URL)
+    return embed
+
+
 class StreamingCog(commands.GroupCog, name="stream"):
     """Notify Discord channels when YouTube channels or Twitch streamers go live."""
 
@@ -126,7 +187,22 @@ class StreamingCog(commands.GroupCog, name="stream"):
     async def _poll_twitch(
         self, guild: discord.Guild, sub: StreamSubscription, session: aiohttp.ClientSession
     ) -> StreamSubscription:
-        return sub  # implemented in Task 3
+        stream = await _fetch_twitch_stream(session, self._twitch_tokens, sub.channel_id)
+        is_now_live = stream is not None
+
+        if is_now_live and not sub.is_live:
+            channel = guild.get_channel(sub.discord_channel_id)
+            if channel and isinstance(channel, discord.TextChannel):
+                embed = _build_twitch_live_embed(stream)
+                content = f"<@&{sub.ping_role_id}>" if sub.ping_role_id else None
+                await channel.send(content=content, embed=embed)
+            from ..storage import utcnow
+            return replace(sub, is_live=True, last_live_at=utcnow())
+
+        if not is_now_live and sub.is_live:
+            return replace(sub, is_live=False)
+
+        return sub
 
     async def _poll_youtube(
         self, guild: discord.Guild, sub: StreamSubscription, session: aiohttp.ClientSession
