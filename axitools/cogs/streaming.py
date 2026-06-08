@@ -391,6 +391,112 @@ class StreamingCog(commands.GroupCog, name="stream"):
 
         return replace(sub, last_vod_id=latest_id)
 
+    @app_commands.command(name="add", description="Subscribe to a YouTube channel or Twitch streamer")
+    @app_commands.describe(
+        name="A short label for this subscription (e.g. arenanet)",
+        platform="The streaming platform",
+        channel="Channel name, @handle, or URL",
+        discord_channel="The Discord channel to post notifications in",
+    )
+    @app_commands.choices(platform=[
+        app_commands.Choice(name="Twitch", value="twitch"),
+        app_commands.Choice(name="YouTube", value="youtube"),
+    ])
+    async def stream_add(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        platform: app_commands.Choice[str],
+        channel: str,
+        discord_channel: discord.TextChannel,
+    ) -> None:
+        await self._stream_add(interaction, name, platform.value, channel, discord_channel)
+
+    async def _stream_add(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        platform: str,
+        channel: str,
+        discord_channel: discord.TextChannel,
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        session = await self._get_session()
+
+        existing = self.bot.storage.find_stream_subscription(interaction.guild.id, name)
+        if existing:
+            await interaction.followup.send(
+                f"A subscription named **{name}** already exists. Use `/stream update` to modify it.",
+                ephemeral=True,
+            )
+            return
+
+        if platform == "twitch":
+            if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
+                await interaction.followup.send(
+                    "Twitch credentials are not configured on this bot.", ephemeral=True
+                )
+                return
+            user = await _fetch_twitch_user(session, self._twitch_tokens, channel.strip())
+            if not user:
+                await interaction.followup.send(
+                    f"Could not find Twitch channel **{channel}**. Check the channel name and try again.",
+                    ephemeral=True,
+                )
+                return
+            login = user["login"]
+            display_name = user["display_name"]
+            # Prime: check current live state so we don't immediately notify
+            stream = await _fetch_twitch_stream(session, self._twitch_tokens, login)
+            is_live = stream is not None
+            sub = StreamSubscription(
+                name=name,
+                platform="twitch",
+                channel_id=login,
+                channel_display_name=display_name,
+                discord_channel_id=discord_channel.id,
+                is_live=is_live,
+            )
+
+        elif platform == "youtube":
+            if not YOUTUBE_API_KEY:
+                await interaction.followup.send(
+                    "YouTube API key is not configured on this bot.", ephemeral=True
+                )
+                return
+            result = await _resolve_youtube_channel(session, channel.strip(), YOUTUBE_API_KEY)
+            if not result:
+                await interaction.followup.send(
+                    f"Could not find YouTube channel **{channel}**. Provide a `@handle`, channel URL, or `UC...` channel ID.",
+                    ephemeral=True,
+                )
+                return
+            channel_id, display_name = result
+            # Prime: get latest video ID so we don't post old content
+            entries = await _fetch_youtube_rss(session, channel_id)
+            last_vod_id = entries[0].get("id") if entries else None
+            sub = StreamSubscription(
+                name=name,
+                platform="youtube",
+                channel_id=channel_id,
+                channel_display_name=display_name,
+                discord_channel_id=discord_channel.id,
+                last_vod_id=last_vod_id,
+                is_live=False,
+            )
+        else:
+            await interaction.followup.send(f"Unknown platform: {platform}", ephemeral=True)
+            return
+
+        self.bot.storage.upsert_stream_subscription(interaction.guild.id, sub)
+        platform_label = "Twitch" if platform == "twitch" else "YouTube"
+        await interaction.followup.send(
+            f"✓ Subscribed to **{display_name}** on {platform_label}. Notifications will post in {discord_channel.mention}.",
+            ephemeral=True,
+        )
+
 
 async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(StreamingCog(bot))

@@ -483,3 +483,114 @@ def test_youtube_video_id_from_entry_id():
     assert _youtube_video_id("yt:video:abc123") == "abc123"
     assert _youtube_video_id("yt:video:XYZ_-abc") == "XYZ_-abc"
     assert _youtube_video_id("not_a_yt_id") is None
+
+
+# ---------------------------------------------------------------------------
+# /stream add command
+# ---------------------------------------------------------------------------
+
+import discord
+
+
+def _make_bot(tmp_path):
+    from axitools.storage import StorageManager
+    bot = MagicMock()
+    bot.storage = StorageManager(tmp_path)
+    bot.ensure_authorised = AsyncMock(return_value=True)
+    return bot
+
+
+def _make_interaction(guild_id=123, channel_id=456):
+    interaction = MagicMock()
+    interaction.guild = MagicMock()
+    interaction.guild.id = guild_id
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+    return interaction
+
+
+@pytest.mark.asyncio
+async def test_stream_add_twitch_saves_subscription(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+
+    bot = _make_bot(tmp_path)
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+    cog._twitch_tokens = MagicMock()
+    cog._twitch_tokens.get_token = AsyncMock(return_value="tok")
+    cog._twitch_tokens.auth_headers = MagicMock(return_value={})
+    cog._get_session = AsyncMock()
+
+    interaction = _make_interaction()
+    discord_channel = MagicMock(spec=discord.TextChannel)
+    discord_channel.id = 789
+
+    with aioresponses() as m:
+        import aiohttp
+        session = aiohttp.ClientSession()
+        cog._get_session.return_value = session
+
+        m.get(
+            "https://api.twitch.tv/helix/users?login=arenanet",
+            payload={"data": [{"login": "arenanet", "display_name": "ArenaNet", "id": "1"}]},
+        )
+        # Prime: fetch stream (offline at add time)
+        m.get(
+            "https://api.twitch.tv/helix/streams?user_login=arenanet",
+            payload={"data": []},
+        )
+
+        with patch("axitools.cogs.streaming.TWITCH_CLIENT_ID", "fake_id"), \
+             patch("axitools.cogs.streaming.TWITCH_CLIENT_SECRET", "fake_secret"):
+            await cog._stream_add(interaction, "mystream", "twitch", "arenanet", discord_channel)
+        await session.close()
+
+    subs = bot.storage.get_stream_subscriptions(123)
+    assert len(subs) == 1
+    assert subs[0].name == "mystream"
+    assert subs[0].platform == "twitch"
+    assert subs[0].channel_id == "arenanet"
+    assert subs[0].channel_display_name == "ArenaNet"
+    assert subs[0].discord_channel_id == 789
+    assert subs[0].is_live is False
+
+
+@pytest.mark.asyncio
+async def test_stream_add_twitch_unknown_channel_sends_error(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+
+    bot = _make_bot(tmp_path)
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+    cog._twitch_tokens = MagicMock()
+    cog._twitch_tokens.get_token = AsyncMock(return_value="tok")
+    cog._twitch_tokens.auth_headers = MagicMock(return_value={})
+    cog._get_session = AsyncMock()
+
+    interaction = _make_interaction()
+    discord_channel = MagicMock(spec=discord.TextChannel)
+    discord_channel.id = 789
+
+    with aioresponses() as m:
+        import aiohttp
+        session = aiohttp.ClientSession()
+        cog._get_session.return_value = session
+
+        m.get(
+            "https://api.twitch.tv/helix/users?login=nobody",
+            payload={"data": []},
+        )
+        with patch("axitools.cogs.streaming.TWITCH_CLIENT_ID", "fake_id"), \
+             patch("axitools.cogs.streaming.TWITCH_CLIENT_SECRET", "fake_secret"):
+            await cog._stream_add(interaction, "test", "twitch", "nobody", discord_channel)
+        await session.close()
+
+    subs = bot.storage.get_stream_subscriptions(123)
+    assert len(subs) == 0
+    # stream_add defers then uses followup.send for all messages
+    interaction.followup.send.assert_called()
+    call_text = str(interaction.followup.send.call_args)
+    assert "not found" in call_text.lower() or "could not" in call_text.lower()
