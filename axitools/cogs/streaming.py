@@ -585,58 +585,6 @@ class StreamingCog(commands.GroupCog, name="stream"):
         for i in range(0, len(embeds), 10):
             await interaction.followup.send(embeds=embeds[i:i + 10], ephemeral=True)
 
-    _TEST_USER_ID = 201537071804973056
-
-    @app_commands.command(name="test", description="Preview a stream notification embed (dev only)")
-    @app_commands.describe(name="The subscription name to preview")
-    async def stream_test(self, interaction: discord.Interaction, name: str) -> None:
-        if interaction.user.id != self._TEST_USER_ID:
-            await interaction.response.send_message("Not authorised.", ephemeral=True)
-            return
-        sub = self.bot.storage.find_stream_subscription(interaction.guild.id, name)
-        if not sub:
-            await interaction.response.send_message(f"No subscription named **{name}** found.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        session = await self._get_session()
-
-        if sub.platform == "twitch":
-            avatar = await self._fetch_twitch_avatar(session, sub.channel_id)
-            stream = await _fetch_twitch_stream(session, self._twitch_tokens, sub.channel_id)
-            if stream:
-                embed = _build_twitch_live_embed(stream, avatar_url=avatar)
-            else:
-                embed = _build_twitch_live_embed({
-                    "user_login": sub.channel_id,
-                    "user_name": sub.channel_display_name,
-                    "title": "[Test] Stream title would appear here",
-                    "game_name": "Test Game",
-                    "viewer_count": 0,
-                    "thumbnail_url": "",
-                }, avatar_url=avatar)
-        else:
-            avatar = await self._fetch_youtube_avatar(session, sub.channel_id)
-            entries = await _fetch_youtube_rss(session, sub.channel_id)
-            if entries:
-                video_id = _youtube_video_id(entries[0].get("id", ""))
-                details = await _fetch_youtube_video_details(session, video_id, YOUTUBE_API_KEY) if video_id and YOUTUBE_API_KEY else None
-            else:
-                details = None
-            if details:
-                is_live = details["snippet"].get("liveBroadcastContent") == "live"
-                embed = _build_youtube_live_embed(details, avatar_url=avatar) if is_live else _build_youtube_video_embed(details, avatar_url=avatar)
-            else:
-                embed = _build_youtube_video_embed({
-                    "id": "dQw4w9WgXcQ",
-                    "snippet": {
-                        "title": "[Test] Video title would appear here",
-                        "channelTitle": sub.channel_display_name,
-                        "publishedAt": "",
-                    },
-                }, avatar_url=avatar)
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
     @app_commands.command(name="remove", description="Remove a stream subscription")
     @app_commands.describe(name="The subscription name to remove")
     async def stream_remove(self, interaction: discord.Interaction, name: str) -> None:
