@@ -1290,34 +1290,6 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         self.bot.save_config(interaction.guild.id, config)
         await interaction.response.send_message("Relink announcements disabled.", ephemeral=True)
 
-    _TEST_USER_ID = 201537071804973056
-
-    @relink_group.command(name="test", description="Preview a relink announcement embed (dev only)")
-    async def relink_test(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self._TEST_USER_ID:
-            await interaction.response.send_message("Not authorised.", ephemeral=True)
-            return
-        assert interaction.guild is not None
-        config = self.bot.get_config(interaction.guild.id)
-        await interaction.response.defer(ephemeral=True)
-        tab = await self._find_relink_server_tab(config)
-        if tab is None:
-            await interaction.followup.send(
-                "Guild not found in any sheet tab — cannot build a preview.", ephemeral=True
-            )
-            return
-        world_id = next(
-            (wid for wid, name in WVW_ALLIANCE_SHEET_TABS.items() if name == tab), None
-        )
-        if world_id is None:
-            await interaction.followup.send(
-                f"Tab `{tab}` has no matching world ID — cannot build a preview.", ephemeral=True
-            )
-            return
-        roster = await self._fetch_alliances(tab)
-        server_name = WVW_SERVER_NAMES.get(world_id, tab)
-        embed = self._build_relink_embed(server_name=server_name, roster=roster, world_id=world_id)
-        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: AxiToolsBot) -> None:
