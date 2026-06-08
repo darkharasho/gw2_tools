@@ -267,3 +267,16 @@ async def test_find_relink_server_tab_returns_none_when_not_found(mock_bot_allia
     result = await cog._find_relink_server_tab(config)
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_find_relink_server_tab_returns_none_for_unknown_world_id(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    cog._resolve_prediction_world_from_sheet = AsyncMock(return_value=99999)  # not in WVW_ALLIANCE_SHEET_TABS
+
+    result = await cog._find_relink_server_tab(config)
+
+    assert result is None
