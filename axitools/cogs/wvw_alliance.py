@@ -280,6 +280,8 @@ class _AllianceCloseButton(discord.ui.Button[AllianceScheduleView]):
 class AllianceMatchupCog(commands.GroupCog, name="alliance"):
     """Configure and post WvW matchup summaries for alliance guilds."""
 
+    relink_group = app_commands.Group(name="relink", description="Configure server link announcements.")
+
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
@@ -1211,6 +1213,49 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 "Unable to post the matchup right now. Check bot permissions and logs for details.",
                 ephemeral=True,
             )
+
+
+    @relink_group.command(name="enable", description="Enable server link announcements when the guild's server changes.")
+    async def relink_enable(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        if not config.alliance_guild_id or not config.alliance_channel_id:
+            await interaction.response.send_message(
+                "Set the alliance guild (`/alliance setguild`) and channel (`/alliance setchannel`) first.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        tab = await self._find_relink_server_tab(config)
+        config.alliance_relink_enabled = True
+        config.alliance_relink_last_server = tab
+        self.bot.save_config(interaction.guild.id, config)
+        if tab:
+            world_id = next(
+                (wid for wid, name in WVW_ALLIANCE_SHEET_TABS.items() if name == tab), None
+            )
+            server_name = WVW_SERVER_NAMES.get(world_id, tab) if world_id else tab
+            await interaction.followup.send(
+                f"Relink announcements enabled. Current server: **{server_name}**.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "Relink announcements enabled. Guild not currently found in sheet — will announce when found.",
+                ephemeral=True,
+            )
+
+    @relink_group.command(name="disable", description="Disable server link announcements.")
+    async def relink_disable(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        config.alliance_relink_enabled = False
+        self.bot.save_config(interaction.guild.id, config)
+        await interaction.response.send_message("Relink announcements disabled.", ephemeral=True)
 
 
 async def setup(bot: AxiToolsBot) -> None:

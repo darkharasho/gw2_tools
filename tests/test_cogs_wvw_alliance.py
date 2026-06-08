@@ -399,3 +399,80 @@ async def test_check_relink_skips_when_world_id_not_in_tab_map(mock_bot_alliance
     channel.send.assert_not_awaited()
     assert config.alliance_relink_last_server == "RR"  # state not updated
     mock_bot_alliance.save_config.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_relink_enable_requires_guild_and_channel(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    # alliance_guild_id and alliance_channel_id both None
+    mock_bot_alliance.ensure_authorised = AsyncMock(return_value=True)
+    mock_bot_alliance.get_config = MagicMock(return_value=config)
+
+    interaction = MagicMock()
+    interaction.guild = MagicMock()
+    interaction.guild.id = 1
+    interaction.response.send_message = AsyncMock()
+
+    await cog.relink_enable.callback(cog, interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    args, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+    assert "setguild" in (args[0] if args else kwargs.get("content", ""))
+
+
+@pytest.mark.asyncio
+async def test_relink_enable_primes_last_server(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_id = "abc123"
+    config.alliance_channel_id = 999
+    config.alliance_guild_name = "My Guild [MG]"
+
+    mock_bot_alliance.ensure_authorised = AsyncMock(return_value=True)
+    mock_bot_alliance.get_config = MagicMock(return_value=config)
+    mock_bot_alliance.save_config = MagicMock()
+
+    cog._find_relink_server_tab = AsyncMock(return_value="HoJ")
+
+    interaction = MagicMock()
+    interaction.guild = MagicMock()
+    interaction.guild.id = 1
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.relink_enable.callback(cog, interaction)
+
+    assert config.alliance_relink_enabled is True
+    assert config.alliance_relink_last_server == "HoJ"
+    mock_bot_alliance.save_config.assert_called_once_with(1, config)
+
+
+@pytest.mark.asyncio
+async def test_relink_disable_clears_flag(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_relink_enabled = True
+    config.alliance_relink_last_server = "HoJ"
+
+    mock_bot_alliance.ensure_authorised = AsyncMock(return_value=True)
+    mock_bot_alliance.get_config = MagicMock(return_value=config)
+    mock_bot_alliance.save_config = MagicMock()
+
+    interaction = MagicMock()
+    interaction.guild = MagicMock()
+    interaction.guild.id = 1
+    interaction.response.send_message = AsyncMock()
+
+    await cog.relink_disable.callback(cog, interaction)
+
+    assert config.alliance_relink_enabled is False
+    assert config.alliance_relink_last_server == "HoJ"  # preserved
+    mock_bot_alliance.save_config.assert_called_once_with(1, config)
