@@ -1158,6 +1158,13 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             ),
             inline=False,
         )
+        relink_status = "Enabled" if config.alliance_relink_enabled else "Disabled"
+        relink_server = config.alliance_relink_last_server or "Not yet detected"
+        embed.add_field(
+            name="Relink Announcements",
+            value=f"{relink_status} — last server: **{relink_server}**",
+            inline=False,
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(

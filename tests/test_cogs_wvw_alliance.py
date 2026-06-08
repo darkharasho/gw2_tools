@@ -476,3 +476,34 @@ async def test_relink_disable_clears_flag(mock_bot_alliance):
     assert config.alliance_relink_enabled is False
     assert config.alliance_relink_last_server == "HoJ"  # preserved
     mock_bot_alliance.save_config.assert_called_once_with(1, config)
+
+
+@pytest.mark.asyncio
+async def test_status_shows_relink_state(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_name = "My Guild [MG]"
+    config.alliance_channel_id = 555
+    config.alliance_relink_enabled = True
+    config.alliance_relink_last_server = "HoJ"
+
+    mock_bot_alliance.get_config = MagicMock(return_value=config)
+
+    interaction = MagicMock()
+    interaction.guild = MagicMock()
+    interaction.guild.id = 1
+    interaction.guild.get_channel = MagicMock(return_value=None)
+    interaction.response.send_message = AsyncMock()
+
+    await cog.status.callback(cog, interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    _, kwargs = interaction.response.send_message.call_args
+    embed = kwargs["embed"]
+    field_names = [f.name for f in embed.fields]
+    assert "Relink Announcements" in field_names
+    relink_field = next(f for f in embed.fields if f.name == "Relink Announcements")
+    assert "Enabled" in relink_field.value
+    assert "HoJ" in relink_field.value
