@@ -317,3 +317,169 @@ async def test_resolve_youtube_channel_returns_none_for_unknown():
             result = await _resolve_youtube_channel(session, "@nobody", "test_key")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# YouTube RSS + video classification
+# ---------------------------------------------------------------------------
+
+YOUTUBE_RSS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015">
+  <entry>
+    <id>yt:video:abc123</id>
+    <title>My New Video</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=abc123"/>
+    <published>2026-06-07T12:00:00+00:00</published>
+    <author><name>ArenaNet</name></author>
+  </entry>
+</feed>"""
+
+
+@pytest.mark.asyncio
+async def test_fetch_youtube_rss_returns_entries():
+    from axitools.cogs.streaming import _fetch_youtube_rss
+    import aiohttp
+
+    with aioresponses() as m:
+        m.get(
+            "https://www.youtube.com/feeds/videos.xml?channel_id=UCvC",
+            body=YOUTUBE_RSS_XML,
+            content_type="application/atom+xml",
+        )
+        async with aiohttp.ClientSession() as session:
+            entries = await _fetch_youtube_rss(session, "UCvC")
+
+    assert len(entries) == 1
+    assert entries[0]["id"] == "yt:video:abc123"
+
+
+@pytest.mark.asyncio
+async def test_fetch_youtube_video_details_regular():
+    from axitools.cogs.streaming import _fetch_youtube_video_details
+    import aiohttp
+
+    payload = {
+        "items": [{
+            "id": "abc123",
+            "snippet": {
+                "title": "My Video",
+                "channelTitle": "ArenaNet",
+                "publishedAt": "2026-06-07T12:00:00Z",
+                "liveBroadcastContent": "none",
+            },
+        }]
+    }
+
+    with aioresponses() as m:
+        m.get(
+            "https://www.googleapis.com/youtube/v3/videos?part=snippet%2CliveStreamingDetails&id=abc123&key=testkey",
+            payload=payload,
+        )
+        async with aiohttp.ClientSession() as session:
+            details = await _fetch_youtube_video_details(session, "abc123", "testkey")
+
+    assert details is not None
+    assert details["snippet"]["title"] == "My Video"
+    assert details["snippet"]["liveBroadcastContent"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_fetch_youtube_video_details_live():
+    from axitools.cogs.streaming import _fetch_youtube_video_details
+    import aiohttp
+
+    payload = {
+        "items": [{
+            "id": "live456",
+            "snippet": {
+                "title": "Live Stream!",
+                "channelTitle": "ArenaNet",
+                "publishedAt": "2026-06-07T12:00:00Z",
+                "liveBroadcastContent": "live",
+            },
+            "liveStreamingDetails": {
+                "actualStartTime": "2026-06-07T12:00:00Z",
+            },
+        }]
+    }
+
+    with aioresponses() as m:
+        m.get(
+            "https://www.googleapis.com/youtube/v3/videos?part=snippet%2CliveStreamingDetails&id=live456&key=testkey",
+            payload=payload,
+        )
+        async with aiohttp.ClientSession() as session:
+            details = await _fetch_youtube_video_details(session, "live456", "testkey")
+
+    assert details["snippet"]["liveBroadcastContent"] == "live"
+    assert "liveStreamingDetails" in details
+
+
+def test_build_youtube_live_embed():
+    from axitools.cogs.streaming import _build_youtube_live_embed
+
+    details = {
+        "id": "live456",
+        "snippet": {
+            "title": "Live now!",
+            "channelTitle": "ArenaNet",
+            "liveBroadcastContent": "live",
+        },
+    }
+    embed = _build_youtube_live_embed(details)
+
+    assert "🔴" in embed.title
+    assert "ArenaNet" in embed.title
+    assert embed.url == "https://youtube.com/watch?v=live456"
+    assert embed.color.value == 0xFF0000
+    assert "live456" in embed.image.url
+
+
+def test_build_youtube_video_embed():
+    from axitools.cogs.streaming import _build_youtube_video_embed
+
+    details = {
+        "id": "abc123",
+        "snippet": {
+            "title": "New Video!",
+            "channelTitle": "ArenaNet",
+            "publishedAt": "2026-06-07T12:00:00Z",
+            "liveBroadcastContent": "none",
+        },
+    }
+    embed = _build_youtube_video_embed(details, is_vod=False)
+
+    assert "📺" in embed.title
+    assert "ArenaNet" in embed.title
+    assert "new video" in embed.title.lower()
+    assert embed.url == "https://youtube.com/watch?v=abc123"
+    assert embed.color.value == 0xFF0000
+
+
+def test_build_youtube_vod_embed():
+    from axitools.cogs.streaming import _build_youtube_video_embed
+
+    details = {
+        "id": "vod789",
+        "snippet": {
+            "title": "Last Night Stream",
+            "channelTitle": "ArenaNet",
+            "publishedAt": "2026-06-07T12:00:00Z",
+            "liveBroadcastContent": "none",
+        },
+        "liveStreamingDetails": {
+            "actualStartTime": "2026-06-07T10:00:00Z",
+            "actualEndTime": "2026-06-07T12:00:00Z",
+        },
+    }
+    embed = _build_youtube_video_embed(details, is_vod=True)
+
+    assert "vod" in embed.title.lower() or "VOD" in embed.title
+
+
+def test_youtube_video_id_from_entry_id():
+    from axitools.cogs.streaming import _youtube_video_id
+
+    assert _youtube_video_id("yt:video:abc123") == "abc123"
+    assert _youtube_video_id("yt:video:XYZ_-abc") == "XYZ_-abc"
+    assert _youtube_video_id("not_a_yt_id") is None

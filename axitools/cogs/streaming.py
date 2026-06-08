@@ -187,6 +187,76 @@ async def _fetch_youtube_channel_by_handle(
         return item["id"], item["snippet"]["title"]
 
 
+def _youtube_video_id(entry_id: str) -> Optional[str]:
+    if entry_id.startswith("yt:video:"):
+        return entry_id[len("yt:video:"):]
+    return None
+
+
+async def _fetch_youtube_rss(
+    session: aiohttp.ClientSession, channel_id: str
+) -> List[dict]:
+    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    async with session.get(url) as resp:
+        if resp.status != 200:
+            return []
+        text = await resp.text()
+    parsed = feedparser.parse(text)
+    return list(parsed.entries)
+
+
+async def _fetch_youtube_video_details(
+    session: aiohttp.ClientSession, video_id: str, api_key: str
+) -> Optional[dict]:
+    async with session.get(
+        "https://www.googleapis.com/youtube/v3/videos",
+        params={"part": "snippet,liveStreamingDetails", "id": video_id, "key": api_key},
+    ) as resp:
+        if resp.status != 200:
+            return None
+        data = await resp.json()
+        items = data.get("items", [])
+        return items[0] if items else None
+
+
+def _build_youtube_live_embed(details: dict) -> discord.Embed:
+    video_id = details["id"]
+    snippet = details["snippet"]
+    title = snippet["title"]
+    channel_name = snippet["channelTitle"]
+
+    embed = discord.Embed(
+        title=f"🔴 {channel_name} is live on YouTube!",
+        description=title,
+        url=f"https://youtube.com/watch?v={video_id}",
+        color=YOUTUBE_COLOUR,
+    )
+    embed.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+    embed.set_footer(text="YouTube", icon_url=YOUTUBE_ICON_URL)
+    return embed
+
+
+def _build_youtube_video_embed(details: dict, *, is_vod: bool = False) -> discord.Embed:
+    video_id = details["id"]
+    snippet = details["snippet"]
+    title = snippet["title"]
+    channel_name = snippet["channelTitle"]
+    published_at = snippet.get("publishedAt", "")
+
+    label = "posted a new VOD" if is_vod else "posted a new video"
+    embed = discord.Embed(
+        title=f"📺 {channel_name} {label}",
+        description=f"[{title}](https://youtube.com/watch?v={video_id})",
+        url=f"https://youtube.com/watch?v={video_id}",
+        color=YOUTUBE_COLOUR,
+    )
+    if published_at:
+        embed.add_field(name="Published", value=published_at[:10], inline=True)
+    embed.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+    embed.set_footer(text="YouTube", icon_url=YOUTUBE_ICON_URL)
+    return embed
+
+
 class StreamingCog(commands.GroupCog, name="stream"):
     """Notify Discord channels when YouTube channels or Twitch streamers go live."""
 
@@ -267,7 +337,52 @@ class StreamingCog(commands.GroupCog, name="stream"):
     async def _poll_youtube(
         self, guild: discord.Guild, sub: StreamSubscription, session: aiohttp.ClientSession
     ) -> StreamSubscription:
-        return sub  # implemented in Task 5
+        # Check if a tracked live stream has ended
+        if sub.is_live and sub.last_vod_id:
+            video_id = _youtube_video_id(sub.last_vod_id)
+            if video_id and YOUTUBE_API_KEY:
+                details = await _fetch_youtube_video_details(session, video_id, YOUTUBE_API_KEY)
+                if details:
+                    broadcast_content = details["snippet"].get("liveBroadcastContent", "none")
+                    ended = details.get("liveStreamingDetails", {}).get("actualEndTime")
+                    if broadcast_content != "live" and ended:
+                        channel = guild.get_channel(sub.discord_channel_id)
+                        if channel and isinstance(channel, discord.TextChannel):
+                            embed = _build_youtube_video_embed(details, is_vod=True)
+                            content = f"<@&{sub.ping_role_id}>" if sub.ping_role_id else None
+                            await channel.send(content=content, embed=embed)
+                        sub = replace(sub, is_live=False)
+
+        # Check RSS for new entries
+        entries = await _fetch_youtube_rss(session, sub.channel_id)
+        if not entries:
+            return sub
+
+        latest_entry = entries[0]
+        latest_id = latest_entry.get("id")
+        if not latest_id or latest_id == sub.last_vod_id:
+            return sub
+
+        video_id = _youtube_video_id(latest_id)
+        if not video_id:
+            return replace(sub, last_vod_id=latest_id)
+
+        details = None
+        if YOUTUBE_API_KEY:
+            details = await _fetch_youtube_video_details(session, video_id, YOUTUBE_API_KEY)
+
+        channel = guild.get_channel(sub.discord_channel_id)
+        if channel and isinstance(channel, discord.TextChannel):
+            is_live = details and details["snippet"].get("liveBroadcastContent") == "live" if details else False
+            embed = _build_youtube_live_embed(details) if is_live else _build_youtube_video_embed(
+                details or {"id": video_id, "snippet": {"title": latest_entry.get("title", ""), "channelTitle": sub.channel_display_name, "publishedAt": ""}},
+                is_vod=False,
+            )
+            content = f"<@&{sub.ping_role_id}>" if sub.ping_role_id else None
+            await channel.send(content=content, embed=embed)
+            return replace(sub, last_vod_id=latest_id, is_live=bool(is_live))
+
+        return replace(sub, last_vod_id=latest_id)
 
 
 async def setup(bot: AxiToolsBot) -> None:
