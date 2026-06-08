@@ -742,6 +742,46 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return f"{SHEET_EDIT_URL}#range={sheet_ref}"
         return None
 
+    def _build_relink_embed(self, *, server_name: str, roster: AllianceRoster, world_id: int) -> discord.Embed:
+        embed = discord.Embed(
+            description="# 🔗 New Server Link Announced",
+            color=BRAND_COLOUR,
+        )
+        embed.add_field(name="Server", value=server_name, inline=False)
+        roster_text = self._trim_field_value(self._format_alliance_list(roster))
+        embed.add_field(name="Roster", value=roster_text or "No roster data.", inline=False)
+        sheet_url = self._resolve_sheet_url([world_id])
+        if sheet_url:
+            embed.set_footer(text=sheet_url)
+        return embed
+
+    async def _check_relink(
+        self, guild: discord.Guild, channel: discord.TextChannel, config: GuildConfig
+    ) -> None:
+        tab = await self._find_relink_server_tab(config)
+        if tab is None:
+            LOGGER.warning("Relink check: guild not found in any sheet tab for Discord guild %s", guild.id)
+            return
+        if config.alliance_relink_last_server == tab:
+            return
+        if config.alliance_relink_last_server is not None:
+            world_id = next(
+                (wid for wid, name in WVW_ALLIANCE_SHEET_TABS.items() if name == tab), None
+            )
+            if world_id is not None:
+                roster = await self._fetch_alliances(tab)
+                server_name = WVW_SERVER_NAMES.get(world_id, tab)
+                embed = self._build_relink_embed(server_name=server_name, roster=roster, world_id=world_id)
+                try:
+                    await channel.send(embed=embed)
+                except discord.HTTPException:
+                    LOGGER.warning(
+                        "Failed to post relink announcement for Discord guild %s", guild.id, exc_info=True
+                    )
+                    return
+        config.alliance_relink_last_server = tab
+        self.bot.save_config(guild.id, config)
+
     def _calculate_team_confidence(
         self,
         teams: Sequence[MatchTeam],

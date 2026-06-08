@@ -280,3 +280,97 @@ async def test_find_relink_server_tab_returns_none_for_unknown_world_id(mock_bot
     result = await cog._find_relink_server_tab(config)
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_build_relink_embed_contains_server_and_roster(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    roster = AllianceRoster(
+        alliances=[("Renegades", ["Guild A", "Guild B"])],
+        solo_guilds=["Solo Guild"],
+    )
+
+    embed = cog._build_relink_embed(server_name="Hall of Judgement", roster=roster, world_id=11006)
+
+    assert "New Server Link Announced" in (embed.description or "")
+    field_names = [f.name for f in embed.fields]
+    assert "Server" in field_names
+    assert "Roster" in field_names
+    server_field = next(f for f in embed.fields if f.name == "Server")
+    assert "Hall of Judgement" in server_field.value
+
+
+@pytest.mark.asyncio
+async def test_check_relink_posts_when_server_changes(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_name = "My Guild [MG]"
+    config.alliance_relink_enabled = True
+    config.alliance_relink_last_server = "RR"  # was Rall's Rest
+
+    guild = MagicMock()
+    guild.id = 42
+    channel = MagicMock()
+    channel.send = AsyncMock()
+
+    roster = AllianceRoster(alliances=[("Alliance A", ["Guild X"])], solo_guilds=[])
+    cog._find_relink_server_tab = AsyncMock(return_value="HoJ")
+    cog._fetch_alliances = AsyncMock(return_value=roster)
+    cog._build_relink_embed = MagicMock(return_value=MagicMock())
+    mock_bot_alliance.save_config = MagicMock()
+
+    await cog._check_relink(guild, channel, config)
+
+    channel.send.assert_awaited_once()
+    assert config.alliance_relink_last_server == "HoJ"
+    mock_bot_alliance.save_config.assert_called_once_with(42, config)
+
+
+@pytest.mark.asyncio
+async def test_check_relink_no_post_when_server_unchanged(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_relink_last_server = "HoJ"
+
+    guild = MagicMock()
+    guild.id = 42
+    channel = MagicMock()
+    channel.send = AsyncMock()
+
+    cog._find_relink_server_tab = AsyncMock(return_value="HoJ")
+    mock_bot_alliance.save_config = MagicMock()
+
+    await cog._check_relink(guild, channel, config)
+
+    channel.send.assert_not_awaited()
+    mock_bot_alliance.save_config.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_relink_no_post_on_first_detection(mock_bot_alliance):
+    """last_server=None means this is the priming run; no post, just store."""
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_relink_last_server = None
+
+    guild = MagicMock()
+    guild.id = 42
+    channel = MagicMock()
+    channel.send = AsyncMock()
+
+    cog._find_relink_server_tab = AsyncMock(return_value="HoJ")
+    mock_bot_alliance.save_config = MagicMock()
+
+    await cog._check_relink(guild, channel, config)
+
+    channel.send.assert_not_awaited()
+    assert config.alliance_relink_last_server == "HoJ"
+    mock_bot_alliance.save_config.assert_called_once_with(42, config)
