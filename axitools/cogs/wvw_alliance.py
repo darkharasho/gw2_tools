@@ -1053,6 +1053,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 if not self._already_posted(config.alliance_last_actual_at, now):
                     LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
                     await self._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
+            if config.alliance_relink_enabled:
+                await self._check_relink(guild, channel, config)
 
     @_poster_loop.before_loop
     async def _before_loop(self) -> None:  # pragma: no cover - discord.py lifecycle
