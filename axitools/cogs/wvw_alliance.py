@@ -768,17 +768,21 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             world_id = next(
                 (wid for wid, name in WVW_ALLIANCE_SHEET_TABS.items() if name == tab), None
             )
-            if world_id is not None:
-                roster = await self._fetch_alliances(tab)
-                server_name = WVW_SERVER_NAMES.get(world_id, tab)
-                embed = self._build_relink_embed(server_name=server_name, roster=roster, world_id=world_id)
-                try:
-                    await channel.send(embed=embed)
-                except discord.HTTPException:
-                    LOGGER.warning(
-                        "Failed to post relink announcement for Discord guild %s", guild.id, exc_info=True
-                    )
-                    return
+            if world_id is None:
+                LOGGER.warning(
+                    "Relink check: tab %r has no matching world_id for Discord guild %s", tab, guild.id
+                )
+                return
+            roster = await self._fetch_alliances(tab)
+            server_name = WVW_SERVER_NAMES.get(world_id, tab)
+            embed = self._build_relink_embed(server_name=server_name, roster=roster, world_id=world_id)
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                LOGGER.warning(
+                    "Failed to post relink announcement for Discord guild %s", guild.id, exc_info=True
+                )
+                return
         config.alliance_relink_last_server = tab
         self.bot.save_config(guild.id, config)
 

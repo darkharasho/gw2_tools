@@ -374,3 +374,28 @@ async def test_check_relink_no_post_on_first_detection(mock_bot_alliance):
     channel.send.assert_not_awaited()
     assert config.alliance_relink_last_server == "HoJ"
     mock_bot_alliance.save_config.assert_called_once_with(42, config)
+
+
+@pytest.mark.asyncio
+async def test_check_relink_skips_when_world_id_not_in_tab_map(mock_bot_alliance):
+    """If the tab name has no matching world_id, log and return without updating state."""
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_relink_last_server = "RR"  # previous server
+
+    guild = MagicMock()
+    guild.id = 42
+    channel = MagicMock()
+    channel.send = AsyncMock()
+
+    # Return a tab name that has no entry in WVW_ALLIANCE_SHEET_TABS
+    cog._find_relink_server_tab = AsyncMock(return_value="UNKNOWN_TAB")
+    mock_bot_alliance.save_config = MagicMock()
+
+    await cog._check_relink(guild, channel, config)
+
+    channel.send.assert_not_awaited()
+    assert config.alliance_relink_last_server == "RR"  # state not updated
+    mock_bot_alliance.save_config.assert_not_called()
