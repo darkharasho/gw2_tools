@@ -592,3 +592,137 @@ async def test_stream_add_twitch_unknown_channel_sends_error(tmp_path):
     interaction.followup.send.assert_called()
     call_text = str(interaction.followup.send.call_args)
     assert "not found" in call_text.lower() or "could not" in call_text.lower()
+
+
+# ---------------------------------------------------------------------------
+# /stream list, remove, update commands
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_stream_list_shows_subscriptions(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+    from axitools.storage import StreamSubscription
+
+    bot = _make_bot(tmp_path)
+    bot.storage.upsert_stream_subscription(123, StreamSubscription(
+        name="arenanet",
+        platform="twitch",
+        channel_id="arenanet",
+        channel_display_name="ArenaNet",
+        discord_channel_id=789,
+    ))
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+
+    interaction = _make_interaction()
+    await cog._stream_list(interaction)
+
+    interaction.response.send_message.assert_called_once()
+    call_args = interaction.response.send_message.call_args
+    embed = call_args.kwargs.get("embed") or (call_args.args[0] if call_args.args else None)
+    assert embed is not None or "arenanet" in str(call_args).lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_list_empty_guild(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+
+    bot = _make_bot(tmp_path)
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+
+    interaction = _make_interaction()
+    await cog._stream_list(interaction)
+
+    interaction.response.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_remove_deletes_subscription(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+    from axitools.storage import StreamSubscription
+
+    bot = _make_bot(tmp_path)
+    bot.storage.upsert_stream_subscription(123, StreamSubscription(
+        name="todelete",
+        platform="twitch",
+        channel_id="todelete",
+        channel_display_name="To Delete",
+        discord_channel_id=789,
+    ))
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+
+    interaction = _make_interaction()
+    await cog._stream_remove(interaction, "todelete")
+
+    assert bot.storage.get_stream_subscriptions(123) == []
+
+
+@pytest.mark.asyncio
+async def test_stream_remove_unknown_sends_error(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+
+    bot = _make_bot(tmp_path)
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+
+    interaction = _make_interaction()
+    await cog._stream_remove(interaction, "doesnotexist")
+
+    interaction.response.send_message.assert_called_once()
+    assert "not found" in str(interaction.response.send_message.call_args).lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_update_changes_channel(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+    from axitools.storage import StreamSubscription
+
+    bot = _make_bot(tmp_path)
+    bot.storage.upsert_stream_subscription(123, StreamSubscription(
+        name="arenanet",
+        platform="twitch",
+        channel_id="arenanet",
+        channel_display_name="ArenaNet",
+        discord_channel_id=789,
+        ping_role_id=None,
+    ))
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+
+    interaction = _make_interaction()
+    new_channel = MagicMock(spec=discord.TextChannel)
+    new_channel.id = 1111
+    await cog._stream_update(interaction, "arenanet", discord_channel=new_channel, ping_role=None)
+
+    updated = bot.storage.find_stream_subscription(123, "arenanet")
+    assert updated.discord_channel_id == 1111
+    assert updated.channel_id == "arenanet"  # unchanged
+    assert updated.is_live is False           # unchanged
+
+
+@pytest.mark.asyncio
+async def test_stream_update_sets_ping_role(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+    from axitools.storage import StreamSubscription
+
+    bot = _make_bot(tmp_path)
+    bot.storage.upsert_stream_subscription(123, StreamSubscription(
+        name="arenanet",
+        platform="twitch",
+        channel_id="arenanet",
+        channel_display_name="ArenaNet",
+        discord_channel_id=789,
+    ))
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+
+    interaction = _make_interaction()
+    role = MagicMock(spec=discord.Role)
+    role.id = 5555
+    await cog._stream_update(interaction, "arenanet", discord_channel=None, ping_role=role)
+
+    updated = bot.storage.find_stream_subscription(123, "arenanet")
+    assert updated.ping_role_id == 5555
+    assert updated.discord_channel_id == 789  # unchanged

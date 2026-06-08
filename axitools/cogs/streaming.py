@@ -497,6 +497,90 @@ class StreamingCog(commands.GroupCog, name="stream"):
             ephemeral=True,
         )
 
+    @app_commands.command(name="list", description="List all stream subscriptions for this server")
+    async def stream_list(self, interaction: discord.Interaction) -> None:
+        await self._stream_list(interaction)
+
+    async def _stream_list(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        subs = self.bot.storage.get_stream_subscriptions(interaction.guild.id)
+        if not subs:
+            await interaction.response.send_message(
+                "No stream subscriptions configured. Use `/stream add` to add one.", ephemeral=True
+            )
+            return
+        embed = discord.Embed(title="Stream Subscriptions", color=0x5865F2)
+        for sub in subs:
+            platform_label = "Twitch 🟣" if sub.platform == "twitch" else "YouTube 🔴"
+            channel_mention = f"<#{sub.discord_channel_id}>"
+            ping = f" | Ping: <@&{sub.ping_role_id}>" if sub.ping_role_id else ""
+            status = " | 🔴 Live" if sub.is_live else ""
+            embed.add_field(
+                name=f"{sub.name} ({platform_label})",
+                value=f"{sub.channel_display_name} → {channel_mention}{ping}{status}",
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="remove", description="Remove a stream subscription")
+    @app_commands.describe(name="The subscription name to remove")
+    async def stream_remove(self, interaction: discord.Interaction, name: str) -> None:
+        await self._stream_remove(interaction, name)
+
+    async def _stream_remove(self, interaction: discord.Interaction, name: str) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        deleted = self.bot.storage.delete_stream_subscription(interaction.guild.id, name)
+        if not deleted:
+            await interaction.response.send_message(
+                f"Subscription **{name}** not found.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            f"✓ Removed subscription **{name}**.", ephemeral=True
+        )
+
+    @app_commands.command(name="update", description="Update the channel or ping role for a subscription")
+    @app_commands.describe(
+        name="The subscription name to update",
+        discord_channel="New Discord channel for notifications (optional)",
+        ping_role="Role to ping on new notifications (optional)",
+    )
+    async def stream_update(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        discord_channel: Optional[discord.TextChannel] = None,
+        ping_role: Optional[discord.Role] = None,
+    ) -> None:
+        await self._stream_update(interaction, name, discord_channel=discord_channel, ping_role=ping_role)
+
+    async def _stream_update(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        discord_channel: Optional[discord.TextChannel] = None,
+        ping_role: Optional[discord.Role] = None,
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        sub = self.bot.storage.find_stream_subscription(interaction.guild.id, name)
+        if not sub:
+            await interaction.response.send_message(
+                f"No subscription named **{name}** found.", ephemeral=True
+            )
+            return
+        updated = replace(
+            sub,
+            discord_channel_id=discord_channel.id if discord_channel else sub.discord_channel_id,
+            ping_role_id=ping_role.id if ping_role else sub.ping_role_id,
+        )
+        self.bot.storage.upsert_stream_subscription(interaction.guild.id, updated)
+        await interaction.response.send_message(
+            f"✓ Updated subscription **{name}**.", ephemeral=True
+        )
+
 
 async def setup(bot: AxiToolsBot) -> None:
     await bot.add_cog(StreamingCog(bot))
