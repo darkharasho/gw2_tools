@@ -1,6 +1,7 @@
 """Tests for the streaming notifications cog."""
 from __future__ import annotations
 
+import discord
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from aioresponses import aioresponses
@@ -488,9 +489,6 @@ def test_youtube_video_id_from_entry_id():
 # ---------------------------------------------------------------------------
 # /stream add command
 # ---------------------------------------------------------------------------
-
-import discord
-
 
 def _make_bot(tmp_path):
     from axitools.storage import StorageManager
