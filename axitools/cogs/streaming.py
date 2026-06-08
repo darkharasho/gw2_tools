@@ -501,6 +501,26 @@ class StreamingCog(commands.GroupCog, name="stream"):
     async def stream_list(self, interaction: discord.Interaction) -> None:
         await self._stream_list(interaction)
 
+    async def _fetch_twitch_avatar(self, session: aiohttp.ClientSession, login: str) -> Optional[str]:
+        user = await _fetch_twitch_user(session, self._twitch_tokens, login)
+        return user.get("profile_image_url") if user else None
+
+    async def _fetch_youtube_avatar(self, session: aiohttp.ClientSession, channel_id: str) -> Optional[str]:
+        if not YOUTUBE_API_KEY:
+            return None
+        async with session.get(
+            "https://www.googleapis.com/youtube/v3/channels",
+            params={"part": "snippet", "id": channel_id, "key": YOUTUBE_API_KEY},
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            items = data.get("items", [])
+            if not items:
+                return None
+            thumbnails = items[0].get("snippet", {}).get("thumbnails", {})
+            return (thumbnails.get("default") or {}).get("url")
+
     async def _stream_list(self, interaction: discord.Interaction) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
@@ -510,18 +530,91 @@ class StreamingCog(commands.GroupCog, name="stream"):
                 "No stream subscriptions configured. Use `/stream add` to add one.", ephemeral=True
             )
             return
-        embed = discord.Embed(title="Stream Subscriptions", color=0x5865F2)
+        await interaction.response.defer(ephemeral=True)
+        session = await self._get_session()
+        embeds: List[discord.Embed] = []
         for sub in subs:
-            platform_label = "Twitch 🟣" if sub.platform == "twitch" else "YouTube 🔴"
+            if sub.platform == "twitch":
+                color = TWITCH_COLOUR
+                platform_label = "Twitch 🟣"
+                channel_url = f"https://twitch.tv/{sub.channel_id}"
+                avatar = await self._fetch_twitch_avatar(session, sub.channel_id)
+            else:
+                color = YOUTUBE_COLOUR
+                platform_label = "YouTube 🔴"
+                channel_url = f"https://youtube.com/channel/{sub.channel_id}"
+                avatar = await self._fetch_youtube_avatar(session, sub.channel_id)
+
+            status = " · 🔴 Live" if sub.is_live else ""
             channel_mention = f"<#{sub.discord_channel_id}>"
-            ping = f" | Ping: <@&{sub.ping_role_id}>" if sub.ping_role_id else ""
-            status = " | 🔴 Live" if sub.is_live else ""
-            embed.add_field(
-                name=f"{sub.name} ({platform_label})",
-                value=f"{sub.channel_display_name} → {channel_mention}{ping}{status}",
-                inline=False,
+            ping = f"\nPing: <@&{sub.ping_role_id}>" if sub.ping_role_id else ""
+
+            platform_name = "Twitch" if sub.platform == "twitch" else "YouTube"
+            platform_icon = TWITCH_ICON_URL if sub.platform == "twitch" else YOUTUBE_ICON_URL
+
+            embed = discord.Embed(
+                title=f"{sub.name} ({platform_label}){status}",
+                url=channel_url,
+                description=f"{sub.channel_display_name}\nNotifying: {channel_mention}{ping}",
+                color=color,
             )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            embed.set_author(name=platform_name, icon_url=platform_icon)
+            if avatar:
+                embed.set_thumbnail(url=avatar)
+            embeds.append(embed)
+
+        for i in range(0, len(embeds), 10):
+            await interaction.followup.send(embeds=embeds[i:i + 10], ephemeral=True)
+
+    _TEST_USER_ID = 201537071804973056
+
+    @app_commands.command(name="test", description="Preview a stream notification embed (dev only)")
+    @app_commands.describe(name="The subscription name to preview")
+    async def stream_test(self, interaction: discord.Interaction, name: str) -> None:
+        if interaction.user.id != self._TEST_USER_ID:
+            await interaction.response.send_message("Not authorised.", ephemeral=True)
+            return
+        sub = self.bot.storage.find_stream_subscription(interaction.guild.id, name)
+        if not sub:
+            await interaction.response.send_message(f"No subscription named **{name}** found.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        session = await self._get_session()
+
+        if sub.platform == "twitch":
+            stream = await _fetch_twitch_stream(session, self._twitch_tokens, sub.channel_id)
+            if stream:
+                embed = _build_twitch_live_embed(stream)
+            else:
+                embed = _build_twitch_live_embed({
+                    "user_login": sub.channel_id,
+                    "user_name": sub.channel_display_name,
+                    "title": "[Test] Stream title would appear here",
+                    "game_name": "Test Game",
+                    "viewer_count": 0,
+                    "thumbnail_url": "",
+                })
+        else:
+            entries = await _fetch_youtube_rss(session, sub.channel_id)
+            if entries:
+                video_id = _youtube_video_id(entries[0].get("id", ""))
+                details = await _fetch_youtube_video_details(session, video_id, YOUTUBE_API_KEY) if video_id and YOUTUBE_API_KEY else None
+            else:
+                details = None
+            if details:
+                is_live = details["snippet"].get("liveBroadcastContent") == "live"
+                embed = _build_youtube_live_embed(details) if is_live else _build_youtube_video_embed(details)
+            else:
+                embed = _build_youtube_video_embed({
+                    "id": "dQw4w9WgXcQ",
+                    "snippet": {
+                        "title": "[Test] Video title would appear here",
+                        "channelTitle": sub.channel_display_name,
+                        "publishedAt": "",
+                    },
+                })
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="remove", description="Remove a stream subscription")
     @app_commands.describe(name="The subscription name to remove")
