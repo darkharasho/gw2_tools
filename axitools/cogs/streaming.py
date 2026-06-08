@@ -571,6 +571,11 @@ class StreamingCog(commands.GroupCog, name="stream"):
                 f"No subscription named **{name}** found.", ephemeral=True
             )
             return
+        if discord_channel is None and ping_role is None:
+            await interaction.response.send_message(
+                "Provide at least one of `discord_channel` or `ping_role` to update.", ephemeral=True
+            )
+            return
         updated = replace(
             sub,
             discord_channel_id=discord_channel.id if discord_channel else sub.discord_channel_id,

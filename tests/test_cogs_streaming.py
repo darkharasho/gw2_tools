@@ -726,3 +726,26 @@ async def test_stream_update_sets_ping_role(tmp_path):
     updated = bot.storage.find_stream_subscription(123, "arenanet")
     assert updated.ping_role_id == 5555
     assert updated.discord_channel_id == 789  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_stream_update_no_args_sends_error(tmp_path):
+    from axitools.cogs.streaming import StreamingCog
+    from axitools.storage import StreamSubscription
+
+    bot = _make_bot(tmp_path)
+    bot.storage.upsert_stream_subscription(123, StreamSubscription(
+        name="arenanet",
+        platform="twitch",
+        channel_id="arenanet",
+        channel_display_name="ArenaNet",
+        discord_channel_id=789,
+    ))
+    cog = StreamingCog.__new__(StreamingCog)
+    cog.bot = bot
+
+    interaction = _make_interaction()
+    await cog._stream_update(interaction, "arenanet", discord_channel=None, ping_role=None)
+
+    interaction.response.send_message.assert_called_once()
+    assert "provide" in str(interaction.response.send_message.call_args).lower()
