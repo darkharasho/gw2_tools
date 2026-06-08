@@ -677,6 +677,12 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             return config.alliance_server_id
         return matched_worlds[0]
 
+    async def _find_relink_server_tab(self, config: GuildConfig) -> Optional[str]:
+        world_id = await self._resolve_prediction_world_from_sheet(config)
+        if world_id is None:
+            return None
+        return WVW_ALLIANCE_SHEET_TABS.get(world_id)
+
     def _format_worlds(self, world_ids: Sequence[int]) -> str:
         names: List[str] = []
         for world_id in world_ids:

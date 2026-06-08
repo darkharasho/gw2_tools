@@ -237,3 +237,33 @@ async def test_format_alliance_list_trims_in_display_order(mock_bot_alliance):
 
     assert value.endswith("…")
     assert "[PACK] - Wölves Of Wär" in value
+
+
+@pytest.mark.asyncio
+async def test_find_relink_server_tab_returns_tab_name(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_name = "My Guild [MG]"
+
+    cog._resolve_prediction_world_from_sheet = AsyncMock(return_value=11006)
+
+    result = await cog._find_relink_server_tab(config)
+
+    assert result == "HoJ"
+
+
+@pytest.mark.asyncio
+async def test_find_relink_server_tab_returns_none_when_not_found(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_name = "Unknown Guild"
+
+    cog._resolve_prediction_world_from_sheet = AsyncMock(return_value=None)
+
+    result = await cog._find_relink_server_tab(config)
+
+    assert result is None
