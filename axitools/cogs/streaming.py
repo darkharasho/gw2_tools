@@ -24,8 +24,8 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 TWITCH_COLOUR = 0x9146FF
 YOUTUBE_COLOUR = 0xFF0000
 
-TWITCH_ICON_URL = "https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c1.png"
-YOUTUBE_ICON_URL = "https://www.youtube.com/s/desktop/e06e5c1a/img/favicon_32x32.png"
+TWITCH_ICON_URL = "https://raw.githubusercontent.com/darkharasho/axitools/main/media/twitch_32.png"
+YOUTUBE_ICON_URL = "https://raw.githubusercontent.com/darkharasho/axitools/main/media/youtube_32.png"
 
 
 class _TwitchTokenManager:
