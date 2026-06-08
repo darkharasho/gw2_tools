@@ -744,6 +744,23 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
                 return f"{SHEET_EDIT_URL}#range={sheet_ref}"
         return None
 
+    def _format_roster_column(self, alliances: List[tuple[str, List[str]]], solo_guilds: List[str]) -> str:
+        lines: List[str] = []
+        for name, guilds in alliances:
+            lines.append(f"**{name}**")
+            for guild in guilds:
+                lines.append(f"• {guild}")
+            lines.append("")
+        if solo_guilds:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append("**Solo Guilds**")
+            for guild in solo_guilds:
+                lines.append(f"• {guild}")
+        while lines and lines[-1] == "":
+            lines.pop()
+        return self._trim_field_value("\n".join(lines))
+
     def _build_relink_embed(self, *, server_name: str, roster: AllianceRoster, world_id: int) -> discord.Embed:
         sheet_url = self._resolve_sheet_url([world_id])
         sheet_link = f"\n[📊 {server_name} sheet]({sheet_url})" if sheet_url else ""
@@ -752,8 +769,18 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
             color=BRAND_COLOUR,
         )
         embed.add_field(name="Server", value=f"**{server_name}**", inline=False)
-        roster_text = self._trim_field_value(self._format_alliance_list(roster))
-        embed.add_field(name="Roster", value=roster_text or "No roster data.", inline=False)
+
+        alliances = roster.alliances
+        mid = (len(alliances) + 1) // 2
+        col1 = self._format_roster_column(alliances[:mid], [])
+        col2 = self._format_roster_column(alliances[mid:], roster.solo_guilds)
+
+        if not col1 and not col2:
+            embed.add_field(name="Roster", value="No roster data.", inline=False)
+        else:
+            embed.add_field(name="Roster", value=col1 or "​", inline=True)
+            embed.add_field(name="​", value=col2 or "​", inline=True)
+
         return embed
 
     async def _check_relink(
