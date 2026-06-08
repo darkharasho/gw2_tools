@@ -745,16 +745,15 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
         return None
 
     def _build_relink_embed(self, *, server_name: str, roster: AllianceRoster, world_id: int) -> discord.Embed:
+        sheet_url = self._resolve_sheet_url([world_id])
+        sheet_link = f"\n[📊 {server_name} sheet]({sheet_url})" if sheet_url else ""
         embed = discord.Embed(
-            description="# 🔗 New Server Link Announced",
+            description=f"# 🔗 New Server Link Announced{sheet_link}",
             color=BRAND_COLOUR,
         )
-        embed.add_field(name="Server", value=server_name, inline=False)
+        embed.add_field(name="Server", value=f"**{server_name}**", inline=False)
         roster_text = self._trim_field_value(self._format_alliance_list(roster))
         embed.add_field(name="Roster", value=roster_text or "No roster data.", inline=False)
-        sheet_url = self._resolve_sheet_url([world_id])
-        if sheet_url:
-            embed.set_footer(text=sheet_url)
         return embed
 
     async def _check_relink(
