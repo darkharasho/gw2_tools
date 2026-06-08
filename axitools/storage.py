@@ -1532,6 +1532,13 @@ class StorageManager:
                 payload["alliance_current_day"] = day_value if 0 <= day_value <= 6 else None
         else:
             payload["alliance_current_day"] = None
+        relink_enabled = payload.get("alliance_relink_enabled")
+        payload["alliance_relink_enabled"] = bool(relink_enabled) if isinstance(relink_enabled, bool) else False
+        relink_last_server = payload.get("alliance_relink_last_server")
+        if isinstance(relink_last_server, str):
+            payload["alliance_relink_last_server"] = relink_last_server.strip() or None
+        else:
+            payload["alliance_relink_last_server"] = None
         config = GuildConfig(**payload)
         if migrated_schedules:
             logger.info(

@@ -1,6 +1,6 @@
 
 import pytest
-from axitools.storage import ApiKeyStore, ApiKeyRecord
+from axitools.storage import ApiKeyStore, ApiKeyRecord, GuildConfig
 
 def test_api_key_store_init(api_key_store):
     assert api_key_store.path.exists()
@@ -183,7 +183,6 @@ def test_stream_subscriptions_find_miss(tmp_path):
 
 
 def test_guild_config_relink_defaults():
-    from axitools.storage import GuildConfig
     config = GuildConfig.default()
     assert config.alliance_relink_enabled is False
     assert config.alliance_relink_last_server is None
