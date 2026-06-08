@@ -180,3 +180,10 @@ def test_stream_subscriptions_find_miss(tmp_path):
 
     result = storage.find_stream_subscription(guild_id, "doesnotexist")
     assert result is None
+
+
+def test_guild_config_relink_defaults():
+    from axitools.storage import GuildConfig
+    config = GuildConfig.default()
+    assert config.alliance_relink_enabled is False
+    assert config.alliance_relink_last_server is None

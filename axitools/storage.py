@@ -228,6 +228,8 @@ class GuildConfig:
     alliance_current_time: Optional[str] = None
     alliance_prediction_day: Optional[int] = None
     alliance_current_day: Optional[int] = None
+    alliance_relink_enabled: bool = False
+    alliance_relink_last_server: Optional[str] = None
     comp: CompConfig = field(default_factory=CompConfig)
     comp_active_preset: Optional[str] = None
     comp_schedules: List[CompSchedule] = field(default_factory=list)
