@@ -219,14 +219,21 @@ async def _fetch_youtube_video_details(
         return items[0] if items else None
 
 
+def _truncate_description(text: str, limit: int = 200) -> str:
+    text = text.strip()
+    return text[:limit] + "…" if len(text) > limit else text
+
+
 def _build_youtube_live_embed(details: dict, *, avatar_url: Optional[str] = None) -> discord.Embed:
     video_id = details["id"]
     snippet = details["snippet"]
     title = snippet["title"]
     channel_name = snippet["channelTitle"]
+    description = _truncate_description(snippet.get("description", ""))
 
     embed = discord.Embed(
         title=title,
+        description=description or None,
         url=f"https://youtube.com/watch?v={video_id}",
         color=YOUTUBE_COLOUR,
     )
@@ -242,10 +249,12 @@ def _build_youtube_video_embed(details: dict, *, is_vod: bool = False, avatar_ur
     title = snippet["title"]
     channel_name = snippet["channelTitle"]
     published_at = snippet.get("publishedAt", "")
+    description = _truncate_description(snippet.get("description", ""))
 
     label = "posted a new VOD" if is_vod else "posted a new video"
     embed = discord.Embed(
         title=title,
+        description=description or None,
         url=f"https://youtube.com/watch?v={video_id}",
         color=YOUTUBE_COLOUR,
     )
