@@ -71,16 +71,16 @@ class StreamingCog(commands.GroupCog, name="stream"):
     POLL_INTERVAL_MINUTES = 5
 
     def __init__(self, bot: AxiToolsBot) -> None:
+        super().__init__()
         self.bot = bot
         self._session: Optional[aiohttp.ClientSession] = None
         self._twitch_tokens = _TwitchTokenManager(TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET)
         self._poll_loop.start()
-        super().__init__()
 
-    def cog_unload(self) -> None:  # pragma: no cover
+    async def cog_unload(self) -> None:  # pragma: no cover - discord.py lifecycle
         self._poll_loop.cancel()
         if self._session and not self._session.closed:
-            self.bot.loop.create_task(self._session.close())
+            await self._session.close()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self._session or self._session.closed:
@@ -99,7 +99,7 @@ class StreamingCog(commands.GroupCog, name="stream"):
                 LOGGER.exception("Error polling stream subscriptions for guild %s", guild.id)
 
     @_poll_loop.before_loop
-    async def _before_poll(self) -> None:
+    async def _before_poll(self) -> None:  # pragma: no cover - discord.py lifecycle
         await self.bot.wait_until_ready()
 
     async def _poll_guild(self, guild: discord.Guild, session: aiohttp.ClientSession) -> None:
