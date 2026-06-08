@@ -126,6 +126,67 @@ def _build_twitch_live_embed(stream: dict) -> discord.Embed:
     return embed
 
 
+async def _resolve_youtube_channel(
+    session: aiohttp.ClientSession,
+    channel_input: str,
+    api_key: str,
+) -> Optional[tuple[str, str]]:
+    """Resolve channel input to (channel_id, display_name). Returns None if not found."""
+    # Strip protocol/domain
+    cleaned = channel_input.strip()
+    for prefix in ("https://", "http://", "www.", "youtube.com/", "youtu.be/"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+
+    # Extract UC... ID from /channel/UCxxx path
+    if cleaned.startswith("channel/") or "/channel/" in cleaned:
+        part = cleaned.split("channel/")[-1].split("/")[0].split("?")[0]
+        if part.startswith("UC"):
+            return await _fetch_youtube_channel_by_id(session, part, api_key)
+
+    # Bare UC... ID
+    if cleaned.startswith("UC") and "/" not in cleaned and "?" not in cleaned:
+        return await _fetch_youtube_channel_by_id(session, cleaned, api_key)
+
+    # Handle: @handle or handle (with or without leading @)
+    handle = cleaned.lstrip("@").split("?")[0].split("/")[0]
+    return await _fetch_youtube_channel_by_handle(session, handle, api_key)
+
+
+async def _fetch_youtube_channel_by_id(
+    session: aiohttp.ClientSession, channel_id: str, api_key: str
+) -> Optional[tuple[str, str]]:
+    async with session.get(
+        "https://www.googleapis.com/youtube/v3/channels",
+        params={"part": "id,snippet", "id": channel_id, "key": api_key},
+    ) as resp:
+        if resp.status != 200:
+            return None
+        data = await resp.json()
+        items = data.get("items", [])
+        if not items:
+            return None
+        item = items[0]
+        return item["id"], item["snippet"]["title"]
+
+
+async def _fetch_youtube_channel_by_handle(
+    session: aiohttp.ClientSession, handle: str, api_key: str
+) -> Optional[tuple[str, str]]:
+    async with session.get(
+        "https://www.googleapis.com/youtube/v3/channels",
+        params={"part": "id,snippet", "forHandle": handle, "key": api_key},
+    ) as resp:
+        if resp.status != 200:
+            return None
+        data = await resp.json()
+        items = data.get("items", [])
+        if not items:
+            return None
+        item = items[0]
+        return item["id"], item["snippet"]["title"]
+
+
 class StreamingCog(commands.GroupCog, name="stream"):
     """Notify Discord channels when YouTube channels or Twitch streamers go live."""
 

@@ -221,3 +221,98 @@ def test_build_twitch_live_embed():
     field_names = [f.name for f in embed.fields]
     assert any("Guild Wars 2" in f.value for f in embed.fields)
     assert any("1,234" in f.value or "1234" in f.value for f in embed.fields)
+
+
+# ---------------------------------------------------------------------------
+# YouTube channel resolution
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_resolve_youtube_channel_from_handle():
+    from axitools.cogs.streaming import _resolve_youtube_channel
+    import aiohttp
+
+    with aioresponses() as m:
+        m.get(
+            "https://www.googleapis.com/youtube/v3/channels?part=id%2Csnippet&forHandle=arenanet&key=test_key",
+            payload={
+                "items": [{
+                    "id": "UCvC_LIfovqvkalSolejNlrQ",
+                    "snippet": {"title": "ArenaNet"},
+                }]
+            },
+        )
+        async with aiohttp.ClientSession() as session:
+            result = await _resolve_youtube_channel(session, "@arenanet", "test_key")
+
+    assert result is not None
+    channel_id, display_name = result
+    assert channel_id == "UCvC_LIfovqvkalSolejNlrQ"
+    assert display_name == "ArenaNet"
+
+
+@pytest.mark.asyncio
+async def test_resolve_youtube_channel_from_uc_id():
+    from axitools.cogs.streaming import _resolve_youtube_channel
+    import aiohttp
+
+    with aioresponses() as m:
+        m.get(
+            "https://www.googleapis.com/youtube/v3/channels?part=id%2Csnippet&id=UCvC_LIfovqvkalSolejNlrQ&key=test_key",
+            payload={
+                "items": [{
+                    "id": "UCvC_LIfovqvkalSolejNlrQ",
+                    "snippet": {"title": "ArenaNet"},
+                }]
+            },
+        )
+        async with aiohttp.ClientSession() as session:
+            result = await _resolve_youtube_channel(
+                session, "UCvC_LIfovqvkalSolejNlrQ", "test_key"
+            )
+
+    assert result is not None
+    channel_id, display_name = result
+    assert channel_id == "UCvC_LIfovqvkalSolejNlrQ"
+
+
+@pytest.mark.asyncio
+async def test_resolve_youtube_channel_from_url():
+    from axitools.cogs.streaming import _resolve_youtube_channel
+    import aiohttp
+
+    with aioresponses() as m:
+        m.get(
+            "https://www.googleapis.com/youtube/v3/channels?part=id%2Csnippet&id=UCvC_LIfovqvkalSolejNlrQ&key=test_key",
+            payload={
+                "items": [{
+                    "id": "UCvC_LIfovqvkalSolejNlrQ",
+                    "snippet": {"title": "ArenaNet"},
+                }]
+            },
+        )
+        async with aiohttp.ClientSession() as session:
+            result = await _resolve_youtube_channel(
+                session,
+                "https://youtube.com/channel/UCvC_LIfovqvkalSolejNlrQ",
+                "test_key",
+            )
+
+    assert result is not None
+    assert result[0] == "UCvC_LIfovqvkalSolejNlrQ"
+
+
+@pytest.mark.asyncio
+async def test_resolve_youtube_channel_returns_none_for_unknown():
+    from axitools.cogs.streaming import _resolve_youtube_channel
+    import aiohttp
+
+    with aioresponses() as m:
+        m.get(
+            "https://www.googleapis.com/youtube/v3/channels?part=id%2Csnippet&forHandle=nobody&key=test_key",
+            payload={"items": []},
+        )
+        async with aiohttp.ClientSession() as session:
+            result = await _resolve_youtube_channel(session, "@nobody", "test_key")
+
+    assert result is None
