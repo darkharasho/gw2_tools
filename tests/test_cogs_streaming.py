@@ -429,8 +429,9 @@ def test_build_youtube_live_embed():
     }
     embed = _build_youtube_live_embed(details)
 
-    assert "🔴" in embed.title
-    assert "ArenaNet" in embed.title
+    assert embed.title == "Live now!"
+    assert "🔴" in embed.author.name
+    assert "ArenaNet" in embed.author.name
     assert embed.url == "https://youtube.com/watch?v=live456"
     assert embed.color.value == 0xFF0000
     assert "live456" in embed.image.url
@@ -450,9 +451,10 @@ def test_build_youtube_video_embed():
     }
     embed = _build_youtube_video_embed(details, is_vod=False)
 
-    assert "📺" in embed.title
-    assert "ArenaNet" in embed.title
-    assert "new video" in embed.title.lower()
+    assert embed.title == "New Video!"
+    assert "📺" in embed.author.name
+    assert "ArenaNet" in embed.author.name
+    assert "new video" in embed.author.name.lower()
     assert embed.url == "https://youtube.com/watch?v=abc123"
     assert embed.color.value == 0xFF0000
 
@@ -475,7 +477,7 @@ def test_build_youtube_vod_embed():
     }
     embed = _build_youtube_video_embed(details, is_vod=True)
 
-    assert "vod" in embed.title.lower() or "VOD" in embed.title
+    assert "vod" in embed.author.name.lower() or "VOD" in embed.author.name
 
 
 def test_youtube_video_id_from_entry_id():
@@ -613,14 +615,19 @@ async def test_stream_list_shows_subscriptions(tmp_path):
     ))
     cog = StreamingCog.__new__(StreamingCog)
     cog.bot = bot
+    cog._get_session = AsyncMock(return_value=MagicMock())
+    cog._fetch_twitch_avatar = AsyncMock(return_value=None)
+    cog._fetch_youtube_avatar = AsyncMock(return_value=None)
 
     interaction = _make_interaction()
     await cog._stream_list(interaction)
 
-    interaction.response.send_message.assert_called_once()
-    call_args = interaction.response.send_message.call_args
-    embed = call_args.kwargs.get("embed") or (call_args.args[0] if call_args.args else None)
-    assert embed is not None or "arenanet" in str(call_args).lower()
+    interaction.response.defer.assert_called_once()
+    interaction.followup.send.assert_called_once()
+    call_kwargs = interaction.followup.send.call_args.kwargs
+    embeds = call_kwargs.get("embeds", [])
+    assert len(embeds) == 1
+    assert "arenanet" in embeds[0].title.lower()
 
 
 @pytest.mark.asyncio
