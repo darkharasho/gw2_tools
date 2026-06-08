@@ -219,24 +219,24 @@ async def _fetch_youtube_video_details(
         return items[0] if items else None
 
 
-def _build_youtube_live_embed(details: dict) -> discord.Embed:
+def _build_youtube_live_embed(details: dict, *, avatar_url: Optional[str] = None) -> discord.Embed:
     video_id = details["id"]
     snippet = details["snippet"]
     title = snippet["title"]
     channel_name = snippet["channelTitle"]
 
     embed = discord.Embed(
-        title=f"🔴 {channel_name} is live on YouTube!",
-        description=title,
+        title=title,
         url=f"https://youtube.com/watch?v={video_id}",
         color=YOUTUBE_COLOUR,
     )
+    embed.set_author(name=f"🔴 {channel_name} is live on YouTube!", icon_url=avatar_url or YOUTUBE_ICON_URL)
     embed.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
     embed.set_footer(text="YouTube", icon_url=YOUTUBE_ICON_URL)
     return embed
 
 
-def _build_youtube_video_embed(details: dict, *, is_vod: bool = False) -> discord.Embed:
+def _build_youtube_video_embed(details: dict, *, is_vod: bool = False, avatar_url: Optional[str] = None) -> discord.Embed:
     video_id = details["id"]
     snippet = details["snippet"]
     title = snippet["title"]
@@ -245,11 +245,11 @@ def _build_youtube_video_embed(details: dict, *, is_vod: bool = False) -> discor
 
     label = "posted a new VOD" if is_vod else "posted a new video"
     embed = discord.Embed(
-        title=f"📺 {channel_name} {label}",
-        description=f"[{title}](https://youtube.com/watch?v={video_id})",
+        title=title,
         url=f"https://youtube.com/watch?v={video_id}",
         color=YOUTUBE_COLOUR,
     )
+    embed.set_author(name=f"📺 {channel_name} {label}", icon_url=avatar_url or YOUTUBE_ICON_URL)
     if published_at:
         embed.add_field(name="Published", value=published_at[:10], inline=True)
     embed.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
@@ -355,7 +355,8 @@ class StreamingCog(commands.GroupCog, name="stream"):
                     if broadcast_content != "live" and ended:
                         channel = guild.get_channel(sub.discord_channel_id)
                         if channel and isinstance(channel, discord.TextChannel):
-                            embed = _build_youtube_video_embed(details, is_vod=True)
+                            avatar = await self._fetch_youtube_avatar(session, sub.channel_id)
+                            embed = _build_youtube_video_embed(details, is_vod=True, avatar_url=avatar)
                             content = f"<@&{sub.ping_role_id}>" if sub.ping_role_id else None
                             await channel.send(content=content, embed=embed)
                         sub = replace(sub, is_live=False)
@@ -381,9 +382,11 @@ class StreamingCog(commands.GroupCog, name="stream"):
         channel = guild.get_channel(sub.discord_channel_id)
         if channel and isinstance(channel, discord.TextChannel):
             is_live = bool(details and details["snippet"].get("liveBroadcastContent") == "live")
-            embed = _build_youtube_live_embed(details) if is_live else _build_youtube_video_embed(
+            avatar = await self._fetch_youtube_avatar(session, sub.channel_id)
+            embed = _build_youtube_live_embed(details, avatar_url=avatar) if is_live else _build_youtube_video_embed(
                 details or {"id": video_id, "snippet": {"title": latest_entry.get("title", ""), "channelTitle": sub.channel_display_name, "publishedAt": ""}},
                 is_vod=False,
+                avatar_url=avatar,
             )
             content = f"<@&{sub.ping_role_id}>" if sub.ping_role_id else None
             await channel.send(content=content, embed=embed)
@@ -595,6 +598,7 @@ class StreamingCog(commands.GroupCog, name="stream"):
                     "thumbnail_url": "",
                 })
         else:
+            avatar = await self._fetch_youtube_avatar(session, sub.channel_id)
             entries = await _fetch_youtube_rss(session, sub.channel_id)
             if entries:
                 video_id = _youtube_video_id(entries[0].get("id", ""))
@@ -603,7 +607,7 @@ class StreamingCog(commands.GroupCog, name="stream"):
                 details = None
             if details:
                 is_live = details["snippet"].get("liveBroadcastContent") == "live"
-                embed = _build_youtube_live_embed(details) if is_live else _build_youtube_video_embed(details)
+                embed = _build_youtube_live_embed(details, avatar_url=avatar) if is_live else _build_youtube_video_embed(details, avatar_url=avatar)
             else:
                 embed = _build_youtube_video_embed({
                     "id": "dQw4w9WgXcQ",
@@ -612,7 +616,7 @@ class StreamingCog(commands.GroupCog, name="stream"):
                         "channelTitle": sub.channel_display_name,
                         "publishedAt": "",
                     },
-                })
+                }, avatar_url=avatar)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
