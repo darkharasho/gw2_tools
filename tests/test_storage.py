@@ -151,3 +151,32 @@ def test_stream_subscriptions_empty(tmp_path):
     from axitools.storage import StorageManager
     storage = StorageManager(tmp_path)
     assert storage.get_stream_subscriptions(99999) == []
+
+
+def test_stream_subscriptions_find_hit(tmp_path):
+    from axitools.storage import StorageManager, StreamSubscription
+    storage = StorageManager(tmp_path)
+    guild_id = 444
+
+    sub = StreamSubscription(
+        name="arenanet",
+        platform="twitch",
+        channel_id="arenanet",
+        channel_display_name="ArenaNet",
+        discord_channel_id=999,
+    )
+    storage.upsert_stream_subscription(guild_id, sub)
+
+    found = storage.find_stream_subscription(guild_id, "arenanet")
+    assert found is not None
+    assert found.name == "arenanet"
+    assert found.channel_display_name == "ArenaNet"
+
+
+def test_stream_subscriptions_find_miss(tmp_path):
+    from axitools.storage import StorageManager
+    storage = StorageManager(tmp_path)
+    guild_id = 555
+
+    result = storage.find_stream_subscription(guild_id, "doesnotexist")
+    assert result is None
