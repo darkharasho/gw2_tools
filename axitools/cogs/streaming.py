@@ -13,7 +13,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
-from ..storage import StreamSubscription
+from ..storage import StreamSubscription, utcnow
 
 LOGGER = logging.getLogger(__name__)
 
@@ -196,7 +196,6 @@ class StreamingCog(commands.GroupCog, name="stream"):
                 embed = _build_twitch_live_embed(stream)
                 content = f"<@&{sub.ping_role_id}>" if sub.ping_role_id else None
                 await channel.send(content=content, embed=embed)
-            from ..storage import utcnow
             return replace(sub, is_live=True, last_live_at=utcnow())
 
         if not is_now_live and sub.is_live:
