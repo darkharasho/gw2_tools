@@ -72,3 +72,82 @@ def test_audit_gw2_api_key_storage_round_trip(tmp_path):
         "main key": "KEY-ONE",
         "alt.key": "KEY-TWO",
     }
+
+
+def test_stream_subscriptions_round_trip(tmp_path):
+    from axitools.storage import StorageManager, StreamSubscription
+    storage = StorageManager(tmp_path)
+    guild_id = 111
+
+    sub = StreamSubscription(
+        name="arenanet",
+        platform="twitch",
+        channel_id="arenanet",
+        channel_display_name="ArenaNet",
+        discord_channel_id=999,
+        ping_role_id=None,
+        last_vod_id=None,
+        last_live_at=None,
+        is_live=False,
+    )
+    storage.save_stream_subscriptions(guild_id, [sub])
+    loaded = storage.get_stream_subscriptions(guild_id)
+
+    assert len(loaded) == 1
+    assert loaded[0].name == "arenanet"
+    assert loaded[0].platform == "twitch"
+    assert loaded[0].channel_display_name == "ArenaNet"
+    assert loaded[0].is_live is False
+
+
+def test_stream_subscriptions_upsert(tmp_path):
+    from axitools.storage import StorageManager, StreamSubscription
+    storage = StorageManager(tmp_path)
+    guild_id = 222
+
+    sub = StreamSubscription(
+        name="mychannel",
+        platform="youtube",
+        channel_id="UCxxxxxxx",
+        channel_display_name="My Channel",
+        discord_channel_id=888,
+    )
+    storage.upsert_stream_subscription(guild_id, sub)
+    storage.upsert_stream_subscription(guild_id, StreamSubscription(
+        name="mychannel",
+        platform="youtube",
+        channel_id="UCxxxxxxx",
+        channel_display_name="My Channel Updated",
+        discord_channel_id=777,
+    ))
+    loaded = storage.get_stream_subscriptions(guild_id)
+    assert len(loaded) == 1
+    assert loaded[0].discord_channel_id == 777
+    assert loaded[0].channel_display_name == "My Channel Updated"
+
+
+def test_stream_subscriptions_delete(tmp_path):
+    from axitools.storage import StorageManager, StreamSubscription
+    storage = StorageManager(tmp_path)
+    guild_id = 333
+
+    sub = StreamSubscription(
+        name="todelete",
+        platform="twitch",
+        channel_id="todelete",
+        channel_display_name="To Delete",
+        discord_channel_id=555,
+    )
+    storage.upsert_stream_subscription(guild_id, sub)
+    deleted = storage.delete_stream_subscription(guild_id, "todelete")
+    assert deleted is True
+    assert storage.get_stream_subscriptions(guild_id) == []
+
+    not_deleted = storage.delete_stream_subscription(guild_id, "todelete")
+    assert not_deleted is False
+
+
+def test_stream_subscriptions_empty(tmp_path):
+    from axitools.storage import StorageManager
+    storage = StorageManager(tmp_path)
+    assert storage.get_stream_subscriptions(99999) == []

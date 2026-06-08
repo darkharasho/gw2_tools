@@ -414,6 +414,21 @@ class RssFeedConfig:
 
 
 @dataclass
+class StreamSubscription:
+    """Persisted configuration for a YouTube or Twitch stream subscription."""
+
+    name: str
+    platform: str
+    channel_id: str
+    channel_display_name: str
+    discord_channel_id: int
+    ping_role_id: Optional[int] = None
+    last_vod_id: Optional[str] = None
+    last_live_at: Optional[str] = None
+    is_live: bool = False
+
+
+@dataclass
 class BuildRecord:
     """Persisted representation of a Guild Wars 2 build."""
 
@@ -1906,6 +1921,53 @@ class StorageManager:
         if len(remaining) == len(feeds):
             return False
         self.save_rss_feeds(guild_id, remaining)
+        return True
+
+    # ------------------------------------------------------------------
+    # Stream subscriptions
+    # ------------------------------------------------------------------
+    def get_stream_subscriptions(self, guild_id: int) -> List[StreamSubscription]:
+        path = self._guild_path(guild_id) / "stream_subscriptions.json"
+        payload = self._read_json(path, [])
+        subs: List[StreamSubscription] = []
+        for item in payload:
+            try:
+                subs.append(StreamSubscription(**item))
+            except TypeError:
+                continue
+        return subs
+
+    def save_stream_subscriptions(self, guild_id: int, subs: List[StreamSubscription]) -> None:
+        path = self._guild_path(guild_id) / "stream_subscriptions.json"
+        self._write_json(path, [asdict(sub) for sub in subs])
+
+    def upsert_stream_subscription(self, guild_id: int, sub: StreamSubscription) -> None:
+        subs = self.get_stream_subscriptions(guild_id)
+        updated: List[StreamSubscription] = []
+        replaced = False
+        for existing in subs:
+            if existing.name.lower() == sub.name.lower():
+                updated.append(sub)
+                replaced = True
+            else:
+                updated.append(existing)
+        if not replaced:
+            updated.append(sub)
+        self.save_stream_subscriptions(guild_id, updated)
+
+    def find_stream_subscription(self, guild_id: int, name: str) -> Optional[StreamSubscription]:
+        name_lower = name.lower()
+        for sub in self.get_stream_subscriptions(guild_id):
+            if sub.name.lower() == name_lower:
+                return sub
+        return None
+
+    def delete_stream_subscription(self, guild_id: int, name: str) -> bool:
+        subs = self.get_stream_subscriptions(guild_id)
+        remaining = [s for s in subs if s.name.lower() != name.lower()]
+        if len(remaining) == len(subs):
+            return False
+        self.save_stream_subscriptions(guild_id, remaining)
         return True
 
     # ------------------------------------------------------------------
