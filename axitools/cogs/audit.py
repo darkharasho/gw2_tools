@@ -110,6 +110,11 @@ class AuditCog(commands.Cog):
         description="Manage GW2 API keys used for audit syncing.",
         parent=audit,
     )
+    audit_blacklist = app_commands.Group(
+        name="blacklist",
+        description="Exclude channels from audit logging.",
+        parent=audit,
+    )
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -346,6 +351,127 @@ class AuditCog(commands.Cog):
             else "Guild Wars 2 audit guild cleared."
         )
         await interaction.response.send_message(message, ephemeral=True)
+
+    @audit_blacklist.command(
+        name="add",
+        description="Exclude a channel from audit logging.",
+    )
+    @app_commands.describe(channel="Channel to exclude from audit logging.")
+    async def audit_blacklist_add_command(
+        self, interaction: discord.Interaction, channel: discord.abc.GuildChannel
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        if interaction.guild is None:
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        if channel.id in config.audit_channel_blacklist:
+            await interaction.response.send_message(
+                f"<#{channel.id}> is already excluded from audit logging.",
+                ephemeral=True,
+            )
+            return
+        config.audit_channel_blacklist.append(channel.id)
+        self.bot.save_config(interaction.guild.id, config)
+        await interaction.response.send_message(
+            f"<#{channel.id}> will no longer be audit logged.",
+            ephemeral=True,
+        )
+
+    @audit_blacklist.command(
+        name="remove",
+        description="Resume audit logging for a previously excluded channel.",
+    )
+    @app_commands.describe(
+        channel="Channel to resume audit logging for.",
+        channel_id="Raw channel ID (use when the channel no longer exists).",
+    )
+    async def audit_blacklist_remove_command(
+        self,
+        interaction: discord.Interaction,
+        channel: Optional[discord.abc.GuildChannel] = None,
+        channel_id: Optional[str] = None,
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        if interaction.guild is None:
+            return
+
+        target_id: Optional[int] = None
+        if channel is not None:
+            target_id = channel.id
+        elif channel_id:
+            try:
+                target_id = int(channel_id.strip())
+            except ValueError:
+                target_id = None
+        if target_id is None:
+            await interaction.response.send_message(
+                "Provide a channel or a numeric channel ID to remove.",
+                ephemeral=True,
+            )
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        if target_id not in config.audit_channel_blacklist:
+            await interaction.response.send_message(
+                f"<#{target_id}> is not in the audit blacklist.",
+                ephemeral=True,
+            )
+            return
+        config.audit_channel_blacklist = [
+            cid for cid in config.audit_channel_blacklist if cid != target_id
+        ]
+        self.bot.save_config(interaction.guild.id, config)
+        await interaction.response.send_message(
+            f"<#{target_id}> will be audit logged again.",
+            ephemeral=True,
+        )
+
+    @audit_blacklist_remove_command.autocomplete("channel_id")
+    async def audit_blacklist_channel_id_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        if interaction.guild is None:
+            return []
+        config = self.bot.get_config(interaction.guild.id)
+        query = current.strip()
+        choices: list[app_commands.Choice[str]] = []
+        for cid in config.audit_channel_blacklist:
+            label = f"#{cid}"
+            channel = interaction.guild.get_channel(cid)
+            if channel is not None:
+                label = f"#{channel.name}"
+            if query and query not in str(cid):
+                continue
+            choices.append(app_commands.Choice(name=label, value=str(cid)))
+        return choices[:25]
+
+    @audit_blacklist.command(
+        name="list",
+        description="List channels excluded from audit logging.",
+    )
+    async def audit_blacklist_list_command(
+        self, interaction: discord.Interaction
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        if interaction.guild is None:
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        if not config.audit_channel_blacklist:
+            await interaction.response.send_message(
+                "No channels are excluded from audit logging.",
+                ephemeral=True,
+            )
+            return
+        lines = "\n".join(f"<#{cid}>" for cid in config.audit_channel_blacklist)
+        await interaction.response.send_message(
+            f"Channels excluded from audit logging:\n{lines}",
+            ephemeral=True,
+        )
 
     # ------------------------------------------------------------------
     # Query commands

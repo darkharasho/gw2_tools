@@ -59,3 +59,68 @@ def test_channel_delete_suppressed_when_blacklisted():
     channel.id = 321
     asyncio.run(cog.on_guild_channel_delete(channel))
     cog._log_discord_event.assert_not_called()
+
+
+def _make_command_cog(blacklist):
+    config = GuildConfig.default()
+    config.audit_channel_blacklist = list(blacklist)
+    cog = AuditCog.__new__(AuditCog)
+    bot = MagicMock()
+    bot.get_config.return_value = config
+    bot.save_config = MagicMock()
+    bot.ensure_authorised = AsyncMock(return_value=True)
+    cog.bot = bot
+    return cog, config
+
+
+def _make_interaction():
+    interaction = MagicMock()
+    interaction.guild = MagicMock()
+    interaction.guild.id = 1
+    interaction.response.send_message = AsyncMock()
+    return interaction
+
+
+def test_blacklist_add_is_idempotent():
+    cog, config = _make_command_cog([])
+    interaction = _make_interaction()
+    channel = MagicMock()
+    channel.id = 700
+    channel.mention = "<#700>"
+
+    asyncio.run(cog.audit_blacklist_add_command.callback(cog, interaction, channel))
+    asyncio.run(cog.audit_blacklist_add_command.callback(cog, interaction, channel))
+
+    assert config.audit_channel_blacklist == [700]
+    assert cog.bot.save_config.called
+
+
+def test_blacklist_remove_by_channel():
+    cog, config = _make_command_cog([700, 800])
+    interaction = _make_interaction()
+    channel = MagicMock()
+    channel.id = 700
+
+    asyncio.run(
+        cog.audit_blacklist_remove_command.callback(cog, interaction, channel, None)
+    )
+
+    assert config.audit_channel_blacklist == [800]
+
+
+def test_blacklist_remove_by_raw_id():
+    cog, config = _make_command_cog([700, 800])
+    interaction = _make_interaction()
+
+    asyncio.run(
+        cog.audit_blacklist_remove_command.callback(cog, interaction, None, "800")
+    )
+
+    assert config.audit_channel_blacklist == [700]
+
+
+def test_blacklist_list_runs():
+    cog, config = _make_command_cog([700])
+    interaction = _make_interaction()
+    asyncio.run(cog.audit_blacklist_list_command.callback(cog, interaction))
+    interaction.response.send_message.assert_awaited()
