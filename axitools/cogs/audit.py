@@ -437,13 +437,12 @@ class AuditCog(commands.Cog):
             return []
         config = self.bot.get_config(interaction.guild.id)
         query = current.strip()
+        query_lower = query.casefold()
         choices: list[app_commands.Choice[str]] = []
         for cid in config.audit_channel_blacklist:
-            label = f"#{cid}"
             channel = interaction.guild.get_channel(cid)
-            if channel is not None:
-                label = f"#{channel.name}"
-            if query and query not in str(cid):
+            label = f"#{channel.name}" if channel is not None else f"#{cid}"
+            if query and query not in str(cid) and query_lower not in label.casefold():
                 continue
             choices.append(app_commands.Choice(name=label, value=str(cid)))
         return choices[:25]

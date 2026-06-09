@@ -124,3 +124,31 @@ def test_blacklist_list_runs():
     interaction = _make_interaction()
     asyncio.run(cog.audit_blacklist_list_command.callback(cog, interaction))
     interaction.response.send_message.assert_awaited()
+
+
+def test_blacklist_channel_id_autocomplete_matches_name_and_empty():
+    cog, config = _make_command_cog([700, 800])
+    interaction = _make_interaction()
+
+    def _get_channel(cid):
+        names = {700: "general-chat", 800: "announcements"}
+        if cid in names:
+            channel = MagicMock()
+            channel.name = names[cid]
+            return channel
+        return None
+
+    interaction.guild.get_channel.side_effect = _get_channel
+
+    # Query by a substring of the channel name.
+    matches = asyncio.run(
+        cog.audit_blacklist_channel_id_autocomplete(interaction, "gener")
+    )
+    assert [c.value for c in matches] == ["700"]
+    assert matches[0].name == "#general-chat"
+
+    # Empty query returns all blacklisted channels.
+    all_matches = asyncio.run(
+        cog.audit_blacklist_channel_id_autocomplete(interaction, "")
+    )
+    assert [c.value for c in all_matches] == ["700", "800"]
