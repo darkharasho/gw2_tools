@@ -99,6 +99,21 @@ def _format_user_field(user: Optional[discord.abc.User], *, fallback: str) -> st
     return _display_user(user) or fallback
 
 
+def _avatar_url(user: Optional[discord.abc.User]) -> Optional[str]:
+    if user is None:
+        return None
+    avatar = getattr(user, "display_avatar", None) or getattr(user, "avatar", None)
+    if avatar is None:
+        return None
+    return getattr(avatar, "url", None)
+
+
+def _author_name(user: Optional[discord.abc.User]) -> Optional[str]:
+    if user is None:
+        return None
+    return getattr(user, "display_name", None) or getattr(user, "name", None) or str(user)
+
+
 class AuditCog(commands.Cog):
     """Audit logging and query commands."""
 
@@ -1217,6 +1232,15 @@ class AuditCog(commands.Cog):
 
         title = DISCORD_EVENT_TITLES.get(event_type, event_type.replace("_", " ").title())
         embed = discord.Embed(title=title, colour=BRAND_COLOUR)
+        avatar_user = actor or target
+        author_name = _author_name(avatar_user)
+        if author_name:
+            embed.set_author(
+                name=author_name,
+                icon_url=_avatar_url(avatar_user) or _avatar_url(target),
+            )
+        elif guild.icon is not None:
+            embed.set_author(name=guild.name, icon_url=guild.icon.url)
         embed.add_field(
             name="Actor",
             value=_format_user_field(actor, fallback="Unknown"),
