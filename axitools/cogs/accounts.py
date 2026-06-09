@@ -15,7 +15,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
-from ..branding import BRAND_COLOUR
+from ..branding import BRAND_COLOUR, brand_embed
 from ..config_status import ConfigStatus, StatusField
 from ..http_utils import read_response_text
 from ..storage import ApiKeyRecord, GuildConfig, normalise_guild_id, utcnow
@@ -68,9 +68,7 @@ class AccountsCog(commands.Cog):
         description: Optional[str] = None,
         colour: discord.Colour = BRAND_COLOUR,
     ) -> discord.Embed:
-        embed = discord.Embed(title=title, description=description or "", colour=colour)
-        embed.set_footer(text="Guild Wars 2 Tools")
-        return embed
+        return brand_embed(title=title, description=description, colour=colour)
 
     @staticmethod
     def _format_list(items: Sequence[str], *, placeholder: str = "None") -> str:

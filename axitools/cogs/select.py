@@ -13,7 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..bot import AxiToolsBot
-from ..branding import BRAND_COLOUR
+from ..branding import BRAND_COLOUR, brand_embed
 from ..config_status import ConfigStatus, StatusField
 from ..export import MemberExportRow, members_to_csv
 from ..http_utils import read_response_text
@@ -68,9 +68,7 @@ class SelectCog(commands.Cog):
         description: Optional[str] = None,
         colour: discord.Colour = BRAND_COLOUR,
     ) -> discord.Embed:
-        embed = discord.Embed(title=title, description=description or "", colour=colour)
-        embed.set_footer(text="Guild Wars 2 Tools")
-        return embed
+        return brand_embed(title=title, description=description, colour=colour)
 
     @staticmethod
     def _truncate_text(value: str, *, limit: int = 260) -> str:
