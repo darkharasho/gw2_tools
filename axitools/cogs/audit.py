@@ -134,7 +134,7 @@ class AuditCog(commands.Cog):
     async def audit_channel_command(
         self,
         interaction: discord.Interaction,
-        channel: Optional[discord.TextChannel],
+        channel: Optional[discord.TextChannel] = None,
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
