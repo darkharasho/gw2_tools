@@ -186,3 +186,25 @@ def test_guild_config_relink_defaults():
     config = GuildConfig.default()
     assert config.alliance_relink_enabled is False
     assert config.alliance_relink_last_server is None
+
+
+def test_audit_channel_blacklist_round_trip(tmp_path):
+    from axitools.storage import StorageManager, GuildConfig
+
+    storage = StorageManager(tmp_path)
+    guild_id = 424242
+    config = GuildConfig.default()
+    # mix of int, str-int, duplicate, and invalid entries
+    config.audit_channel_blacklist = [111, "222", 111, "bad", 333]
+    storage.save_config(guild_id, config)
+
+    loaded = storage.get_config(guild_id)
+    assert loaded.audit_channel_blacklist == [111, 222, 333]
+
+
+def test_audit_channel_blacklist_defaults_empty(tmp_path):
+    from axitools.storage import StorageManager
+
+    storage = StorageManager(tmp_path)
+    loaded = storage.get_config(999001)
+    assert loaded.audit_channel_blacklist == []

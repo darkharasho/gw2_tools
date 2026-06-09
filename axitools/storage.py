@@ -217,6 +217,7 @@ class GuildConfig:
     audit_channel_id: Optional[int] = None
     audit_gw2_admin_api_key: Optional[str] = None
     audit_gw2_guild_id: Optional[str] = None
+    audit_channel_blacklist: List[int] = field(default_factory=list)
     alliance_channel_id: Optional[int] = None
     alliance_guild_id: Optional[str] = None
     alliance_guild_name: Optional[str] = None
@@ -1462,6 +1463,27 @@ class StorageManager:
             payload["audit_gw2_guild_id"] = cleaned or None
         else:
             payload["audit_gw2_guild_id"] = None
+        raw_blacklist = payload.get("audit_channel_blacklist")
+        cleaned_blacklist: List[int] = []
+        if isinstance(raw_blacklist, list):
+            seen_blacklist: set[int] = set()
+            for entry in raw_blacklist:
+                if isinstance(entry, bool):
+                    continue
+                if isinstance(entry, int):
+                    value = entry
+                elif isinstance(entry, str):
+                    try:
+                        value = int(entry)
+                    except ValueError:
+                        continue
+                else:
+                    continue
+                if value in seen_blacklist:
+                    continue
+                cleaned_blacklist.append(value)
+                seen_blacklist.add(value)
+        payload["audit_channel_blacklist"] = cleaned_blacklist
         alliance_channel_id = payload.get("alliance_channel_id")
         if isinstance(alliance_channel_id, int):
             payload["alliance_channel_id"] = alliance_channel_id
@@ -1691,6 +1713,28 @@ class StorageManager:
         if config.audit_gw2_guild_id is not None:
             cleaned = normalise_guild_id(str(config.audit_gw2_guild_id))
             config.audit_gw2_guild_id = cleaned or None
+        if isinstance(config.audit_channel_blacklist, list):
+            cleaned_blacklist: List[int] = []
+            seen_blacklist: set[int] = set()
+            for entry in config.audit_channel_blacklist:
+                if isinstance(entry, bool):
+                    continue
+                if isinstance(entry, int):
+                    value = entry
+                elif isinstance(entry, str):
+                    try:
+                        value = int(entry)
+                    except ValueError:
+                        continue
+                else:
+                    continue
+                if value in seen_blacklist:
+                    continue
+                cleaned_blacklist.append(value)
+                seen_blacklist.add(value)
+            config.audit_channel_blacklist = cleaned_blacklist
+        else:
+            config.audit_channel_blacklist = []
         if config.alliance_channel_id is not None:
             try:
                 config.alliance_channel_id = int(config.alliance_channel_id)
