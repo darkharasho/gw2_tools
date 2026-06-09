@@ -605,6 +605,8 @@ class AuditCog(commands.Cog):
     async def on_message_delete(self, message: discord.Message) -> None:
         if message.guild is None:
             return
+        if self._is_channel_blacklisted(message.guild, message.channel.id):
+            return
         author = message.author if isinstance(message.author, discord.abc.User) else None
         actor = None
         if author:
@@ -637,6 +639,8 @@ class AuditCog(commands.Cog):
         self, before: discord.Message, after: discord.Message
     ) -> None:
         if after.guild is None:
+            return
+        if self._is_channel_blacklisted(after.guild, after.channel.id):
             return
         content_changed = before.content != after.content
         attachments_changed = len(before.attachments) != len(after.attachments)
@@ -719,6 +723,12 @@ class AuditCog(commands.Cog):
         after: discord.VoiceState,
     ) -> None:
         if member.guild is None:
+            return
+        before_id = before.channel.id if before.channel else None
+        after_id = after.channel.id if after.channel else None
+        if self._is_channel_blacklisted(
+            member.guild, before_id
+        ) or self._is_channel_blacklisted(member.guild, after_id):
             return
         event_type = None
         if before.mute != after.mute:
@@ -860,6 +870,8 @@ class AuditCog(commands.Cog):
     async def on_guild_channel_create(
         self, channel: discord.abc.GuildChannel
     ) -> None:
+        if self._is_channel_blacklisted(channel.guild, channel.id):
+            return
         actor = await self._find_audit_entry_user(
             channel.guild, discord.AuditLogAction.channel_create, channel.id
         )
@@ -875,6 +887,8 @@ class AuditCog(commands.Cog):
     async def on_guild_channel_delete(
         self, channel: discord.abc.GuildChannel
     ) -> None:
+        if self._is_channel_blacklisted(channel.guild, channel.id):
+            return
         actor = await self._find_audit_entry_user(
             channel.guild, discord.AuditLogAction.channel_delete, channel.id
         )
@@ -892,6 +906,8 @@ class AuditCog(commands.Cog):
         before: discord.abc.GuildChannel,
         after: discord.abc.GuildChannel,
     ) -> None:
+        if self._is_channel_blacklisted(after.guild, after.id):
+            return
         details: dict[str, str] = {}
         if before.name != after.name:
             details["Name"] = f"{before.name} -> {after.name}"
@@ -1036,6 +1052,14 @@ class AuditCog(commands.Cog):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _is_channel_blacklisted(
+        self, guild: discord.Guild, channel_id: Optional[int]
+    ) -> bool:
+        if channel_id is None:
+            return False
+        config = self.bot.get_config(guild.id)
+        return channel_id in config.audit_channel_blacklist
+
     def _audit_channel_id(self, guild: discord.Guild) -> Optional[int]:
         config = self.bot.get_config(guild.id)
         return config.audit_channel_id
