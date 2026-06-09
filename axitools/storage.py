@@ -1342,6 +1342,28 @@ class StorageManager:
         with path.open("w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
 
+    @staticmethod
+    def _normalise_channel_ids(channel_ids: Iterable[object]) -> List[int]:
+        seen: set[int] = set()
+        cleaned: List[int] = []
+        for entry in channel_ids or []:
+            if isinstance(entry, bool):
+                continue
+            if isinstance(entry, int):
+                value = entry
+            elif isinstance(entry, str):
+                try:
+                    value = int(entry)
+                except ValueError:
+                    continue
+            else:
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            cleaned.append(value)
+        return cleaned
+
     # ------------------------------------------------------------------
     # Configuration
     # ------------------------------------------------------------------
@@ -1464,26 +1486,12 @@ class StorageManager:
         else:
             payload["audit_gw2_guild_id"] = None
         raw_blacklist = payload.get("audit_channel_blacklist")
-        cleaned_blacklist: List[int] = []
         if isinstance(raw_blacklist, list):
-            seen_blacklist: set[int] = set()
-            for entry in raw_blacklist:
-                if isinstance(entry, bool):
-                    continue
-                if isinstance(entry, int):
-                    value = entry
-                elif isinstance(entry, str):
-                    try:
-                        value = int(entry)
-                    except ValueError:
-                        continue
-                else:
-                    continue
-                if value in seen_blacklist:
-                    continue
-                cleaned_blacklist.append(value)
-                seen_blacklist.add(value)
-        payload["audit_channel_blacklist"] = cleaned_blacklist
+            payload["audit_channel_blacklist"] = self._normalise_channel_ids(
+                raw_blacklist
+            )
+        else:
+            payload["audit_channel_blacklist"] = []
         alliance_channel_id = payload.get("alliance_channel_id")
         if isinstance(alliance_channel_id, int):
             payload["alliance_channel_id"] = alliance_channel_id
@@ -1714,25 +1722,9 @@ class StorageManager:
             cleaned = normalise_guild_id(str(config.audit_gw2_guild_id))
             config.audit_gw2_guild_id = cleaned or None
         if isinstance(config.audit_channel_blacklist, list):
-            cleaned_blacklist: List[int] = []
-            seen_blacklist: set[int] = set()
-            for entry in config.audit_channel_blacklist:
-                if isinstance(entry, bool):
-                    continue
-                if isinstance(entry, int):
-                    value = entry
-                elif isinstance(entry, str):
-                    try:
-                        value = int(entry)
-                    except ValueError:
-                        continue
-                else:
-                    continue
-                if value in seen_blacklist:
-                    continue
-                cleaned_blacklist.append(value)
-                seen_blacklist.add(value)
-            config.audit_channel_blacklist = cleaned_blacklist
+            config.audit_channel_blacklist = self._normalise_channel_ids(
+                config.audit_channel_blacklist
+            )
         else:
             config.audit_channel_blacklist = []
         if config.alliance_channel_id is not None:
