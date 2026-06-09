@@ -16,18 +16,26 @@ from ..branding import BRAND_COLOUR
 LOGGER = logging.getLogger(__name__)
 
 
-PUBLIC_COMMANDS = {
-    "apikey add",
-    "apikey refresh",
-    "apikey remove",
-    "apikey help",
-    "apikey list",
-    "guildrole clear",
-    "guildrole set",
-    "gw2guild search",
-    "help",
-    "reset",
-}
+DEFAULT_CATEGORY = "Other"
+
+
+def _walk_extras(command: app_commands.Command, key: str):
+    """Return the nearest ``extras[key]`` value from the command or its parents."""
+    node = command
+    while node is not None:
+        value = getattr(node, "extras", {}).get(key)
+        if value is not None:
+            return value
+        node = getattr(node, "parent", None)
+    return None
+
+
+def _is_public(command: app_commands.Command) -> bool:
+    return bool(_walk_extras(command, "public"))
+
+
+def _category(command: app_commands.Command) -> str:
+    return _walk_extras(command, "category") or DEFAULT_CATEGORY
 
 
 def _collect_commands(
@@ -70,22 +78,17 @@ class HelpCog(commands.Cog):
         command_entries = _collect_commands(commands_list)
         LOGGER.info("Collected %d commands for help display", len(command_entries))
 
-        lines_by_group: dict[str, list[str]] = defaultdict(list)
+        lines_by_category: dict[str, list[str]] = defaultdict(list)
 
         for command in command_entries:
-            qualified_name = command.qualified_name
-            # Case-insensitive check for public commands
-            is_public = qualified_name.lower() in {cmd.lower() for cmd in PUBLIC_COMMANDS}
-            
-            if not is_authorised and not is_public:
+            if not is_authorised and not _is_public(command):
                 continue
 
-            group_name = qualified_name.split(" ", 1)[0]
-            lines_by_group[group_name].append(
-                f"/{qualified_name} — {command.description or 'No description provided.'}"
+            lines_by_category[_category(command)].append(
+                f"/{command.qualified_name} — {command.description or 'No description provided.'}"
             )
 
-        if not lines_by_group:
+        if not lines_by_category:
             await interaction.response.send_message(
                 "No commands are available for your current permissions.",
                 ephemeral=True,
@@ -104,9 +107,9 @@ class HelpCog(commands.Cog):
         )
         embed.set_footer(text="Guild Wars 2 Tools")
 
-        for group_name in sorted(lines_by_group.keys()):
-            entries = "\n".join(sorted(lines_by_group[group_name]))
-            embed.add_field(name=f"/{group_name}", value=entries, inline=False)
+        for category in sorted(lines_by_category.keys()):
+            entries = "\n".join(sorted(lines_by_category[category]))
+            embed.add_field(name=category, value=entries, inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
