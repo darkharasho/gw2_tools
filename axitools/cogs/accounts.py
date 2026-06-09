@@ -29,7 +29,9 @@ class AccountsCog(commands.Cog):
     REQUIRED_PERMISSIONS = {"account", "characters", "guilds", "wvw"}
 
     guild_roles = app_commands.Group(
-        name="guildroles", description="Configure Guild Wars 2 guild to role mappings."
+        name="guildroles",
+        description="Configure Guild Wars 2 guild to role mappings.",
+        extras={"category": "Moderation"},
     )
     guild_role_allowlist = app_commands.Group(
         name="whitelist",
@@ -37,13 +39,19 @@ class AccountsCog(commands.Cog):
         parent=guild_roles,
     )
     guild_role_preferences = app_commands.Group(
-        name="guildrole", description="Set your preferred guild role for auto sync."
+        name="guildrole",
+        description="Set your preferred guild role for auto sync.",
+        extras={"public": True, "category": "GW2 Account"},
     )
     api_keys = app_commands.Group(
-        name="apikey", description="Manage your Guild Wars 2 API keys."
+        name="apikey",
+        description="Manage your Guild Wars 2 API keys.",
+        extras={"public": True, "category": "GW2 Account"},
     )
     guild_lookup = app_commands.Group(
-        name="gw2guild", description="Look up Guild Wars 2 guild information."
+        name="gw2guild",
+        description="Look up Guild Wars 2 guild information.",
+        extras={"public": True, "category": "GW2 Account"},
     )
 
     def __init__(self, bot: AxiToolsBot) -> None:

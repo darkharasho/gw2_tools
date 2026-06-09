@@ -1418,7 +1418,7 @@ class CompConfigView(discord.ui.View):
         await interaction.response.send_modal(ClassesModal(self))
 
 
-class CompCog(commands.GroupCog, name="comp"):
+class CompCog(commands.GroupCog, name="comp", group_extras={"category": "Builds & Comps"}):
     """Schedule and manage guild composition signups."""
 
     POST_CHECK_INTERVAL_MINUTES = 1

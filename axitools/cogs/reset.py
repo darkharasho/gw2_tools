@@ -57,7 +57,7 @@ class ResetCog(commands.Cog):
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="reset", description="Show the next WvW weekly reset time.")
+    @app_commands.command(name="reset", description="Show the next WvW weekly reset time.", extras={"public": True, "category": "WvW"})
     async def reset_command(self, interaction: discord.Interaction) -> None:
         eu = False
         if interaction.guild:

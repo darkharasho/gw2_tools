@@ -277,7 +277,7 @@ class _AllianceCloseButton(discord.ui.Button[AllianceScheduleView]):
         self.view.stop()
 
 
-class AllianceMatchupCog(commands.GroupCog, name="alliance"):
+class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"category": "WvW"}):
     """Configure and post WvW matchup summaries for alliance guilds."""
 
     relink_group = app_commands.Group(name="relink", description="Configure server link announcements.")
@@ -1150,6 +1150,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance"):
 
     @app_commands.command(name="status", description="Show alliance matchup configuration.")
     async def status(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
             return

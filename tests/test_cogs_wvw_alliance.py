@@ -515,6 +515,7 @@ async def test_status_shows_relink_state(mock_bot_alliance):
     config.alliance_relink_last_server = "HoJ"
 
     mock_bot_alliance.get_config = MagicMock(return_value=config)
+    mock_bot_alliance.ensure_authorised = AsyncMock(return_value=True)
 
     interaction = MagicMock()
     interaction.guild = MagicMock()

@@ -272,7 +272,7 @@ def _build_youtube_video_embed(details: dict, *, is_vod: bool = False, avatar_ur
     return embed
 
 
-class StreamingCog(commands.GroupCog, name="stream"):
+class StreamingCog(commands.GroupCog, name="stream", group_extras={"category": "Announcements"}):
     """Notify Discord channels when YouTube channels or Twitch streamers go live."""
 
     POLL_INTERVAL_MINUTES = 5

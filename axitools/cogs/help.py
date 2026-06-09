@@ -48,7 +48,7 @@ class HelpCog(commands.Cog):
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="help", description="Show available AxiTools commands.")
+    @app_commands.command(name="help", description="Show available AxiTools commands.", extras={"public": True, "category": "General"})
     async def help_command(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         member = interaction.user if isinstance(interaction.user, discord.Member) else None

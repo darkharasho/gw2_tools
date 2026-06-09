@@ -47,6 +47,7 @@ class SelectCog(commands.Cog):
         # previously cached administrator-only defaults and surfaces the
         # command to authorised moderator roles governed by runtime checks.
         default_permissions=discord.Permissions(),
+        extras={"category": "Moderation"},
     )
 
     def __init__(self, bot: AxiToolsBot) -> None:

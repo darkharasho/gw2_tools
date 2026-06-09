@@ -189,7 +189,7 @@ class ConfigCog(commands.Cog):
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="config", description="Configure AxiTools settings for this server.")
+    @app_commands.command(name="config", description="Configure AxiTools settings for this server.", extras={"category": "Server Setup"})
     async def config_command(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used inside a server.", ephemeral=True)
@@ -266,7 +266,7 @@ class ConfigCog(commands.Cog):
 
         return embed
 
-    @app_commands.command(name="status", description="View AxiTools configuration status for this server.")
+    @app_commands.command(name="status", description="View AxiTools configuration status for this server.", extras={"category": "Server Setup"})
     async def status_command(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used inside a server.", ephemeral=True)

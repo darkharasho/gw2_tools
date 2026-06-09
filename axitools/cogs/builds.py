@@ -160,7 +160,7 @@ class BuildDeleteModal(discord.ui.Modal):
         )
 
 
-class BuildsCog(commands.GroupCog, name="builds"):
+class BuildsCog(commands.GroupCog, name="builds", group_extras={"category": "Builds & Comps"}):
     """Manage Guild Wars 2 build posts."""
 
     description = "Manage Guild Wars 2 builds."

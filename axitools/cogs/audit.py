@@ -118,7 +118,9 @@ class AuditCog(commands.Cog):
     """Audit logging and query commands."""
 
     audit = app_commands.Group(
-        name="audit", description="Configure and query audit logging."
+        name="audit",
+        description="Configure and query audit logging.",
+        extras={"category": "Server Setup"},
     )
     audit_gw2_key = app_commands.Group(
         name="gw2_key",

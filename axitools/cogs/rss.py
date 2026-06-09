@@ -118,7 +118,7 @@ def _convert_struct_time(struct_time: Optional[Tuple[int, ...]]) -> Optional[dat
         return None
 
 
-class RssFeedsCog(commands.GroupCog, name="rss"):
+class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Announcements"}):
     """Manage RSS feed subscriptions and push updates to Discord channels."""
 
     CHECK_INTERVAL_MINUTES = 10
@@ -390,6 +390,8 @@ class RssFeedsCog(commands.GroupCog, name="rss"):
 
     @app_commands.command(name="list", description="List configured RSS feeds.")
     async def list_feeds(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
             return
