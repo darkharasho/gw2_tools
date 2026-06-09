@@ -269,3 +269,20 @@ def test_audit_cog_status_missing():
     status = cog.get_config_status(guild_id=1)
 
     assert all(f.state == "missing" for f in status.fields)
+
+
+def test_audit_cog_status_lists_blacklist():
+    from axitools.cogs.audit import AuditCog
+
+    config = MagicMock()
+    config.audit_channel_id = 11111
+    config.audit_gw2_guild_id = "abc-123"
+    config.audit_channel_blacklist = [222, 333]
+    cog = AuditCog.__new__(AuditCog)
+    cog.bot = _make_mock_bot(config)
+
+    status = cog.get_config_status(guild_id=1)
+
+    assert any(f.label == "Blacklisted Channels" for f in status.fields)
+    field = next(f for f in status.fields if f.label == "Blacklisted Channels")
+    assert "<#222>" in field.value and "<#333>" in field.value

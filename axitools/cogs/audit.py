@@ -1579,6 +1579,13 @@ class AuditCog(commands.Cog):
                 value="Not configured — use /audit gw2_guild",
                 state="missing",
             ))
+        blacklist = config.audit_channel_blacklist
+        if isinstance(blacklist, list) and blacklist:
+            fields.append(StatusField(
+                label="Blacklisted Channels",
+                value=", ".join(f"<#{cid}>" for cid in blacklist),
+                state="ok",
+            ))
         return ConfigStatus(
             title="Audit Logging",
             fields=fields,
