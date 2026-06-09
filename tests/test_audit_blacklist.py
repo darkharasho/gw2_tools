@@ -126,6 +126,21 @@ def test_blacklist_list_runs():
     interaction.response.send_message.assert_awaited()
 
 
+def test_blacklist_add_replies_with_branded_embed():
+    cog, config = _make_command_cog([])
+    interaction = _make_interaction()
+    channel = MagicMock()
+    channel.id = 700
+
+    asyncio.run(cog.audit_blacklist_add_command.callback(cog, interaction, channel))
+
+    _, kwargs = interaction.response.send_message.call_args
+    embed = kwargs.get("embed")
+    assert embed is not None
+    assert embed.footer.text == "Guild Wars 2 Tools"
+    assert embed.title == "Audit blacklist"
+
+
 def test_blacklist_channel_id_autocomplete_matches_name_and_empty():
     cog, config = _make_command_cog([700, 800])
     interaction = _make_interaction()

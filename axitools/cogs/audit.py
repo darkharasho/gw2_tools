@@ -16,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
-from ..branding import BRAND_COLOUR
+from ..branding import BRAND_COLOUR, brand_embed
 from ..config_status import ConfigStatus, StatusField
 from ..http_utils import read_response_text
 from ..storage import normalise_guild_id, utcnow
@@ -148,6 +148,22 @@ class AuditCog(commands.Cog):
     # ------------------------------------------------------------------
     # Configuration commands
     # ------------------------------------------------------------------
+    async def _reply(
+        self,
+        interaction: discord.Interaction,
+        description: str,
+        *,
+        title: str = "Audit",
+        use_followup: bool = False,
+    ) -> None:
+        """Send a branded ephemeral embed reply."""
+        embed = brand_embed(title=title, description=description)
+        if use_followup:
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # ------------------------------------------------------------------
     @audit.command(
         name="channel",
         description="Set the audit log channel (leave blank to disable).",
@@ -171,7 +187,7 @@ class AuditCog(commands.Cog):
             config.audit_channel_id = channel.id
             message = f"Audit log channel set to {channel.mention}."
         self.bot.save_config(interaction.guild.id, config)
-        await interaction.response.send_message(message, ephemeral=True)
+        await self._reply(interaction, message)
 
     @audit_gw2_key.command(
         name="add",
@@ -192,15 +208,15 @@ class AuditCog(commands.Cog):
         cleaned_name = self._normalise_key_name(name)
         cleaned_key = api_key.strip()
         if not cleaned_name:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "Key name cannot be empty and must contain letters, numbers, spaces, `_`, `-`, or `.`.",
-                ephemeral=True,
+                title="GW2 audit keys",
             )
             return
         if not cleaned_key:
-            await interaction.response.send_message(
-                "API key cannot be empty.",
-                ephemeral=True,
+            await self._reply(
+                interaction, "API key cannot be empty.", title="GW2 audit keys"
             )
             return
 
@@ -214,7 +230,7 @@ class AuditCog(commands.Cog):
             if existed
             else f"Added GW2 audit key `{cleaned_name}`."
         )
-        await interaction.response.send_message(message, ephemeral=True)
+        await self._reply(interaction, message, title="GW2 audit keys")
 
     @audit_gw2_key.command(
         name="list",
@@ -230,9 +246,10 @@ class AuditCog(commands.Cog):
 
         keys = self.bot.storage.get_audit_gw2_api_keys(interaction.guild.id)
         if not keys:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "No managed GW2 audit keys configured.",
-                ephemeral=True,
+                title="GW2 audit keys",
             )
             return
 
@@ -240,9 +257,10 @@ class AuditCog(commands.Cog):
             f"- `{name}`: `{self._mask_api_key(key)}`"
             for name, key in sorted(keys.items(), key=lambda item: item[0].casefold())
         ]
-        await interaction.response.send_message(
+        await self._reply(
+            interaction,
             "Configured GW2 audit keys:\n" + "\n".join(lines),
-            ephemeral=True,
+            title="GW2 audit keys",
         )
 
     @audit_gw2_key.command(
@@ -260,25 +278,28 @@ class AuditCog(commands.Cog):
 
         cleaned_name = self._normalise_key_name(name)
         if not cleaned_name:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "Please provide a key name to remove.",
-                ephemeral=True,
+                title="GW2 audit keys",
             )
             return
 
         guild_id = interaction.guild.id
         keys = self.bot.storage.get_audit_gw2_api_keys(guild_id)
         if cleaned_name not in keys:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 f"No GW2 audit key named `{cleaned_name}` was found.",
-                ephemeral=True,
+                title="GW2 audit keys",
             )
             return
         keys.pop(cleaned_name, None)
         self.bot.storage.save_audit_gw2_api_keys(guild_id, keys)
-        await interaction.response.send_message(
+        await self._reply(
+            interaction,
             f"Removed GW2 audit key `{cleaned_name}`.",
-            ephemeral=True,
+            title="GW2 audit keys",
         )
 
     @audit_gw2_key_remove_command.autocomplete("name")
@@ -315,9 +336,10 @@ class AuditCog(commands.Cog):
         config = self.bot.get_config(guild_id)
         legacy_key = (config.audit_gw2_admin_api_key or "").strip()
         if not legacy_key:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "No legacy GW2 audit key is set in config, so there is nothing to migrate.",
-                ephemeral=True,
+                title="GW2 audit keys",
             )
             return
 
@@ -340,9 +362,10 @@ class AuditCog(commands.Cog):
 
         config.audit_gw2_admin_api_key = None
         self.bot.save_config(guild_id, config)
-        await interaction.response.send_message(
+        await self._reply(
+            interaction,
             f"Migrated legacy GW2 audit key to managed key `{desired_name}` and cleared the legacy config key.",
-            ephemeral=True,
+            title="GW2 audit keys",
         )
 
     @audit.command(
@@ -367,7 +390,7 @@ class AuditCog(commands.Cog):
             if cleaned
             else "Guild Wars 2 audit guild cleared."
         )
-        await interaction.response.send_message(message, ephemeral=True)
+        await self._reply(interaction, message)
 
     @audit_blacklist.command(
         name="add",
@@ -384,16 +407,18 @@ class AuditCog(commands.Cog):
 
         config = self.bot.get_config(interaction.guild.id)
         if channel.id in config.audit_channel_blacklist:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 f"<#{channel.id}> is already excluded from audit logging.",
-                ephemeral=True,
+                title="Audit blacklist",
             )
             return
         config.audit_channel_blacklist.append(channel.id)
         self.bot.save_config(interaction.guild.id, config)
-        await interaction.response.send_message(
+        await self._reply(
+            interaction,
             f"<#{channel.id}> will no longer be audit logged.",
-            ephemeral=True,
+            title="Audit blacklist",
         )
 
     @audit_blacklist.command(
@@ -424,26 +449,29 @@ class AuditCog(commands.Cog):
             except ValueError:
                 target_id = None
         if target_id is None:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "Provide a channel or a numeric channel ID to remove.",
-                ephemeral=True,
+                title="Audit blacklist",
             )
             return
 
         config = self.bot.get_config(interaction.guild.id)
         if target_id not in config.audit_channel_blacklist:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 f"<#{target_id}> is not in the audit blacklist.",
-                ephemeral=True,
+                title="Audit blacklist",
             )
             return
         config.audit_channel_blacklist = [
             cid for cid in config.audit_channel_blacklist if cid != target_id
         ]
         self.bot.save_config(interaction.guild.id, config)
-        await interaction.response.send_message(
+        await self._reply(
+            interaction,
             f"<#{target_id}> will be audit logged again.",
-            ephemeral=True,
+            title="Audit blacklist",
         )
 
     @audit_blacklist_remove_command.autocomplete("channel_id")
@@ -478,15 +506,17 @@ class AuditCog(commands.Cog):
 
         config = self.bot.get_config(interaction.guild.id)
         if not config.audit_channel_blacklist:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "No channels are excluded from audit logging.",
-                ephemeral=True,
+                title="Audit blacklist",
             )
             return
         lines = "\n".join(f"<#{cid}>" for cid in config.audit_channel_blacklist)
-        await interaction.response.send_message(
+        await self._reply(
+            interaction,
             f"Channels excluded from audit logging:\n{lines}",
-            ephemeral=True,
+            title="Audit blacklist",
         )
 
     # ------------------------------------------------------------------
@@ -504,6 +534,8 @@ class AuditCog(commands.Cog):
             return
         if interaction.guild is None:
             return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
 
         user_id = user.id
         store = self.bot.storage.get_audit_store(interaction.guild.id)
@@ -530,9 +562,10 @@ class AuditCog(commands.Cog):
                 seen_gw2.add(key)
                 gw2_rows.append(row)
         if not discord_rows and not gw2_rows:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "No audit entries found for that user.",
-                ephemeral=True,
+                use_followup=True,
             )
             return
 
@@ -581,7 +614,7 @@ class AuditCog(commands.Cog):
         buffer.write("\n")
         buffer.seek(0)
         file = discord.File(fp=buffer, filename="audit_results.txt")
-        await interaction.response.send_message(file=file, ephemeral=True)
+        await interaction.followup.send(file=file, ephemeral=True)
 
     @audit.command(
         name="historical_query",
@@ -598,20 +631,23 @@ class AuditCog(commands.Cog):
 
         query = username.strip()
         if not query:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "Please provide a Discord username to search for.",
-                ephemeral=True,
             )
             return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
 
         store = self.bot.storage.get_audit_store(interaction.guild.id)
         rows = store.query_discord_events(
             user_query=query, limit=AUDIT_QUERY_LIMIT
         )
         if not rows:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "No Discord audit entries found for that username.",
-                ephemeral=True,
+                use_followup=True,
             )
             return
 
@@ -630,7 +666,7 @@ class AuditCog(commands.Cog):
         buffer.write("\n")
         buffer.seek(0)
         file = discord.File(fp=buffer, filename="discord_audit.txt")
-        await interaction.response.send_message(file=file, ephemeral=True)
+        await interaction.followup.send(file=file, ephemeral=True)
 
     @audit.command(
         name="gw2_query",
@@ -644,13 +680,16 @@ class AuditCog(commands.Cog):
             return
         if interaction.guild is None:
             return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
 
         store = self.bot.storage.get_audit_store(interaction.guild.id)
         rows = store.query_gw2_events(user_query=user, limit=GW2_QUERY_LIMIT)
         if not rows:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 "No Guild Wars 2 audit entries found for that user.",
-                ephemeral=True,
+                use_followup=True,
             )
             return
 
@@ -665,7 +704,7 @@ class AuditCog(commands.Cog):
         buffer.write("\n")
         buffer.seek(0)
         file = discord.File(fp=buffer, filename="gw2_audit.txt")
-        await interaction.response.send_message(file=file, ephemeral=True)
+        await interaction.followup.send(file=file, ephemeral=True)
 
     # ------------------------------------------------------------------
     # Event listeners
