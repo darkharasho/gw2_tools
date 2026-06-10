@@ -24,9 +24,11 @@ _Date: 2026-06-09 · Implements menu items A + C + E from `docs/command-audit-20
    - Anything with its own `add`/`list`/`remove` lifecycle keeps its **own** subgroup
      (`/audit apikey …`, `/audit blacklist …`) — see the nesting constraint below.
    - One-shot actions stay as direct verbs on the group (`/alliance post`, `/alliance refresh`).
-4. **Simple CRUD features stay flat.** `/builds`, `/stream`, `/rss` already read intuitively
-   (`/builds add`); wrapping them in `manage`/`setup` only adds a redundant token. Intent subgroups
-   apply to `audit`, `alliance`, and `config` only.
+4. **Threshold rule for intent subgroups.** A feature gets intent/area subgroups when it has
+   **≥5 commands across mixed concerns** → `audit`, `alliance`, `config`, `guildroles`. A feature
+   with ≤4 cohesive CRUD commands stays **flat** → `builds`, `stream`, `rss`, `apikey`, `gw2guild`,
+   `select`, `comp`. This puts "type the group, discover the commands" exactly where it helps and
+   avoids redundant names like `/stream view list`.
 5. Verbs: `add` / `remove` / `edit` / `list` / `set` / `clear`. `set` may act as upsert for
    single-value config (`/rss set`).
 6. Drop redundant prefixes inside an already-namespaced group (`/audit gw2_query` → `/audit query gw2`).
@@ -146,8 +148,9 @@ E ships and is verified before any rename, so the A/C diffs apply to the already
 ## Open questions resolved
 - `/config` bare command → `/config setup` (only way to fold `status` under a group; `setup` matches
   the intent-subgroup vocabulary).
-- Intent subgroups (`setup`, `query`) apply to `audit`, `alliance`, `config` — the features that mix
-  configuration, queries, and actions. Simple CRUD features (`builds`, `stream`, `rss`) stay flat.
+- Intent/area subgroups apply per the **threshold rule** (≥5 mixed commands): `audit`, `alliance`,
+  `config`, `guildroles`. Simple CRUD features (`builds`, `stream`, `rss`, `apikey`, `gw2guild`,
+  `select`, `comp`) stay flat.
 - Leaf names carry no underscores (`/audit setup guild`, not `gw2_guild`).
 - API-key systems are NOT merged (user `/apikey` vs guild `/audit apikey`); they stay distinct but
   now share the `apikey` vocabulary, which the `/help` categories disambiguate.
