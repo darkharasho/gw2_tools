@@ -28,8 +28,13 @@ class GuildRolesCog(AccountsSharedMixin, commands.Cog):
         description="Configure Guild Wars 2 guild to role mappings.",
         extras={"category": "Moderation"},
     )
+    guild_roles_alliance = app_commands.Group(
+        name="alliance",
+        description="Alliance guild used for WvW membership checks in role audits.",
+        parent=guild_roles,
+    )
     guild_role_allowlist = app_commands.Group(
-        name="whitelist",
+        name="allowlist",
         description="Manage preferred guild role allowlist entries.",
         parent=guild_roles,
     )
@@ -582,8 +587,8 @@ class GuildRolesCog(AccountsSharedMixin, commands.Cog):
             ),
         )
 
-    @guild_roles.command(
-        name="setalliance",
+    @guild_roles_alliance.command(
+        name="set",
         description="Set the alliance guild used for WvW membership checks in role audits.",
     )
     @app_commands.describe(guild_id="Guild Wars 2 guild ID to use for alliance WvW checks")
@@ -614,8 +619,8 @@ class GuildRolesCog(AccountsSharedMixin, commands.Cog):
             description=f"WvW membership checks will use **{alliance_label}**.",
         )
 
-    @guild_roles.command(
-        name="clearalliance",
+    @guild_roles_alliance.command(
+        name="clear",
         description="Clear the alliance guild used for WvW membership checks in role audits.",
     )
     async def clear_alliance_guild(self, interaction: discord.Interaction) -> None:
