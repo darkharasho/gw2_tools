@@ -19,8 +19,8 @@ def test_config_status_with_setup_command():
     fields = [
         StatusField(label="Channel", value="not set", state="missing"),
     ]
-    status = ConfigStatus(title="Builds", fields=fields, setup_command="/config")
-    assert status.setup_command == "/config"
+    status = ConfigStatus(title="Builds", fields=fields, setup_command="/config setup")
+    assert status.setup_command == "/config setup"
     assert len(status.fields) == 1
 
 
@@ -203,16 +203,16 @@ def test_comps_cog_status_missing():
 
 
 # ------------------------------------------------------------------
-# AccountsCog
+# AccountSelfCog
 # ------------------------------------------------------------------
 
 def test_accounts_cog_status_ok():
-    from axitools.cogs.accounts import AccountsCog
+    from axitools.cogs.account_self import AccountSelfCog
 
     config = MagicMock()
     bot = _make_mock_bot(config)
     bot.storage.count_api_keys.return_value = 5
-    cog = AccountsCog.__new__(AccountsCog)
+    cog = AccountSelfCog.__new__(AccountSelfCog)
     cog.bot = bot
 
     status = cog.get_config_status(guild_id=1)
@@ -224,12 +224,12 @@ def test_accounts_cog_status_ok():
 
 
 def test_accounts_cog_status_missing():
-    from axitools.cogs.accounts import AccountsCog
+    from axitools.cogs.account_self import AccountSelfCog
 
     config = MagicMock()
     bot = _make_mock_bot(config)
     bot.storage.count_api_keys.return_value = 0
-    cog = AccountsCog.__new__(AccountsCog)
+    cog = AccountSelfCog.__new__(AccountSelfCog)
     cog.bot = bot
 
     status = cog.get_config_status(guild_id=1)

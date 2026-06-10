@@ -20,6 +20,36 @@ async def test_wvw_alliance_init(mock_bot_alliance):
 
 
 @pytest.mark.asyncio
+async def test_alliance_command_surface(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    qualified_names = {
+        cmd.qualified_name for cmd in cog.walk_app_commands()
+    }
+
+    expected = {
+        "alliance setup guild",
+        "alliance setup channel",
+        "alliance setup time",
+        "alliance post",
+        "alliance status",
+        "alliance refresh",
+        "alliance relink enable",
+        "alliance relink disable",
+    }
+    assert expected <= qualified_names
+
+    old = {
+        "alliance setguild",
+        "alliance setchannel",
+        "alliance settime",
+        "alliance postnow",
+    }
+    assert not (old & qualified_names)
+
+
+@pytest.mark.asyncio
 async def test_fetch_guild_world_map_force_refresh_bypasses_cache(mock_bot_alliance):
     cog = AllianceMatchupCog(mock_bot_alliance)
     cog._poster_loop.cancel()
@@ -421,7 +451,7 @@ async def test_relink_enable_requires_guild_and_channel(mock_bot_alliance):
     interaction.response.send_message.assert_awaited_once()
     args, kwargs = interaction.response.send_message.call_args
     assert kwargs.get("ephemeral") is True
-    assert "setguild" in (args[0] if args else kwargs.get("content", ""))
+    assert "setup guild" in (args[0] if args else kwargs.get("content", ""))
 
 
 @pytest.mark.asyncio

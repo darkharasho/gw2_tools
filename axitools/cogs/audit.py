@@ -122,8 +122,18 @@ class AuditCog(commands.Cog):
         description="Configure and query audit logging.",
         extras={"category": "Server Setup"},
     )
+    audit_setup = app_commands.Group(
+        name="setup",
+        description="Configure audit logging.",
+        parent=audit,
+    )
+    audit_query = app_commands.Group(
+        name="query",
+        description="Query audit entries.",
+        parent=audit,
+    )
     audit_gw2_key = app_commands.Group(
-        name="gw2_key",
+        name="apikey",
         description="Manage GW2 API keys used for audit syncing.",
         parent=audit,
     )
@@ -164,7 +174,7 @@ class AuditCog(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
-    @audit.command(
+    @audit_setup.command(
         name="channel",
         description="Set the audit log channel (leave blank to disable).",
     )
@@ -368,8 +378,8 @@ class AuditCog(commands.Cog):
             title="GW2 audit keys",
         )
 
-    @audit.command(
-        name="gw2_guild",
+    @audit_setup.command(
+        name="guild",
         description="Set the Guild Wars 2 guild ID to audit.",
     )
     @app_commands.describe(guild_id="Guild Wars 2 guild UUID (leave blank to clear).")
@@ -522,8 +532,8 @@ class AuditCog(commands.Cog):
     # ------------------------------------------------------------------
     # Query commands
     # ------------------------------------------------------------------
-    @audit.command(
-        name="query",
+    @audit_query.command(
+        name="discord",
         description="Query Discord audit entries for a user.",
     )
     @app_commands.describe(user="Discord user to search for.")
@@ -616,8 +626,8 @@ class AuditCog(commands.Cog):
         file = discord.File(fp=buffer, filename="audit_results.txt")
         await interaction.followup.send(file=file, ephemeral=True)
 
-    @audit.command(
-        name="historical_query",
+    @audit_query.command(
+        name="historical",
         description="Query Discord audit entries by username (including departed members).",
     )
     @app_commands.describe(username="Discord username to search for.")
@@ -668,8 +678,8 @@ class AuditCog(commands.Cog):
         file = discord.File(fp=buffer, filename="discord_audit.txt")
         await interaction.followup.send(file=file, ephemeral=True)
 
-    @audit.command(
-        name="gw2_query",
+    @audit_query.command(
+        name="gw2",
         description="Query GW2 guild log entries for a user.",
     )
     @app_commands.describe(user="Guild Wars 2 account name to search for.")
@@ -1629,7 +1639,7 @@ class AuditCog(commands.Cog):
         else:
             fields.append(StatusField(
                 label="Audit Channel",
-                value="Not configured — use /audit channel",
+                value="Not configured — use /audit setup channel",
                 state="missing",
             ))
         if config.audit_gw2_guild_id:
@@ -1641,7 +1651,7 @@ class AuditCog(commands.Cog):
         else:
             fields.append(StatusField(
                 label="GW2 Guild",
-                value="Not configured — use /audit gw2_guild",
+                value="Not configured — use /audit setup guild",
                 state="missing",
             ))
         blacklist = config.audit_channel_blacklist
@@ -1654,7 +1664,7 @@ class AuditCog(commands.Cog):
         return ConfigStatus(
             title="Audit Logging",
             fields=fields,
-            setup_command="/audit channel",
+            setup_command="/audit setup channel",
         )
 
 

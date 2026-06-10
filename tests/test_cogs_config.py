@@ -15,6 +15,12 @@ def mock_bot_config():
     return bot
 
 
+def test_config_group_qualified_names():
+    cog = ConfigCog(MagicMock())
+    assert cog.config_command.qualified_name == "config setup"
+    assert cog.status_command.qualified_name == "config status"
+
+
 @pytest.mark.asyncio
 async def test_config_command(mock_bot_config):
     cog = ConfigCog(mock_bot_config)

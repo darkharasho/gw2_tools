@@ -179,17 +179,18 @@ class StatusView(discord.ui.View):
     @discord.ui.button(label="Open Config", style=discord.ButtonStyle.primary)
     async def open_config(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.send_message(
-            "Use `/config` to update your server settings.", ephemeral=True
+            "Use `/config setup` to update your server settings.", ephemeral=True
         )
 
 
-class ConfigCog(commands.Cog):
+class ConfigCog(commands.GroupCog, name="config", group_extras={"category": "Server Setup"}):
     """Manage server configuration for AxiTools."""
 
     def __init__(self, bot: AxiToolsBot) -> None:
+        super().__init__()
         self.bot = bot
 
-    @app_commands.command(name="config", description="Configure AxiTools settings for this server.", extras={"category": "Server Setup"})
+    @app_commands.command(name="setup", description="Open AxiTools settings for this server.")
     async def config_command(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used inside a server.", ephemeral=True)
@@ -234,7 +235,7 @@ class ConfigCog(commands.Cog):
             "UpdateNotesCog",
             "SelectCog",
             "CompCog",
-            "AccountsCog",
+            "AccountSelfCog",
             "AuditCog",
         ]
 
@@ -266,7 +267,7 @@ class ConfigCog(commands.Cog):
 
         return embed
 
-    @app_commands.command(name="status", description="View AxiTools configuration status for this server.", extras={"category": "Server Setup"})
+    @app_commands.command(name="status", description="View AxiTools configuration status for this server.")
     async def status_command(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await interaction.response.send_message("This command can only be used inside a server.", ephemeral=True)
@@ -287,7 +288,7 @@ class ConfigCog(commands.Cog):
         if self._is_first_run(interaction.guild.id):
             embed.description = (
                 "Looks like AxiTools hasn't been configured yet. "
-                "Use `/config` to get started!"
+                "Use `/config setup` to get started!"
             )
 
         await interaction.response.send_message(embed=embed, view=StatusView(), ephemeral=True)
@@ -310,7 +311,7 @@ class ConfigCog(commands.Cog):
         return ConfigStatus(
             title="Bot Configuration",
             fields=fields,
-            setup_command="/config",
+            setup_command="/config setup",
         )
 
 

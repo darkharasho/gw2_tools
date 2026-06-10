@@ -5,6 +5,39 @@ from axitools.cogs.audit import AuditCog
 from axitools.storage import GuildConfig
 
 
+def test_audit_command_qualified_names():
+    names = {cmd.qualified_name for cmd in AuditCog.audit.walk_commands()}
+    expected = {
+        "audit setup channel",
+        "audit setup guild",
+        "audit query discord",
+        "audit query historical",
+        "audit query gw2",
+        "audit apikey add",
+        "audit apikey list",
+        "audit apikey remove",
+        "audit apikey migrate",
+        "audit blacklist add",
+        "audit blacklist remove",
+        "audit blacklist list",
+    }
+    assert expected <= names
+    # Old leaf command paths must be gone (hard cutover, no aliases).
+    from discord import app_commands
+
+    leaf_names = {
+        cmd.qualified_name
+        for cmd in AuditCog.audit.walk_commands()
+        if isinstance(cmd, app_commands.Command)
+    }
+    assert "audit channel" not in leaf_names
+    assert "audit gw2_guild" not in leaf_names
+    assert "audit query" not in leaf_names
+    assert "audit historical_query" not in leaf_names
+    assert "audit gw2_query" not in leaf_names
+    assert not any(n.startswith("audit gw2_key") for n in leaf_names)
+
+
 def _make_cog(blacklist):
     config = GuildConfig.default()
     config.audit_channel_blacklist = list(blacklist)

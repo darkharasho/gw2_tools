@@ -280,6 +280,7 @@ class _AllianceCloseButton(discord.ui.Button[AllianceScheduleView]):
 class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"category": "WvW"}):
     """Configure and post WvW matchup summaries for alliance guilds."""
 
+    setup_group = app_commands.Group(name="setup", description="Configure alliance matchup posts.")
     relink_group = app_commands.Group(name="relink", description="Configure server link announcements.")
 
     def __init__(self, bot: AxiToolsBot) -> None:
@@ -1088,7 +1089,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
     async def _before_loop(self) -> None:  # pragma: no cover - discord.py lifecycle
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="setguild", description="Set the alliance guild to track for WvW matchups.")
+    @setup_group.command(name="guild", description="Set the alliance guild to track for WvW matchups.")
     async def set_guild(self, interaction: discord.Interaction, guild_name: str) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
@@ -1120,7 +1121,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
                 ephemeral=True,
             )
 
-    @app_commands.command(name="setchannel", description="Set the channel for WvW matchup posts.")
+    @setup_group.command(name="channel", description="Set the channel for WvW matchup posts.")
     async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
@@ -1132,8 +1133,8 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             f"Alliance matchup posts will be sent to {channel.mention}.", ephemeral=True
         )
 
-    @app_commands.command(
-        name="settime",
+    @setup_group.command(
+        name="time",
         description="Configure when the predictive and current matchup posts are sent.",
     )
     async def set_times(self, interaction: discord.Interaction) -> None:
@@ -1217,7 +1218,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             await interaction.response.send_message("Cache cleared but could not resolve server.", ephemeral=True)
 
     @app_commands.command(
-        name="postnow",
+        name="post",
         description="Post the WvW matchup summary immediately (admin only).",
     )
     async def post_now(self, interaction: discord.Interaction, prediction: bool = False) -> None:
@@ -1258,7 +1259,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
         config = self.bot.get_config(interaction.guild.id)
         if not config.alliance_guild_id or not config.alliance_channel_id or not config.alliance_guild_name:
             await interaction.response.send_message(
-                "Set the alliance guild (`/alliance setguild`) and channel (`/alliance setchannel`) first.",
+                "Set the alliance guild (`/alliance setup guild`) and channel (`/alliance setup channel`) first.",
                 ephemeral=True,
             )
             return

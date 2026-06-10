@@ -196,7 +196,7 @@ class BuildsCog(commands.GroupCog, name="builds", group_extras={"category": "Bui
         channel = await self._get_build_channel(interaction.guild)
         if not channel:
             await interaction.response.send_message(
-                "No build channel has been configured. Ask a moderator to run /config.",
+                "No build channel has been configured. Ask a moderator to run /config setup.",
                 ephemeral=True,
             )
             return
@@ -303,7 +303,7 @@ class BuildsCog(commands.GroupCog, name="builds", group_extras={"category": "Bui
         channel = await self._get_build_channel(interaction.guild)
         if not channel:
             await interaction.response.send_message(
-                "No build channel has been configured. Ask a moderator to run /config.",
+                "No build channel has been configured. Ask a moderator to run /config setup.",
                 ephemeral=True,
             )
             return
@@ -646,13 +646,13 @@ class BuildsCog(commands.GroupCog, name="builds", group_extras={"category": "Bui
         else:
             field = StatusField(
                 label="Build Channel",
-                value="Not configured — use /config",
+                value="Not configured — use /config setup",
                 state="missing",
             )
         return ConfigStatus(
             title="GW2 Builds",
             fields=[field],
-            setup_command="/config",
+            setup_command="/config setup",
         )
 
 

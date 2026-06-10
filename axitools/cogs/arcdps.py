@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -10,7 +9,6 @@ from typing import List, Optional, Tuple, Union
 import aiohttp
 import discord
 from bs4 import BeautifulSoup, NavigableString, Tag
-from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
@@ -32,7 +30,6 @@ class ArcDpsUpdatesCog(commands.Cog):
     CHECK_INTERVAL_MINUTES = 15
     RELEASE_URL = "https://www.deltaconnected.com/arcdps/x64/"
     CHANGELOG_URL = "https://www.deltaconnected.com/arcdps/"
-    PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -325,66 +322,60 @@ class ArcDpsUpdatesCog(commands.Cog):
 
         return channel
 
-    if not PRODUCTION:
+    async def run_force_notification(self, interaction: discord.Interaction) -> None:
+        """Allow developers to trigger a notification in non-production environments."""
 
-        @app_commands.command(
-            name="arcdps_force_notification",
-            description="Send a test ArcDPS notification.",
-        )
-        async def force_notification(self, interaction: discord.Interaction) -> None:
-            """Allow developers to trigger a notification in non-production environments."""
-
-            if not interaction.guild:
-                await interaction.response.send_message(
-                    "This command must be used inside a server.", ephemeral=True
-                )
-                return
-
-            if not await self.bot.ensure_authorised(interaction):
-                return
-
-            config = self.bot.get_config(interaction.guild.id)
-            channel_id = config.arcdps_channel_id
-            if not channel_id:
-                await interaction.response.send_message(
-                    "ArcDPS notifications are disabled for this server.",
-                    ephemeral=True,
-                )
-                return
-
-            channel = await self._resolve_notification_channel(interaction.guild, channel_id)
-            if not channel:
-                await interaction.response.send_message(
-                    "Unable to locate the configured ArcDPS channel.",
-                    ephemeral=True,
-                )
-                return
-
-            release_time = datetime.now(timezone.utc)
-            changes_info = await self._fetch_latest_changes()
-            embed, thumbnail = self._build_embed(release_time, changes_info)
-
-            try:
-                send_kwargs = {"embed": embed}
-                if thumbnail:
-                    send_kwargs["file"] = thumbnail
-                await channel.send(**send_kwargs)
-            except (discord.Forbidden, discord.HTTPException):
-                await interaction.response.send_message(
-                    "Failed to send the ArcDPS notification. Check bot permissions.",
-                    ephemeral=True,
-                )
-                return
-
-            now = datetime.now(timezone.utc)
-            self._store_status(
-                interaction.guild.id, last_checked_at=now, last_updated_at=release_time
-            )
-
+        if not interaction.guild:
             await interaction.response.send_message(
-                f"Sent a test ArcDPS notification to {channel.mention}.",
+                "This command must be used inside a server.", ephemeral=True
+            )
+            return
+
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        channel_id = config.arcdps_channel_id
+        if not channel_id:
+            await interaction.response.send_message(
+                "ArcDPS notifications are disabled for this server.",
                 ephemeral=True,
             )
+            return
+
+        channel = await self._resolve_notification_channel(interaction.guild, channel_id)
+        if not channel:
+            await interaction.response.send_message(
+                "Unable to locate the configured ArcDPS channel.",
+                ephemeral=True,
+            )
+            return
+
+        release_time = datetime.now(timezone.utc)
+        changes_info = await self._fetch_latest_changes()
+        embed, thumbnail = self._build_embed(release_time, changes_info)
+
+        try:
+            send_kwargs = {"embed": embed}
+            if thumbnail:
+                send_kwargs["file"] = thumbnail
+            await channel.send(**send_kwargs)
+        except (discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message(
+                "Failed to send the ArcDPS notification. Check bot permissions.",
+                ephemeral=True,
+            )
+            return
+
+        now = datetime.now(timezone.utc)
+        self._store_status(
+            interaction.guild.id, last_checked_at=now, last_updated_at=release_time
+        )
+
+        await interaction.response.send_message(
+            f"Sent a test ArcDPS notification to {channel.mention}.",
+            ephemeral=True,
+        )
 
 
     def get_config_status(self, guild_id: int) -> ConfigStatus:
@@ -398,13 +389,13 @@ class ArcDpsUpdatesCog(commands.Cog):
         else:
             field = StatusField(
                 label="ArcDPS Channel",
-                value="Not configured — use /config",
+                value="Not configured — use /config setup",
                 state="missing",
             )
         return ConfigStatus(
             title="ArcDPS Updates",
             fields=[field],
-            setup_command="/config",
+            setup_command="/config setup",
         )
 
 

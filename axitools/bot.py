@@ -41,7 +41,8 @@ class AxiToolsBot(commands.Bot):
         await self.load_extension("axitools.cogs.config")
         await self.load_extension("axitools.cogs.audit")
         await self.load_extension("axitools.cogs.help")
-        await self.load_extension("axitools.cogs.accounts")
+        await self.load_extension("axitools.cogs.account_self")
+        await self.load_extension("axitools.cogs.guild_roles")
         await self.load_extension("axitools.cogs.select")
         await self.load_extension("axitools.cogs.builds")
         await self.load_extension("axitools.cogs.arcdps")
@@ -51,6 +52,7 @@ class AxiToolsBot(commands.Bot):
         await self.load_extension("axitools.cogs.wvw_alliance")
         await self.load_extension("axitools.cogs.reset")
         await self.load_extension("axitools.cogs.streaming")
+        await self.load_extension("axitools.cogs.dev")
 
     async def on_ready(self) -> None:
         await self._sync_global_commands()

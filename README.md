@@ -4,7 +4,7 @@ AxiTools is a multi-guild Discord bot that helps Guild Wars 2 communities organi
 
 ## Features
 
-- **Per-guild configuration** – `/config` lets server administrators choose which roles can interact with the bot and which channel or forum should receive build posts. Settings can be delivered in a DM or as an ephemeral popup and persist independently for every guild.
+- **Per-guild configuration** – `/config setup` lets server administrators choose which roles can interact with the bot and which channel or forum should receive build posts. Settings can be delivered in a DM or as an ephemeral popup and persist independently for every guild.
 - **Build management workflows** – `/builds` supports adding, editing, and deleting Guild Wars 2 builds. Each record stores the profession or elite specialisation, URLs, chat codes, optional descriptions, and audit metadata about who made the latest changes.
 - **RSS announcements** – `/rss set` subscribes the guild to an RSS or Atom feed and posts new entries into the channel you specify. `/rss list` shows paginated embeds of the configured feeds, and `/rss delete` opens a dropdown so you can pick which subscription to remove without touching other guilds.
 - **Game update notes notifications** – Subscribe a channel to the official forum's dev tracker so the latest Guild Wars 2 patch notes appear automatically, complete with timestamps and summaries.
@@ -39,7 +39,7 @@ AxiTools is a multi-guild Discord bot that helps Guild Wars 2 communities organi
    ```bash
    python -m axitools
    ```
-3. Invite the bot to your Discord server with the necessary permissions (application commands, manage messages/threads for forum posting, etc.). Once guild commands finish syncing, use `/config` to set moderator roles and the build posting channel.
+3. Invite the bot to your Discord server with the necessary permissions (application commands, manage messages/threads for forum posting, etc.). Once guild commands finish syncing, use `/config setup` to set moderator roles and the build posting channel.
 
 ## Project structure
 
@@ -58,13 +58,13 @@ Persistent data (configurations and builds) will appear under `axitools/data/` a
 
 ## Posting game update notes automatically
 
-Keep your community informed about the latest Guild Wars 2 release notes without copying them manually. Moderators can enable automated notifications through the existing `/config` command:
+Keep your community informed about the latest Guild Wars 2 release notes without copying them manually. Moderators can enable automated notifications through the existing `/config setup` command:
 
-1. Run `/config` and open the configuration view for your guild.
+1. Run `/config setup` and open the configuration view for your guild.
 2. Use the **Game update notes** dropdown to pick the channel (text or announcement) that should receive patch notifications. Choose **Clear** if you want to disable the feature later.
 3. The bot polls the official forum dev tracker every 15 minutes. When new "Game Update Notes" posts appear, it sends a rich embed containing the headline, publication timestamp, and a condensed summary, falling back to a generic message if no summary is available.
 
-When you're developing locally or testing in staging (set the `PRODUCTION` environment variable to `false`), a helper slash command—`/update_notes_force_notification`—is registered to let authorised moderators trigger the most recent notification on demand. This is useful for verifying permissions or previewing the embed formatting without waiting for the scheduler.
+When you're developing locally or testing in staging (set the `PRODUCTION` environment variable to `false`), a helper slash command—`/dev updatenotes`—is registered to let authorised moderators trigger the most recent notification on demand. This is useful for verifying permissions or previewing the embed formatting without waiting for the scheduler.
 
 ## Managing RSS feed subscriptions
 
@@ -72,7 +72,7 @@ Guild moderators can use the `/rss` command group to mirror updates from communi
 
 1. Run `/rss set` with a unique name, the feed URL, and the channel where updates should be posted. The bot validates the feed and stores the most recent entry so it does not repost historical content.
 2. Use `/rss list` to review the configured feeds for the current guild. Each subscription is isolated, so feeds configured in one server never appear in another.
-3. Run `/rss test` in non-production environments to open a dropdown of configured feeds and post the most recent entry into the feed's channel when you want to verify permissions or preview the announcement formatting.
+3. Run `/dev rsstest` in non-production environments to open a dropdown of configured feeds and post the most recent entry into the feed's channel when you want to verify permissions or preview the announcement formatting.
 4. Remove a subscription with `/rss delete`, which opens a dropdown of the configured feeds so you can select the one to delete. The bot stops polling and deletes the stored metadata for that feed.
 
 The RSS poller wakes up every 10 minutes. When it finds new entries it posts a rich embed containing the headline, summary, publication time, and link to the original article.

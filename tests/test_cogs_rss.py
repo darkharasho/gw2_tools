@@ -16,6 +16,16 @@ async def test_rss_init(mock_bot_rss):
     cog._feed_poll.cancel()
 
 
+@pytest.mark.asyncio
+async def test_rss_test_command_removed(mock_bot_rss):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+
+    qualified_names = {cmd.qualified_name for cmd in cog.walk_app_commands()}
+    assert "rss test" not in qualified_names
+    assert hasattr(cog, "run_test_feed")
+
+
 def test_extract_entry_description_preserves_markdown():
     entry = {
         "summary": (

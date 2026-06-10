@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import calendar
 import logging
-import os
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -19,6 +18,7 @@ from ..branding import BRAND_COLOUR
 from ..config_status import ConfigStatus, StatusField
 from ..rendering import clean_html, html_to_discord_markdown, truncate_embed_field
 from ..storage import RssFeedConfig
+from ._paginated_select import PaginatedSelectView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -123,7 +123,6 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
 
     CHECK_INTERVAL_MINUTES = 10
     EMBED_COLOR = BRAND_COLOUR
-    PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -477,170 +476,71 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             )
             return
 
-        view = self._FeedDeleteView(self, interaction.user, guild, feeds)
+        view = self._build_feed_select_view(
+            interaction.user,
+            guild,
+            feeds,
+            placeholder="Select an RSS feed to delete",
+            action=self._execute_delete_feed,
+        )
         await interaction.response.send_message(
             "Select the RSS feed you would like to delete.",
             view=view,
             ephemeral=True,
         )
 
-    class _FeedDeleteSelect(discord.ui.Select):
-        """Dropdown selector that deletes RSS feed subscriptions."""
+    def _build_feed_select_view(
+        self,
+        invoker: discord.abc.User,
+        guild: discord.Guild,
+        feeds: Sequence[RssFeedConfig],
+        *,
+        placeholder: str,
+        action,
+    ) -> PaginatedSelectView:
+        """Build a paginated dropdown of feeds wired to ``action``.
 
-        def __init__(self, cog: "RssFeedsCog") -> None:
-            super().__init__(
-                placeholder="Select an RSS feed to delete",
-                options=[],
-                min_values=1,
-                max_values=1,
-            )
-            self._cog = cog
-            self._feed_lookup: Dict[str, RssFeedConfig] = {}
+        ``action`` is invoked as ``await action(interaction, feed_config, selector=select)``
+        when the user picks a feed.
+        """
+        sorted_feeds = sorted(feeds, key=lambda feed: feed.name.lower())
+        feed_lookup: Dict[str, RssFeedConfig] = {feed.name: feed for feed in sorted_feeds}
 
-        def populate(
-            self,
-            guild: discord.Guild,
-            feeds: Sequence[RssFeedConfig],
-            *,
-            page: int,
-            total_pages: int,
-        ) -> None:
-            self._feed_lookup = {feed.name: feed for feed in feeds}
-            options: List[discord.SelectOption] = []
-            for feed in feeds:
-                option_label = feed.name[:100]
+        options: List[Tuple[str, str]] = []
+        descriptions: Dict[str, str] = {}
+        for feed in sorted_feeds:
+            options.append((feed.name, feed.name[:100]))
 
-                channel = guild.get_channel(feed.channel_id)
-                if isinstance(channel, discord.TextChannel):
-                    channel_name = f"#{channel.name}"
-                else:
-                    channel_name = f"ID {feed.channel_id}"
-
-                description_parts = [str(feed.url)]
-                description_parts.append(f"Channel: {channel_name}")
-                description = " • ".join(description_parts)[:100]
-                options.append(
-                    discord.SelectOption(
-                        label=option_label,
-                        value=feed.name,
-                        description=description if description else None,
-                    )
-                )
-
-            self.options = options
-            if total_pages > 1:
-                self.placeholder = (
-                    f"Select an RSS feed to delete (page {page + 1}/{total_pages})"
-                )
+            channel = guild.get_channel(feed.channel_id)
+            if isinstance(channel, discord.TextChannel):
+                channel_name = f"#{channel.name}"
             else:
-                self.placeholder = "Select an RSS feed to delete"
+                channel_name = f"ID {feed.channel_id}"
 
-        async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - UI glue
-            feed_name = self.values[0]
-            feed_config = self._feed_lookup.get(feed_name)
+            description = " • ".join([str(feed.url), f"Channel: {channel_name}"])[:100]
+            if description:
+                descriptions[feed.name] = description
+
+        async def on_select(value: str, interaction: discord.Interaction) -> None:
+            feed_config = feed_lookup.get(value)
+            select = view._select  # noqa: F821 - bound below
             if not feed_config:
                 await interaction.response.send_message(
                     "The selected RSS feed could not be found. Please close this menu and try again.",
                     ephemeral=True,
                 )
                 return
-            await self._cog._execute_delete_feed(interaction, feed_config, selector=self)
+            await action(interaction, feed_config, selector=select)
 
-    class _FeedDeleteView(discord.ui.View):
-        PAGE_SIZE = 25
-
-        def __init__(
-            self,
-            cog: "RssFeedsCog",
-            invoker: discord.abc.User,
-            guild: discord.Guild,
-            feeds: Sequence[RssFeedConfig],
-        ) -> None:
-            super().__init__(timeout=120)
-            self._invoker_id = invoker.id
-            self._guild = guild
-            self._feeds = sorted(feeds, key=lambda feed: feed.name.lower())
-            self._page = 0
-            self._select = RssFeedsCog._FeedDeleteSelect(cog)
-            self.add_item(self._select)
-
-            self._previous_button: Optional[RssFeedsCog._FeedDeletePageButton]
-            self._next_button: Optional[RssFeedsCog._FeedDeletePageButton]
-
-            if len(self._feeds) > self.PAGE_SIZE:
-                self._previous_button = RssFeedsCog._FeedDeletePageButton(self, -1)
-                self._next_button = RssFeedsCog._FeedDeletePageButton(self, 1)
-                self.add_item(self._previous_button)
-                self.add_item(self._next_button)
-            else:
-                self._previous_button = None
-                self._next_button = None
-
-            self._refresh_select()
-            self._refresh_navigation()
-
-        async def interaction_check(self, interaction: discord.Interaction) -> bool:  # pragma: no cover - UI glue
-            if interaction.user.id != self._invoker_id:
-                await interaction.response.send_message(
-                    "Only the user who invoked this command can use the dropdown.",
-                    ephemeral=True,
-                )
-                return False
-            return True
-
-        def disable(self) -> None:
-            for child in self.children:
-                if isinstance(child, (discord.ui.Select, discord.ui.Button)):
-                    child.disabled = True
-            self.stop()
-
-        def _page_count(self) -> int:
-            return max(1, (len(self._feeds) - 1) // self.PAGE_SIZE + 1)
-
-        def _current_page_feeds(self) -> Sequence[RssFeedConfig]:
-            start = self._page * self.PAGE_SIZE
-            end = start + self.PAGE_SIZE
-            return self._feeds[start:end]
-
-        def _refresh_select(self) -> None:
-            total_pages = self._page_count()
-            self._select.populate(
-                self._guild,
-                self._current_page_feeds(),
-                page=self._page,
-                total_pages=total_pages,
-            )
-
-        def _refresh_navigation(self) -> None:
-            if not self._previous_button or not self._next_button:
-                return
-            total_pages = self._page_count()
-            self._previous_button.disabled = self._page <= 0
-            self._next_button.disabled = self._page >= total_pages - 1
-
-        async def change_page(
-            self, interaction: discord.Interaction, step: int
-        ) -> None:  # pragma: no cover - UI glue
-            total_pages = self._page_count()
-            new_page = min(max(self._page + step, 0), total_pages - 1)
-            if new_page == self._page:
-                await interaction.response.defer()
-                return
-
-            self._page = new_page
-            self._refresh_select()
-            self._refresh_navigation()
-            await interaction.response.edit_message(view=self)
-
-    class _FeedDeletePageButton(discord.ui.Button):
-        def __init__(self, view: "RssFeedsCog._FeedDeleteView", step: int) -> None:
-            label = "Previous" if step < 0 else "Next"
-            super().__init__(style=discord.ButtonStyle.secondary, label=label)
-            self._view = view
-            self._step = step
-
-        async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - UI glue
-            await self._view.change_page(interaction, self._step)
+        view = PaginatedSelectView(
+            options=options,
+            page_size=PaginatedSelectView.PAGE_SIZE,
+            on_select=on_select,
+            descriptions=descriptions,
+            placeholder=placeholder,
+            invoker_id=invoker.id,
+        )
+        return view
 
     async def _execute_delete_feed(
         self,
@@ -676,164 +576,6 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         await interaction.followup.send(
             f"RSS feed **{feed_config.name}** has been removed.", ephemeral=True
         )
-
-    class _FeedTestSelect(discord.ui.Select):
-        """Dropdown selector that triggers RSS feed test posts."""
-
-        def __init__(self, cog: "RssFeedsCog") -> None:
-            super().__init__(
-                placeholder="Select an RSS feed to test",
-                options=[],
-                min_values=1,
-                max_values=1,
-            )
-            self._cog = cog
-            self._feed_lookup: Dict[str, RssFeedConfig] = {}
-
-        def populate(
-            self,
-            guild: discord.Guild,
-            feeds: Sequence[RssFeedConfig],
-            *,
-            page: int,
-            total_pages: int,
-        ) -> None:
-            self._feed_lookup = {feed.name: feed for feed in feeds}
-            options: List[discord.SelectOption] = []
-            for feed in feeds:
-                option_label = feed.name[:100]
-
-                channel = guild.get_channel(feed.channel_id)
-                if isinstance(channel, discord.TextChannel):
-                    channel_name = f"#{channel.name}"
-                else:
-                    channel_name = f"ID {feed.channel_id}"
-
-                description_parts = [str(feed.url)]
-                description_parts.append(f"Channel: {channel_name}")
-                description = " • ".join(description_parts)[:100]
-                options.append(
-                    discord.SelectOption(
-                        label=option_label,
-                        value=feed.name,
-                        description=description if description else None,
-                    )
-                )
-
-            self.options = options
-            if total_pages > 1:
-                self.placeholder = (
-                    f"Select an RSS feed to test (page {page + 1}/{total_pages})"
-                )
-            else:
-                self.placeholder = "Select an RSS feed to test"
-
-        async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - UI glue
-            feed_name = self.values[0]
-            feed_config = self._feed_lookup.get(feed_name)
-            if not feed_config:
-                await interaction.response.send_message(
-                    "The selected RSS feed could not be found. Please close this menu and try again.",
-                    ephemeral=True,
-                )
-                return
-            await self._cog._execute_test_feed(interaction, feed_config, selector=self)
-
-    class _FeedTestView(discord.ui.View):
-        PAGE_SIZE = 25
-
-        def __init__(
-            self,
-            cog: "RssFeedsCog",
-            invoker: discord.abc.User,
-            guild: discord.Guild,
-            feeds: Sequence[RssFeedConfig],
-        ) -> None:
-            super().__init__(timeout=120)
-            self._invoker_id = invoker.id
-            self._guild = guild
-            self._feeds = sorted(feeds, key=lambda feed: feed.name.lower())
-            self._page = 0
-            self._select = RssFeedsCog._FeedTestSelect(cog)
-            self.add_item(self._select)
-
-            self._previous_button: Optional[RssFeedsCog._FeedTestPageButton]
-            self._next_button: Optional[RssFeedsCog._FeedTestPageButton]
-
-            if len(self._feeds) > self.PAGE_SIZE:
-                self._previous_button = RssFeedsCog._FeedTestPageButton(self, -1)
-                self._next_button = RssFeedsCog._FeedTestPageButton(self, 1)
-                self.add_item(self._previous_button)
-                self.add_item(self._next_button)
-            else:
-                self._previous_button = None
-                self._next_button = None
-
-            self._refresh_select()
-            self._refresh_navigation()
-
-        async def interaction_check(self, interaction: discord.Interaction) -> bool:  # pragma: no cover - UI glue
-            if interaction.user.id != self._invoker_id:
-                await interaction.response.send_message(
-                    "Only the user who invoked this command can use the dropdown.",
-                    ephemeral=True,
-                )
-                return False
-            return True
-
-        def disable(self) -> None:
-            for child in self.children:
-                if isinstance(child, (discord.ui.Select, discord.ui.Button)):
-                    child.disabled = True
-            self.stop()
-
-        def _page_count(self) -> int:
-            return max(1, (len(self._feeds) - 1) // self.PAGE_SIZE + 1)
-
-        def _current_page_feeds(self) -> Sequence[RssFeedConfig]:
-            start = self._page * self.PAGE_SIZE
-            end = start + self.PAGE_SIZE
-            return self._feeds[start:end]
-
-        def _refresh_select(self) -> None:
-            total_pages = self._page_count()
-            self._select.populate(
-                self._guild,
-                self._current_page_feeds(),
-                page=self._page,
-                total_pages=total_pages,
-            )
-
-        def _refresh_navigation(self) -> None:
-            if not self._previous_button or not self._next_button:
-                return
-            total_pages = self._page_count()
-            self._previous_button.disabled = self._page <= 0
-            self._next_button.disabled = self._page >= total_pages - 1
-
-        async def change_page(
-            self, interaction: discord.Interaction, step: int
-        ) -> None:  # pragma: no cover - UI glue
-            total_pages = self._page_count()
-            new_page = min(max(self._page + step, 0), total_pages - 1)
-            if new_page == self._page:
-                await interaction.response.defer()
-                return
-
-            self._page = new_page
-            self._refresh_select()
-            self._refresh_navigation()
-            await interaction.response.edit_message(view=self)
-
-    class _FeedTestPageButton(discord.ui.Button):
-        def __init__(self, view: "RssFeedsCog._FeedTestView", step: int) -> None:
-            label = "Previous" if step < 0 else "Next"
-            super().__init__(style=discord.ButtonStyle.secondary, label=label)
-            self._view = view
-            self._step = step
-
-        async def callback(self, interaction: discord.Interaction) -> None:  # pragma: no cover - UI glue
-            await self._view.change_page(interaction, self._step)
 
     async def _execute_test_feed(
         self,
@@ -899,45 +641,45 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             ephemeral=True,
         )
 
-    if not PRODUCTION:
+    async def run_test_feed(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
 
-        @app_commands.command(
-            name="test",
-            description="Post the latest entry from a configured RSS feed to its channel.",
-        )
-        async def test_feed(self, interaction: discord.Interaction) -> None:
-            if not await self.bot.ensure_authorised(interaction):
-                return
-
-            guild = interaction.guild
-            if not guild:
-                await interaction.response.send_message(
-                    "This command can only be used in a server.", ephemeral=True
-                )
-                return
-
-            feeds = self.bot.storage.get_rss_feeds(guild.id)
-            if not feeds:
-                await interaction.response.send_message(
-                    "No RSS feeds are configured for this server.",
-                    ephemeral=True,
-                )
-                return
-
-            view = self._FeedTestView(self, interaction.user, guild, feeds)
-            message = (
-                "Choose an RSS feed below to post its latest entry to the configured channel."
-            )
-            if len(feeds) > self._FeedTestView.PAGE_SIZE:
-                message += (
-                    "\nUse the navigation buttons to browse all feeds before making a selection."
-                )
-
+        guild = interaction.guild
+        if not guild:
             await interaction.response.send_message(
-                message,
-                view=view,
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        feeds = self.bot.storage.get_rss_feeds(guild.id)
+        if not feeds:
+            await interaction.response.send_message(
+                "No RSS feeds are configured for this server.",
                 ephemeral=True,
             )
+            return
+
+        view = self._build_feed_select_view(
+            interaction.user,
+            guild,
+            feeds,
+            placeholder="Select an RSS feed to test",
+            action=self._execute_test_feed,
+        )
+        message = (
+            "Choose an RSS feed below to post its latest entry to the configured channel."
+        )
+        if len(feeds) > PaginatedSelectView.PAGE_SIZE:
+            message += (
+                "\nUse the navigation buttons to browse all feeds before making a selection."
+            )
+
+        await interaction.response.send_message(
+            message,
+            view=view,
+            ephemeral=True,
+        )
 
 
     def get_config_status(self, guild_id: int) -> ConfigStatus:

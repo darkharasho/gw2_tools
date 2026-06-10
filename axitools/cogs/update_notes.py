@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,7 +11,6 @@ from typing import List, Optional, Sequence
 import discord
 import requests
 from bs4 import BeautifulSoup
-from discord import app_commands
 from discord.ext import commands, tasks
 from markdownify import markdownify as html_to_markdown
 
@@ -71,7 +69,6 @@ class UpdateNotesCog(commands.Cog):
 
     CHECK_INTERVAL_MINUTES = 15
     EMBED_COLOR = BRAND_COLOUR
-    PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -396,59 +393,53 @@ class UpdateNotesCog(commands.Cog):
             LOGGER.warning("Giving up on %s after repeated failures", url, exc_info=last_error)
         return None
 
-    if not PRODUCTION:
-
-        @app_commands.command(
-            name="update_notes_force_notification",
-            description="Send the latest game update notes notification.",
-        )
-        async def force_notification(self, interaction: discord.Interaction) -> None:
-            if not interaction.guild:
-                await interaction.response.send_message(
-                    "This command must be used inside a server.", ephemeral=True
-                )
-                return
-
-            if not await self.bot.ensure_authorised(interaction):
-                return
-
-            config = self.bot.get_config(interaction.guild.id)
-            channel_id = config.update_notes_channel_id
-            if not channel_id:
-                await interaction.response.send_message(
-                    "Game update notes notifications are disabled for this server.",
-                    ephemeral=True,
-                )
-                return
-
-            entries = await self._fetch_entries()
-            if not entries:
-                await interaction.response.send_message(
-                    "Unable to fetch the latest game update notes.", ephemeral=True
-                )
-                return
-
-            channel = await self._resolve_channel(interaction.guild, channel_id)
-            if not channel:
-                await interaction.response.send_message(
-                    "Unable to locate the configured game update notes channel.",
-                    ephemeral=True,
-                )
-                return
-
-            entry = entries[0]
-            body = entry.content or entry.summary
-            embeds = self._build_embeds(entry, body)
-            for embed in embeds:
-                await channel.send(embed=embed)
-            status = self.bot.storage.get_update_notes_status(interaction.guild.id) or UpdateNotesStatus()
-            status.last_entry_id = entry.entry_id
-            status.last_entry_published_at = entry.published_at
-            self.bot.storage.save_update_notes_status(interaction.guild.id, status)
+    async def run_force_notification(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
             await interaction.response.send_message(
-                f"Posted the latest game update notes in {channel.mention}.",
+                "This command must be used inside a server.", ephemeral=True
+            )
+            return
+
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        channel_id = config.update_notes_channel_id
+        if not channel_id:
+            await interaction.response.send_message(
+                "Game update notes notifications are disabled for this server.",
                 ephemeral=True,
             )
+            return
+
+        entries = await self._fetch_entries()
+        if not entries:
+            await interaction.response.send_message(
+                "Unable to fetch the latest game update notes.", ephemeral=True
+            )
+            return
+
+        channel = await self._resolve_channel(interaction.guild, channel_id)
+        if not channel:
+            await interaction.response.send_message(
+                "Unable to locate the configured game update notes channel.",
+                ephemeral=True,
+            )
+            return
+
+        entry = entries[0]
+        body = entry.content or entry.summary
+        embeds = self._build_embeds(entry, body)
+        for embed in embeds:
+            await channel.send(embed=embed)
+        status = self.bot.storage.get_update_notes_status(interaction.guild.id) or UpdateNotesStatus()
+        status.last_entry_id = entry.entry_id
+        status.last_entry_published_at = entry.published_at
+        self.bot.storage.save_update_notes_status(interaction.guild.id, status)
+        await interaction.response.send_message(
+            f"Posted the latest game update notes in {channel.mention}.",
+            ephemeral=True,
+        )
 
 
     def get_config_status(self, guild_id: int) -> ConfigStatus:
@@ -462,13 +453,13 @@ class UpdateNotesCog(commands.Cog):
         else:
             field = StatusField(
                 label="Update Notes Channel",
-                value="Not configured — use /config",
+                value="Not configured — use /config setup",
                 state="missing",
             )
         return ConfigStatus(
             title="GW2 Update Notes",
             fields=[field],
-            setup_command="/config",
+            setup_command="/config setup",
         )
 
 
