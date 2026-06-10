@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sqlite3
+from sqlcipher3 import dbapi2 as sqlcipher
 import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -13,8 +14,21 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .db_key import resolve_db_key
+
 
 logger = logging.getLogger(__name__)
+
+
+def connect_encrypted(path, key: str, *, foreign_keys: bool = False):
+    """Open a SQLCipher connection to ``path`` keyed with the raw hex ``key``."""
+
+    connection = sqlcipher.connect(str(path))
+    connection.execute(f"PRAGMA key = \"x'{key}'\"")
+    connection.row_factory = sqlcipher.Row
+    if foreign_keys:
+        connection.execute("PRAGMA foreign_keys = ON")
+    return connection
 
 
 ISOFORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -553,17 +567,15 @@ class ApiKeyRecord:
 class ApiKeyStore:
     """SQLite-backed persistence for API keys with query-friendly indexes."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, key: Optional[str] = None) -> None:
         self.root = root
         self.path = root / "api_keys.sqlite"
+        self._key = key or resolve_db_key()
         self._ensure_schema()
         self._migrate_json_stores()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+    def _connect(self):
+        return connect_encrypted(self.path, self._key, foreign_keys=True)
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
@@ -1092,15 +1104,14 @@ class ApiKeyStore:
 class AuditStore:
     """SQLite-backed audit log storage per Discord guild."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, key: Optional[str] = None) -> None:
         self.root = root
         self.path = root / "audit.sqlite"
+        self._key = key or resolve_db_key()
         self._ensure_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self):
+        return connect_encrypted(self.path, self._key)
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
@@ -1314,7 +1325,8 @@ class StorageManager:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
-        self.api_key_store = ApiKeyStore(self.root)
+        self._db_key = resolve_db_key()
+        self.api_key_store = ApiKeyStore(self.root, self._db_key)
         self._audit_stores: Dict[int, AuditStore] = {}
 
     # ------------------------------------------------------------------
@@ -1328,7 +1340,7 @@ class StorageManager:
     def get_audit_store(self, guild_id: int) -> AuditStore:
         store = self._audit_stores.get(guild_id)
         if store is None:
-            store = AuditStore(self._guild_path(guild_id))
+            store = AuditStore(self._guild_path(guild_id), self._db_key)
             self._audit_stores[guild_id] = store
         return store
 
