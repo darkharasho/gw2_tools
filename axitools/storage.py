@@ -46,11 +46,13 @@ def _encrypt_in_place(path: Path, key: str) -> None:
         tmp.unlink()
 
     # Open the plaintext database (no key on main), attach an encrypted target,
-    # and export the full schema + data into it.
+    # and export the full schema + data into it. Escape single quotes in the
+    # temp path so an unusual filename cannot break out of the SQL string.
+    tmp_escaped = str(tmp).replace("'", "''")
     connection = sqlcipher.connect(str(path))
     try:
         connection.execute(
-            f"ATTACH DATABASE '{tmp}' AS encrypted KEY \"x'{key}'\""
+            f"ATTACH DATABASE '{tmp_escaped}' AS encrypted KEY \"x'{key}'\""
         )
         connection.execute("SELECT sqlcipher_export('encrypted')")
         connection.execute("DETACH DATABASE encrypted")
