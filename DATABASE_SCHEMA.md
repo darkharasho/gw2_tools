@@ -4,6 +4,20 @@ The bot stores persistent data in SQLite at `axitools/data/api_keys.sqlite`. The
 
 Audit logging data is stored per Discord guild in `axitools/data/guild_<guild_id>/audit.sqlite`.
 
+## Encryption at rest
+
+All persistent SQLite databases are encrypted at rest with SQLCipher. The key is
+resolved (in order) from the `AXITOOLS_DB_KEY` env var, the `AXITOOLS_DB_KEY_FILE`
+env var, or an auto-generated key file at `${XDG_CONFIG_HOME:-~/.config}/axitools/db_key`
+(kept separate from the data directory). **Back up this key** — if it is lost, the
+encrypted data is unrecoverable. On startup, any pre-existing plaintext database is
+re-encrypted in place, leaving a `<name>.plaintext.bak` backup you should delete once
+you have confirmed reads work.
+
+This protects against a leaked database file (backup, stray copy, accidental commit,
+stolen disk). It does **not** protect against an attacker with host access, nor does it
+prevent the operator from decrypting; see `docs/superpowers/specs/2026-06-09-encrypt-data-at-rest-design.md`.
+
 ## Tables
 
 ### `api_keys`

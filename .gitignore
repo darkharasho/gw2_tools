@@ -218,3 +218,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .worktrees/
+
+# At-rest encryption: never commit key material or plaintext backups
+*.db_key
+*.plaintext.bak
