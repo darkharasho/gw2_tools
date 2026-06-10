@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,7 +11,6 @@ from typing import List, Optional, Sequence
 import discord
 import requests
 from bs4 import BeautifulSoup
-from discord import app_commands
 from discord.ext import commands, tasks
 from markdownify import markdownify as html_to_markdown
 
@@ -71,7 +69,6 @@ class UpdateNotesCog(commands.Cog):
 
     CHECK_INTERVAL_MINUTES = 15
     EMBED_COLOR = BRAND_COLOUR
-    PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -456,13 +453,13 @@ class UpdateNotesCog(commands.Cog):
         else:
             field = StatusField(
                 label="Update Notes Channel",
-                value="Not configured — use /config",
+                value="Not configured — use /config setup",
                 state="missing",
             )
         return ConfigStatus(
             title="GW2 Update Notes",
             fields=[field],
-            setup_command="/config",
+            setup_command="/config setup",
         )
 
 

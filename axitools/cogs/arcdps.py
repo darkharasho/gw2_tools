@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -10,7 +9,6 @@ from typing import List, Optional, Tuple, Union
 import aiohttp
 import discord
 from bs4 import BeautifulSoup, NavigableString, Tag
-from discord import app_commands
 from discord.ext import commands, tasks
 
 from ..bot import AxiToolsBot
@@ -32,7 +30,6 @@ class ArcDpsUpdatesCog(commands.Cog):
     CHECK_INTERVAL_MINUTES = 15
     RELEASE_URL = "https://www.deltaconnected.com/arcdps/x64/"
     CHANGELOG_URL = "https://www.deltaconnected.com/arcdps/"
-    PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -392,13 +389,13 @@ class ArcDpsUpdatesCog(commands.Cog):
         else:
             field = StatusField(
                 label="ArcDPS Channel",
-                value="Not configured — use /config",
+                value="Not configured — use /config setup",
                 state="missing",
             )
         return ConfigStatus(
             title="ArcDPS Updates",
             fields=[field],
-            setup_command="/config",
+            setup_command="/config setup",
         )
 
 

@@ -459,7 +459,7 @@ class AccountSelfCog(AccountsSharedMixin, commands.Cog):
                 title="Preferred guild role",
                 description=(
                     "No roles are available for preferred selection yet. Ask a moderator to add roles to the "
-                    "/guildroles whitelist."
+                    "/guildroles allowlist."
                 ),
                 colour=BRAND_COLOUR,
             )
@@ -483,7 +483,7 @@ class AccountSelfCog(AccountsSharedMixin, commands.Cog):
                 interaction,
                 title="Preferred guild role",
                 description=(
-                    "That role is not available for preferred selection. Choose one of your whitelisted guild roles."
+                    "That role is not available for preferred selection. Choose one of your allowlisted guild roles."
                 ),
                 colour=BRAND_COLOUR,
             )

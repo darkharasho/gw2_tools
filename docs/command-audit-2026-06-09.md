@@ -148,6 +148,10 @@ Pick any subset; each is independently shippable.
 - **A. Kill the confusables (P1):** rename `/guildrole`→`/myrole` (or fold into `/apikey`),
   unify the two API-key systems' naming, fold `/status` into `/config status`. _Breaking; needs
   transition window._
+  ✅ **DONE (2026-06-09)** — `/guildrole set|clear` folded into `/apikey role set|clear`;
+  `/audit gw2_key *` renamed to `/audit apikey *` to align the two API-key systems; `/status`
+  folded into `/config status` (with `/config setup` as the opener). Shipped as a hard cutover
+  (breaking) rather than a dual-register transition.
 - **B. Fix help + auth visibility (P3, low risk, non-breaking):** auto-derive public commands,
   add categories, fix the two hidden public commands. _No user-visible command renames._
   ✅ **DONE (2026-06-09)** — help now derives visibility/category from command `extras`
@@ -155,12 +159,21 @@ Pick any subset; each is independently shippable.
   for consistency with their siblings (the one intentional behaviour change).
 - **C. Normalize names to the convention (P2):** the big rename pass (`setguild`→`set guild`,
   snake_case→subgroups). _Most breaking; biggest consistency win._
+  ✅ **DONE (2026-06-09)** — full rename pass shipped: `/alliance setguild|setchannel|settime`
+  →`/alliance setup guild|channel|time` (and `postnow`→`post`); `/audit channel|gw2_guild`
+  →`/audit setup channel|guild`; `/audit query|historical_query|gw2_query`→`/audit query
+  discord|historical|gw2`; `/guildroles setalliance|clearalliance`→`/guildroles alliance
+  set|clear`; `/guildroles whitelist`→`/guildroles allowlist`; dev/test commands consolidated
+  under `/dev`. In-code hint strings, README, and tests updated to match.
 - **D. Unify response style (P3):** shared embed/result builder, brand `/audit`, fix `defer()`.
   _Non-breaking._ ✅ **DONE (2026-06-09)** — `brand_embed` factory in `branding.py` (duplicated
   `_embed` helpers now delegate); all `/audit` text replies are branded embeds; the three
   `/audit` query commands defer before DB/API work.
 - **E. Structural refactor (P4):** split `accounts.py`, dedupe pagination. _Non-breaking,
   maintainer-only._
+  ✅ **DONE (2026-06-09)** — `accounts.py` split into `account_self.py` (user-facing: `apikey`,
+  `apikey role`, `gw2guild`) and `guild_roles.py` (admin `guildroles`); shared pagination
+  extracted into a reusable `PaginatedSelectView`.
 
 Recommended order: **B → D → A → C → E** (ship the safe, high-visibility wins first; do the
 breaking renames as one coordinated transition).

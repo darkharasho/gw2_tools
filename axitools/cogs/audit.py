@@ -1639,7 +1639,7 @@ class AuditCog(commands.Cog):
         else:
             fields.append(StatusField(
                 label="Audit Channel",
-                value="Not configured — use /audit channel",
+                value="Not configured — use /audit setup channel",
                 state="missing",
             ))
         if config.audit_gw2_guild_id:
@@ -1651,7 +1651,7 @@ class AuditCog(commands.Cog):
         else:
             fields.append(StatusField(
                 label="GW2 Guild",
-                value="Not configured — use /audit gw2_guild",
+                value="Not configured — use /audit setup guild",
                 state="missing",
             ))
         blacklist = config.audit_channel_blacklist
@@ -1664,7 +1664,7 @@ class AuditCog(commands.Cog):
         return ConfigStatus(
             title="Audit Logging",
             fields=fields,
-            setup_command="/audit channel",
+            setup_command="/audit setup channel",
         )
 
 

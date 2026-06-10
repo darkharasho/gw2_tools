@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import calendar
 import logging
-import os
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -124,7 +123,6 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
 
     CHECK_INTERVAL_MINUTES = 10
     EMBED_COLOR = BRAND_COLOUR
-    PRODUCTION = os.getenv("PRODUCTION", "true").lower() in {"1", "true", "yes", "on"}
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot

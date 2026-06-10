@@ -19,8 +19,8 @@ def test_config_status_with_setup_command():
     fields = [
         StatusField(label="Channel", value="not set", state="missing"),
     ]
-    status = ConfigStatus(title="Builds", fields=fields, setup_command="/config")
-    assert status.setup_command == "/config"
+    status = ConfigStatus(title="Builds", fields=fields, setup_command="/config setup")
+    assert status.setup_command == "/config setup"
     assert len(status.fields) == 1
 
 

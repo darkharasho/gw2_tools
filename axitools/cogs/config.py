@@ -288,7 +288,7 @@ class ConfigCog(commands.GroupCog, name="config", group_extras={"category": "Ser
         if self._is_first_run(interaction.guild.id):
             embed.description = (
                 "Looks like AxiTools hasn't been configured yet. "
-                "Use `/config` to get started!"
+                "Use `/config setup` to get started!"
             )
 
         await interaction.response.send_message(embed=embed, view=StatusView(), ephemeral=True)
@@ -311,7 +311,7 @@ class ConfigCog(commands.GroupCog, name="config", group_extras={"category": "Ser
         return ConfigStatus(
             title="Bot Configuration",
             fields=fields,
-            setup_command="/config",
+            setup_command="/config setup",
         )
 
 
