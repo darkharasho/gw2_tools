@@ -1,8 +1,9 @@
 import sqlite3
 
 import pytest
+from sqlcipher3 import dbapi2 as sqlcipher
 
-from axitools.storage import StorageManager, ApiKeyRecord
+from axitools.storage import StorageManager, ApiKeyRecord, connect_encrypted
 
 PLAINTEXT_MAGIC = b"SQLite format 3\x00"
 
@@ -32,3 +33,20 @@ def test_round_trip_through_encrypted_store(tmp_path):
     assert fetched is not None
     assert fetched.key == "SECRET-GW2-KEY"
     assert fetched.account_name == "Foo.1234"
+
+
+def test_wrong_key_cannot_decrypt(tmp_path):
+    """An encrypted database opened with the wrong key fails loudly rather than
+    returning garbage — this is why a key must never be swapped post-migration."""
+    db_path = tmp_path / "vault.sqlite"
+
+    conn = connect_encrypted(db_path, "aa" * 32)
+    conn.execute("CREATE TABLE t (v TEXT)")
+    conn.execute("INSERT INTO t (v) VALUES ('secret')")
+    conn.commit()
+    conn.close()
+
+    wrong = connect_encrypted(db_path, "bb" * 32)
+    with pytest.raises(sqlcipher.DatabaseError):
+        wrong.execute("SELECT v FROM t").fetchall()
+    wrong.close()
