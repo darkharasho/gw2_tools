@@ -22,15 +22,15 @@ class AccountSelfCog(AccountsSharedMixin, commands.Cog):
 
     REQUIRED_PERMISSIONS = {"account", "characters", "guilds", "wvw"}
 
-    guild_role_preferences = app_commands.Group(
-        name="guildrole",
-        description="Set your preferred guild role for auto sync.",
-        extras={"public": True, "category": "GW2 Account"},
-    )
     api_keys = app_commands.Group(
         name="apikey",
         description="Manage your Guild Wars 2 API keys.",
         extras={"public": True, "category": "GW2 Account"},
+    )
+    api_role = app_commands.Group(
+        name="role",
+        description="Set your preferred guild role for auto sync.",
+        parent=api_keys,
     )
     guild_lookup = app_commands.Group(
         name="gw2guild",
@@ -427,7 +427,7 @@ class AccountSelfCog(AccountsSharedMixin, commands.Cog):
         eligible.sort(key=lambda role: role.position, reverse=True)
         return eligible
 
-    @guild_role_preferences.command(
+    @api_role.command(
         name="set", description="Choose the highest guild role you want assigned."
     )
     @app_commands.describe(role_id="Preferred Discord guild role")
@@ -537,7 +537,7 @@ class AccountSelfCog(AccountsSharedMixin, commands.Cog):
                 break
         return choices
 
-    @guild_role_preferences.command(
+    @api_role.command(
         name="clear", description="Clear your preferred guild role selection."
     )
     async def clear_preferred_guild_role(

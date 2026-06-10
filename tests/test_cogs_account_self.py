@@ -21,6 +21,18 @@ async def test_accounts_init(mock_bot_accounts):
     # Check for commands availability if we could access app_commands structure easily
     # or just trust the class definition is valid.
 
+def test_guild_role_folded_into_apikey_role():
+    cog = AccountSelfCog(MagicMock())
+    qualified = set()
+    for group in cog.__cog_app_commands__:
+        for cmd in group.walk_commands():
+            qualified.add(cmd.qualified_name)
+
+    assert "apikey role set" in qualified
+    assert "apikey role clear" in qualified
+    assert not any(name.startswith("guildrole") for name in qualified)
+
+
 @pytest.mark.asyncio
 async def test_refresh_member_cache_syncs_roles(mock_bot_accounts):
     # Test that _refresh_member_cache calls _sync_roles for successfully refreshed users
