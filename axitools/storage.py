@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import sqlite3
+from sqlcipher3 import dbapi2 as sqlcipher
 import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -13,8 +15,69 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .db_key import resolve_db_key
+
 
 logger = logging.getLogger(__name__)
+
+
+def connect_encrypted(path, key: str, *, foreign_keys: bool = False):
+    """Open a SQLCipher connection to ``path`` keyed with the raw hex ``key``."""
+
+    connection = sqlcipher.connect(str(path))
+    connection.execute(f"PRAGMA key = \"x'{key}'\"")
+    connection.row_factory = sqlcipher.Row
+    if foreign_keys:
+        connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
+_PLAINTEXT_MAGIC = b"SQLite format 3\x00"
+
+
+def _encrypt_in_place(path: Path, key: str) -> None:
+    """Re-encrypt a plaintext SQLite file at ``path``, keeping a backup."""
+
+    backup = path.with_name(path.name + ".plaintext.bak")
+    shutil.copy2(path, backup)
+
+    tmp = path.with_name(path.name + ".enc.tmp")
+    if tmp.exists():
+        tmp.unlink()
+
+    # Open the plaintext database (no key on main), attach an encrypted target,
+    # and export the full schema + data into it. Escape single quotes in the
+    # temp path so an unusual filename cannot break out of the SQL string.
+    tmp_escaped = str(tmp).replace("'", "''")
+    connection = sqlcipher.connect(str(path))
+    try:
+        connection.execute(
+            f"ATTACH DATABASE '{tmp_escaped}' AS encrypted KEY \"x'{key}'\""
+        )
+        connection.execute("SELECT sqlcipher_export('encrypted')")
+        connection.execute("DETACH DATABASE encrypted")
+    finally:
+        connection.close()
+
+    os.replace(tmp, path)
+
+
+def migrate_data_dir(root: Path, key: str) -> None:
+    """Encrypt any plaintext ``*.sqlite`` files under ``root`` in place.
+
+    Idempotent: SQLCipher-encrypted files do not carry the plaintext header,
+    so they are skipped on subsequent runs.
+    """
+
+    for path in Path(root).rglob("*.sqlite"):
+        if not path.is_file():
+            continue
+        with path.open("rb") as handle:
+            header = handle.read(16)
+        if header != _PLAINTEXT_MAGIC:
+            continue
+        logger.warning("Encrypting pre-existing plaintext database at %s", path)
+        _encrypt_in_place(path, key)
 
 
 ISOFORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -553,17 +616,15 @@ class ApiKeyRecord:
 class ApiKeyStore:
     """SQLite-backed persistence for API keys with query-friendly indexes."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, key: Optional[str] = None) -> None:
         self.root = root
         self.path = root / "api_keys.sqlite"
+        self._key = key or resolve_db_key()
         self._ensure_schema()
         self._migrate_json_stores()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+    def _connect(self):
+        return connect_encrypted(self.path, self._key, foreign_keys=True)
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
@@ -1092,15 +1153,14 @@ class ApiKeyStore:
 class AuditStore:
     """SQLite-backed audit log storage per Discord guild."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, key: Optional[str] = None) -> None:
         self.root = root
         self.path = root / "audit.sqlite"
+        self._key = key or resolve_db_key()
         self._ensure_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self):
+        return connect_encrypted(self.path, self._key)
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
@@ -1314,7 +1374,9 @@ class StorageManager:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
-        self.api_key_store = ApiKeyStore(self.root)
+        self._db_key = resolve_db_key()
+        migrate_data_dir(self.root, self._db_key)
+        self.api_key_store = ApiKeyStore(self.root, self._db_key)
         self._audit_stores: Dict[int, AuditStore] = {}
 
     # ------------------------------------------------------------------
@@ -1328,7 +1390,7 @@ class StorageManager:
     def get_audit_store(self, guild_id: int) -> AuditStore:
         store = self._audit_stores.get(guild_id)
         if store is None:
-            store = AuditStore(self._guild_path(guild_id))
+            store = AuditStore(self._guild_path(guild_id), self._db_key)
             self._audit_stores[guild_id] = store
         return store
 

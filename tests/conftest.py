@@ -4,6 +4,11 @@ import sqlite3
 from unittest.mock import MagicMock
 from axitools.storage import ApiKeyStore
 
+@pytest.fixture(autouse=True)
+def _db_key_env(monkeypatch):
+    """Give every test a deterministic DB key so SQLCipher connections work."""
+    monkeypatch.setenv("AXITOOLS_DB_KEY", "00" * 32)  # 64 hex chars
+
 @pytest.fixture
 def mock_db():
     """Create an in-memory SQLite database for testing."""
