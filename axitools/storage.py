@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import sqlite3
 from sqlcipher3 import dbapi2 as sqlcipher
 import unicodedata
@@ -29,6 +30,52 @@ def connect_encrypted(path, key: str, *, foreign_keys: bool = False):
     if foreign_keys:
         connection.execute("PRAGMA foreign_keys = ON")
     return connection
+
+
+_PLAINTEXT_MAGIC = b"SQLite format 3\x00"
+
+
+def _encrypt_in_place(path: Path, key: str) -> None:
+    """Re-encrypt a plaintext SQLite file at ``path``, keeping a backup."""
+
+    backup = path.with_name(path.name + ".plaintext.bak")
+    shutil.copy2(path, backup)
+
+    tmp = path.with_name(path.name + ".enc.tmp")
+    if tmp.exists():
+        tmp.unlink()
+
+    # Open the plaintext database (no key on main), attach an encrypted target,
+    # and export the full schema + data into it.
+    connection = sqlcipher.connect(str(path))
+    try:
+        connection.execute(
+            f"ATTACH DATABASE '{tmp}' AS encrypted KEY \"x'{key}'\""
+        )
+        connection.execute("SELECT sqlcipher_export('encrypted')")
+        connection.execute("DETACH DATABASE encrypted")
+    finally:
+        connection.close()
+
+    os.replace(tmp, path)
+
+
+def migrate_data_dir(root: Path, key: str) -> None:
+    """Encrypt any plaintext ``*.sqlite`` files under ``root`` in place.
+
+    Idempotent: SQLCipher-encrypted files do not carry the plaintext header,
+    so they are skipped on subsequent runs.
+    """
+
+    for path in Path(root).rglob("*.sqlite"):
+        if not path.is_file():
+            continue
+        with path.open("rb") as handle:
+            header = handle.read(16)
+        if header != _PLAINTEXT_MAGIC:
+            continue
+        logger.warning("Encrypting pre-existing plaintext database at %s", path)
+        _encrypt_in_place(path, key)
 
 
 ISOFORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -1326,6 +1373,7 @@ class StorageManager:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self._db_key = resolve_db_key()
+        migrate_data_dir(self.root, self._db_key)
         self.api_key_store = ApiKeyStore(self.root, self._db_key)
         self._audit_stores: Dict[int, AuditStore] = {}
 
