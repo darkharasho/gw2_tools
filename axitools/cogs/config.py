@@ -234,7 +234,7 @@ class ConfigCog(commands.Cog):
             "UpdateNotesCog",
             "SelectCog",
             "CompCog",
-            "AccountsCog",
+            "AccountSelfCog",
             "AuditCog",
         ]
 
