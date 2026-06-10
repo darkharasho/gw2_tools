@@ -11,7 +11,6 @@ The view exposes a small, side-effect-free surface for unit testing
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Callable, List, Optional, Sequence, Tuple
 
 import discord
@@ -23,6 +22,42 @@ TIMEOUT = 120
 
 # (value, label) for the simple form used by tests; descriptions are optional.
 OptionTuple = Tuple[str, str]
+
+
+class _Pager:
+    """Plain (non-View) pagination helper.
+
+    Holds the page math so it can be unit-tested without a running event
+    loop. ``page_size`` is clamped to ``[1, 25]`` because Discord caps a
+    select menu at 25 options per page.
+    """
+
+    def __init__(self, options: Sequence[OptionTuple], page_size: int) -> None:
+        self._options: List[OptionTuple] = list(options)
+        self._page_size = min(25, max(1, page_size))
+        self._page = 0
+
+    @property
+    def page_size(self) -> int:
+        return self._page_size
+
+    @property
+    def page_count(self) -> int:
+        return max(1, (len(self._options) + self._page_size - 1) // self._page_size)
+
+    @property
+    def current_index(self) -> int:
+        return self._page
+
+    def current_options(self) -> List[OptionTuple]:
+        start = self._page * self._page_size
+        return self._options[start:start + self._page_size]
+
+    def next_page(self) -> None:
+        self._page = min(self._page + 1, self.page_count - 1)
+
+    def prev_page(self) -> None:
+        self._page = max(self._page - 1, 0)
 
 
 class PaginatedSelectView(discord.ui.View):
@@ -51,9 +86,6 @@ class PaginatedSelectView(discord.ui.View):
 
     PAGE_SIZE = PAGE_SIZE
 
-    async def _init_view(self) -> None:
-        super().__init__(timeout=TIMEOUT)
-
     def __init__(
         self,
         *,
@@ -64,25 +96,12 @@ class PaginatedSelectView(discord.ui.View):
         placeholder: str = "Select an option",
         invoker_id: Optional[int] = None,
     ) -> None:
-        # discord.ui.View.__init__ requires a running event loop (it creates an
-        # internal future). Provide a transient loop when instantiated outside
-        # one (e.g. synchronous unit tests) so behaviour matches the live path.
-        try:
-            asyncio.get_running_loop()
-            super().__init__(timeout=TIMEOUT)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(self._init_view())
-            finally:
-                loop.close()
-        self._options: List[OptionTuple] = list(options)
-        self._page_size = max(1, page_size)
+        super().__init__(timeout=TIMEOUT)
+        self._pager = _Pager(options, page_size)
         self._on_select = on_select
         self._descriptions = descriptions or {}
         self._placeholder = placeholder
         self._invoker_id = invoker_id
-        self._page = 0
 
         self._select = _PaginatedSelect(self)
         self.add_item(self._select)
@@ -101,27 +120,23 @@ class PaginatedSelectView(discord.ui.View):
         self._refresh_select()
         self._refresh_navigation()
 
-    # -- testable surface -------------------------------------------------
+    # -- testable surface (delegated to the plain _Pager) -----------------
     @property
     def page_count(self) -> int:
-        if not self._options:
-            return 1
-        return (len(self._options) - 1) // self._page_size + 1
+        return self._pager.page_count
 
     @property
     def current_index(self) -> int:
-        return self._page
+        return self._pager.current_index
 
     def current_options(self) -> List[OptionTuple]:
-        start = self._page * self._page_size
-        end = start + self._page_size
-        return self._options[start:end]
+        return self._pager.current_options()
 
     def next_page(self) -> None:
-        self._page = min(self._page + 1, self.page_count - 1)
+        self._pager.next_page()
 
     def prev_page(self) -> None:
-        self._page = max(self._page - 1, 0)
+        self._pager.prev_page()
 
     # -- discord glue -----------------------------------------------------
     def _refresh_select(self) -> None:
@@ -139,7 +154,7 @@ class PaginatedSelectView(discord.ui.View):
         self._select.options = select_options
         if total_pages > 1:
             self._select.placeholder = (
-                f"{self._placeholder} (page {self._page + 1}/{total_pages})"
+                f"{self._placeholder} (page {self.current_index + 1}/{total_pages})"
             )
         else:
             self._select.placeholder = self._placeholder
@@ -148,8 +163,8 @@ class PaginatedSelectView(discord.ui.View):
         if not self._previous_button or not self._next_button:
             return
         total_pages = self.page_count
-        self._previous_button.disabled = self._page <= 0
-        self._next_button.disabled = self._page >= total_pages - 1
+        self._previous_button.disabled = self.current_index <= 0
+        self._next_button.disabled = self.current_index >= total_pages - 1
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:  # pragma: no cover - UI glue
         if self._invoker_id is not None and interaction.user.id != self._invoker_id:
@@ -169,12 +184,12 @@ class PaginatedSelectView(discord.ui.View):
     async def change_page(
         self, interaction: discord.Interaction, step: int
     ) -> None:  # pragma: no cover - UI glue
-        previous = self._page
+        previous = self.current_index
         if step < 0:
             self.prev_page()
         elif step > 0:
             self.next_page()
-        if self._page == previous:
+        if self.current_index == previous:
             await interaction.response.defer()
             return
         self._refresh_select()
