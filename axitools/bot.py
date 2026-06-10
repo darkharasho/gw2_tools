@@ -52,6 +52,7 @@ class AxiToolsBot(commands.Bot):
         await self.load_extension("axitools.cogs.wvw_alliance")
         await self.load_extension("axitools.cogs.reset")
         await self.load_extension("axitools.cogs.streaming")
+        await self.load_extension("axitools.cogs.dev")
 
     async def on_ready(self) -> None:
         await self._sync_global_commands()

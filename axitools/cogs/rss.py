@@ -643,51 +643,45 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             ephemeral=True,
         )
 
-    if not PRODUCTION:
+    async def run_test_feed(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
 
-        @app_commands.command(
-            name="test",
-            description="Post the latest entry from a configured RSS feed to its channel.",
-        )
-        async def test_feed(self, interaction: discord.Interaction) -> None:
-            if not await self.bot.ensure_authorised(interaction):
-                return
-
-            guild = interaction.guild
-            if not guild:
-                await interaction.response.send_message(
-                    "This command can only be used in a server.", ephemeral=True
-                )
-                return
-
-            feeds = self.bot.storage.get_rss_feeds(guild.id)
-            if not feeds:
-                await interaction.response.send_message(
-                    "No RSS feeds are configured for this server.",
-                    ephemeral=True,
-                )
-                return
-
-            view = self._build_feed_select_view(
-                interaction.user,
-                guild,
-                feeds,
-                placeholder="Select an RSS feed to test",
-                action=self._execute_test_feed,
-            )
-            message = (
-                "Choose an RSS feed below to post its latest entry to the configured channel."
-            )
-            if len(feeds) > PaginatedSelectView.PAGE_SIZE:
-                message += (
-                    "\nUse the navigation buttons to browse all feeds before making a selection."
-                )
-
+        guild = interaction.guild
+        if not guild:
             await interaction.response.send_message(
-                message,
-                view=view,
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        feeds = self.bot.storage.get_rss_feeds(guild.id)
+        if not feeds:
+            await interaction.response.send_message(
+                "No RSS feeds are configured for this server.",
                 ephemeral=True,
             )
+            return
+
+        view = self._build_feed_select_view(
+            interaction.user,
+            guild,
+            feeds,
+            placeholder="Select an RSS feed to test",
+            action=self._execute_test_feed,
+        )
+        message = (
+            "Choose an RSS feed below to post its latest entry to the configured channel."
+        )
+        if len(feeds) > PaginatedSelectView.PAGE_SIZE:
+            message += (
+                "\nUse the navigation buttons to browse all feeds before making a selection."
+            )
+
+        await interaction.response.send_message(
+            message,
+            view=view,
+            ephemeral=True,
+        )
 
 
     def get_config_status(self, guild_id: int) -> ConfigStatus:
