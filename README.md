@@ -41,6 +41,13 @@ AxiTools is a multi-guild Discord bot that helps Guild Wars 2 communities organi
    ```
 3. Invite the bot to your Discord server with the necessary permissions (application commands, manage messages/threads for forum posting, etc.). Once guild commands finish syncing, use `/config setup` to set moderator roles and the build posting channel.
 
+## Local API (for AxiVale)
+
+The bot serves a localhost-only HTTP API on port 8642 (override with
+`AXITOOLS_API_PORT`). Requests need `Authorization: Bearer <token>`; the token
+is read from `AXITOOLS_API_TOKEN` or auto-generated at `<data root>/api_token`
+on first run. Copy that token into AxiVale's settings.
+
 ## Project structure
 
 ```
