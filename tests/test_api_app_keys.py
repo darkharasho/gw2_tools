@@ -28,6 +28,12 @@ class FakeBot:
         self.guilds = [FakeGuild(123, "Vigil Keep"), FakeGuild(456, "Durmand Priory")]
 
 
+@pytest.fixture(autouse=True)
+def _global_token_disabled_by_default(monkeypatch):
+    """Default posture: global token off unless a test opts in explicitly."""
+    monkeypatch.delenv("AXITOOLS_ALLOW_GLOBAL_TOKEN", raising=False)
+
+
 @pytest.fixture
 def bot(tmp_path):
     return FakeBot(tmp_path)
@@ -35,6 +41,14 @@ def bot(tmp_path):
 
 @pytest_asyncio.fixture
 async def api_client(aiohttp_client, bot):
+    app = build_app(bot, token="test-token")
+    return await aiohttp_client(app)
+
+
+@pytest_asyncio.fixture
+async def global_token_client(aiohttp_client, bot, monkeypatch):
+    """Client built with the global token opted in (legacy full-access path)."""
+    monkeypatch.setenv("AXITOOLS_ALLOW_GLOBAL_TOKEN", "1")
     app = build_app(bot, token="test-token")
     return await aiohttp_client(app)
 
@@ -152,11 +166,27 @@ async def test_revoked_key_is_unauthorized(api_client, bot, scoped_key):
 
 
 @pytest.mark.asyncio
-async def test_global_token_retains_full_access(api_client, scoped_key):
+async def test_global_token_rejected_by_default(api_client, scoped_key):
+    # Flag off (default): the global token is just an unknown bearer -> 401,
+    # while the per-guild axt1 key still authenticates and is scoped.
+    resp = await api_client.get("/guilds/123/builds", headers=_bearer("test-token"))
+    assert resp.status == 401
+
+    scoped = await api_client.get("/guilds/123/builds", headers=_bearer(scoped_key))
+    assert scoped.status == 200
+    assert await scoped.json() == []
+    other = await api_client.get("/guilds/456/builds", headers=_bearer(scoped_key))
+    assert other.status == 403
+
+
+@pytest.mark.asyncio
+async def test_global_token_retains_full_access_when_enabled(
+    global_token_client, scoped_key
+):
     for path in ("/guilds/123/builds", "/guilds/456/builds"):
-        resp = await api_client.get(path, headers=_bearer("test-token"))
+        resp = await global_token_client.get(path, headers=_bearer("test-token"))
         assert resp.status == 200
-    resp = await api_client.get("/guilds", headers=_bearer("test-token"))
+    resp = await global_token_client.get("/guilds", headers=_bearer("test-token"))
     assert await resp.json() == [
         {"id": "123", "name": "Vigil Keep"},
         {"id": "456", "name": "Durmand Priory"},

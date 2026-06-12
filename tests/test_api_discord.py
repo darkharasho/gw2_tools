@@ -131,13 +131,19 @@ class FakeBot:
         return next((g for g in self.guilds if g.id == guild_id), None)
 
 
+@pytest.fixture(autouse=True)
+def _allow_global_token(monkeypatch):
+    """The _auth() helper uses the global token, which is opt-in."""
+    monkeypatch.setenv("AXITOOLS_ALLOW_GLOBAL_TOKEN", "1")
+
+
 @pytest.fixture
 def bot(tmp_path):
     return FakeBot(tmp_path)
 
 
 @pytest_asyncio.fixture
-async def api_client(aiohttp_client, bot):
+async def api_client(aiohttp_client, bot, _allow_global_token):
     app = build_app(bot, token="test-token")
     return await aiohttp_client(app)
 

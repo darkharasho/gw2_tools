@@ -52,9 +52,14 @@ credentials are accepted as `Authorization: Bearer <…>`:
   into AxiVale. The key embeds this bot's address and only grants access to
   that Discord server's data. `/config apikey revoke` invalidates it;
   regenerating replaces it.
-- **The global token** (legacy/automation): read from `AXITOOLS_API_TOKEN` or
-  auto-generated at `<data root>/api_token` on first run. Full access to all
-  guilds — for trusted same-machine consumers only.
+- **The global token** (legacy/automation, **disabled by default**): read from
+  `AXITOOLS_API_TOKEN` or auto-generated at `<data root>/api_token` on first
+  run. It grants unscoped, full access to all guilds, so it is ignored unless
+  you opt in by setting `AXITOOLS_ALLOW_GLOBAL_TOKEN` to a truthy value
+  (`1`/`true`/`yes`). When it's off (the default), presenting the global token
+  is rejected with `401` exactly like any unknown bearer — only per-server
+  `axt1.…` keys authenticate. Enable it only for trusted same-machine
+  consumers; the bot logs a startup warning while it's on.
 
 ### Serving AxiVale users on other networks
 

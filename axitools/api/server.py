@@ -66,6 +66,20 @@ def resolve_api_token(root: Path) -> str:
     return token
 
 
+def global_token_enabled() -> bool:
+    """Whether the unscoped global API token is opted in.
+
+    Disabled by default: the global token grants full cross-guild access, so it
+    is only honoured when ``AXITOOLS_ALLOW_GLOBAL_TOKEN`` is truthy. Otherwise
+    only per-server ``axt1.*`` keys authenticate.
+    """
+    return os.getenv("AXITOOLS_ALLOW_GLOBAL_TOKEN", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def resolve_public_url() -> str:
     """Return the bot's public API base URL embedded into AxiVale keys."""
     env = os.getenv("AXITOOLS_PUBLIC_URL", "").strip()
@@ -90,8 +104,12 @@ def hash_app_key(key: str) -> str:
 async def _auth_middleware(request: web.Request, handler):
     expected = f"Bearer {request.app['api_token']}"
     supplied = request.headers.get("Authorization", "")
-    if secrets.compare_digest(supplied.encode(), expected.encode()):
-        # Global token: full access.
+    if request.app["allow_global_token"] and secrets.compare_digest(
+        supplied.encode(), expected.encode()
+    ):
+        # Global token: full access. Only honoured when opted in via
+        # AXITOOLS_ALLOW_GLOBAL_TOKEN; otherwise it falls through and is
+        # rejected as an unknown bearer below.
         return await handler(request)
 
     bearer = supplied[len("Bearer "):] if supplied.startswith("Bearer ") else ""
@@ -1479,6 +1497,7 @@ def build_app(bot, token: str) -> web.Application:
     app = web.Application(middlewares=[_auth_middleware])
     app["bot"] = bot
     app["api_token"] = token
+    app["allow_global_token"] = global_token_enabled()
     app.router.add_get("/guilds", _handle_guilds)
     app.router.add_get("/guilds/{guild_id:\\d+}/builds", _handle_builds_list)
     app.router.add_post("/guilds/{guild_id:\\d+}/builds", _handle_builds_create)
@@ -1534,6 +1553,12 @@ async def start_api(bot, *, host: str | None = None, port: int | None = None) ->
     if port is None:
         port = int(os.getenv("AXITOOLS_API_PORT", str(DEFAULT_PORT)))
     token = resolve_api_token(bot.storage.root)
+    if global_token_enabled():
+        LOGGER.warning(
+            "AXITOOLS_ALLOW_GLOBAL_TOKEN is enabled: the global API token grants "
+            "unscoped, full cross-guild access. Prefer per-server axt1 keys and "
+            "leave this disabled unless you need it."
+        )
     app = build_app(bot, token)
     runner = web.AppRunner(app)
     await runner.setup()
