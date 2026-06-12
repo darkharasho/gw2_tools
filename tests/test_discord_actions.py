@@ -206,7 +206,26 @@ async def test_numeric_string_ids_are_coerced(guild):
         None, guild, "message_send", {"channel_id": "11", "content": "hello"}
     )
     assert channel.calls == [("send", "hello")]
-    assert result == {"id": 555, "channel_id": 11}
+    assert result == {"id": "555", "channel_id": "11"}
+
+
+@pytest.mark.asyncio
+async def test_full_precision_19_digit_string_id_coerces_exactly(guild):
+    big = 1380283751703445199  # exceeds JS Number.MAX_SAFE_INTEGER
+    channel = guild.add_channel(FakeChannel(big))
+    result = await execute_action(
+        None, guild, "message_send", {"channel_id": str(big), "content": "hi"}
+    )
+    assert channel.calls == [("send", "hi")]
+    assert result["channel_id"] == "1380283751703445199"
+
+
+@pytest.mark.asyncio
+async def test_role_permissions_accepts_int_and_string(guild):
+    await execute_action(None, guild, "role_create", {"name": "A", "permissions": 104320})
+    await execute_action(None, guild, "role_create", {"name": "B", "permissions": "104320"})
+    perms = [kwargs["permissions"] for name, kwargs in guild.calls if name == "create_role"]
+    assert [p.value for p in perms] == [104320, 104320]
 
 
 @pytest.mark.asyncio
@@ -278,7 +297,7 @@ async def test_channel_create_text(guild):
         "topic": "Raid signups",
         "reason": "AxiVale: channel_create",
     })]
-    assert result == {"id": 7001, "name": "raids", "type": "text"}
+    assert result == {"id": "7001", "name": "raids", "type": "text"}
 
 
 @pytest.mark.asyncio
@@ -304,7 +323,7 @@ async def test_role_assign_calls_add_roles(guild):
         None, guild, "role_assign", {"member_id": 30, "role_id": 20}
     )
     assert member.calls == [("add_roles", (role,), "AxiVale: role_assign")]
-    assert result == {"member_id": 30, "role_id": 20, "role_name": "Raider"}
+    assert result == {"member_id": "30", "role_id": "20", "role_name": "Raider"}
 
 
 @pytest.mark.asyncio
@@ -314,7 +333,7 @@ async def test_member_kick_passes_reason_to_audit_log(guild):
         None, guild, "member_kick", {"member_id": 30, "reason": "spam"}
     )
     assert member.calls == [("kick", "AxiVale: spam")]
-    assert result == {"id": 30, "name": "Logan", "kicked": True}
+    assert result == {"id": "30", "name": "Logan", "kicked": True}
 
 
 @pytest.mark.asyncio
@@ -344,7 +363,7 @@ async def test_message_send(guild):
         None, guild, "message_send", {"channel_id": 11, "content": "o7"}
     )
     assert channel.calls == [("send", "o7")]
-    assert result == {"id": 555, "channel_id": 11}
+    assert result == {"id": "555", "channel_id": "11"}
 
 
 @pytest.mark.asyncio

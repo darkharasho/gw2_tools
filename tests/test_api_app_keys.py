@@ -128,7 +128,7 @@ async def test_scoped_key_rejected_for_other_guild(api_client, scoped_key):
 async def test_scoped_key_guild_list_only_contains_own_guild(api_client, scoped_key):
     resp = await api_client.get("/guilds", headers=_bearer(scoped_key))
     assert resp.status == 200
-    assert await resp.json() == [{"id": 123, "name": "Vigil Keep"}]
+    assert await resp.json() == [{"id": "123", "name": "Vigil Keep"}]
 
 
 @pytest.mark.asyncio
@@ -158,6 +158,6 @@ async def test_global_token_retains_full_access(api_client, scoped_key):
         assert resp.status == 200
     resp = await api_client.get("/guilds", headers=_bearer("test-token"))
     assert await resp.json() == [
-        {"id": 123, "name": "Vigil Keep"},
-        {"id": 456, "name": "Durmand Priory"},
+        {"id": "123", "name": "Vigil Keep"},
+        {"id": "456", "name": "Durmand Priory"},
     ]

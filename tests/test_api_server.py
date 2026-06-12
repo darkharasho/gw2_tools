@@ -52,7 +52,7 @@ async def test_rejects_wrong_token(api_client):
 async def test_lists_guilds(api_client):
     resp = await api_client.get("/guilds", headers=_auth())
     assert resp.status == 200
-    assert await resp.json() == [{"id": 123, "name": "Vigil Keep"}]
+    assert await resp.json() == [{"id": "123", "name": "Vigil Keep"}]
 
 
 def test_resolve_api_token_generates_and_persists(tmp_path):

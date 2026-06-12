@@ -171,11 +171,27 @@ class CompConfig:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "CompConfig":
+        def _snowflake(raw: Any) -> Optional[int]:
+            # API clients send snowflake ids as strings (they overflow JS
+            # numbers); storage keeps them as ints.
+            if isinstance(raw, bool):
+                return None
+            if isinstance(raw, int):
+                return raw
+            if isinstance(raw, str):
+                try:
+                    return int(raw)
+                except ValueError:
+                    return None
+            return None
+
         classes_payload = payload.get("classes", []) or []
         classes: List[CompClassConfig] = []
         for item in classes_payload:
             if not isinstance(item, dict):
                 continue
+            if "emoji_id" in item:
+                item = {**item, "emoji_id": _snowflake(item.get("emoji_id"))}
             try:
                 classes.append(CompClassConfig(**item))
             except TypeError:
@@ -227,27 +243,16 @@ class CompConfig:
 
         timezone_value = payload.get("timezone", "UTC")
         timezone_value = normalise_timezone(timezone_value)
-        ping_role_raw = payload.get("ping_role_id")
-        ping_role_id: Optional[int]
-        if isinstance(ping_role_raw, int):
-            ping_role_id = ping_role_raw
-        elif isinstance(ping_role_raw, str):
-            try:
-                ping_role_id = int(ping_role_raw)
-            except ValueError:
-                ping_role_id = None
-        else:
-            ping_role_id = None
         return cls(
-            channel_id=payload.get("channel_id"),
-            ping_role_id=ping_role_id,
+            channel_id=_snowflake(payload.get("channel_id")),
+            ping_role_id=_snowflake(payload.get("ping_role_id")),
             post_days=post_days,
             post_time=payload.get("post_time"),
             timezone=timezone_value,
             overview=payload.get("overview", ""),
             classes=classes,
             signups=signups,
-            message_id=payload.get("message_id"),
+            message_id=_snowflake(payload.get("message_id")),
             last_post_at=payload.get("last_post_at"),
         )
 

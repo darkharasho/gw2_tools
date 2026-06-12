@@ -102,8 +102,49 @@ async def _auth_middleware(request: web.Request, handler):
     return await handler(request)
 
 
+_SNOWFLAKE_KEYS = frozenset({
+    "channel_id",
+    "thread_id",
+    "message_id",
+    "created_by",
+    "updated_by",
+    "ping_role_id",
+    "emoji_id",
+    "build_channel_id",
+    "moderator_role_ids",
+})
+
+
+def _with_string_ids(value, key=None, force=False):
+    """Recursively stringify snowflake-keyed ints in a JSON-able payload.
+
+    ``signups`` maps class names to lists of member ids, so everything under
+    it is forced. Non-snowflake numbers (positions, counts, days) pass through.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _with_string_ids(v, k, force or k == "signups")
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_with_string_ids(item, key, force) for item in value]
+    if isinstance(value, int) and not isinstance(value, bool) and (force or key in _SNOWFLAKE_KEYS):
+        return str(value)
+    return value
+
+
 def _build_to_json(record: BuildRecord) -> dict:
-    return asdict(record)
+    return _with_string_ids(asdict(record))
+
+
+def _sid(value) -> str | None:
+    """Serialize a Discord snowflake id as a string (None passes through).
+
+    Snowflakes are 64-bit ints that exceed JavaScript's Number.MAX_SAFE_INTEGER;
+    JSON numbers silently lose precision in JS clients, so — like Discord's own
+    REST API — every id crosses the API boundary as a string.
+    """
+    return None if value is None else str(value)
 
 
 def _guild_ctx(request: web.Request):
@@ -135,7 +176,7 @@ async def _handle_guilds(request: web.Request) -> web.Response:
     guilds = bot.guilds
     if scoped_guild_id is not None:
         guilds = [g for g in guilds if g.id == scoped_guild_id]
-    return web.json_response([{"id": g.id, "name": g.name} for g in guilds])
+    return web.json_response([{"id": _sid(g.id), "name": g.name} for g in guilds])
 
 
 async def _parse_json_body(request: web.Request) -> dict | None:
@@ -245,7 +286,7 @@ async def _handle_builds_delete(request: web.Request) -> web.Response:
 async def _handle_comp_presets_list(request: web.Request) -> web.Response:
     bot, gid = _guild_ctx(request)
     presets = await asyncio.to_thread(bot.storage.get_comp_presets, gid)
-    return web.json_response([p.to_dict() for p in presets])
+    return web.json_response([_with_string_ids(p.to_dict()) for p in presets])
 
 
 async def _handle_comp_presets_upsert(request: web.Request) -> web.Response:
@@ -276,7 +317,7 @@ async def _handle_comp_presets_upsert(request: web.Request) -> web.Response:
     async with _write_lock:
         await asyncio.to_thread(_upsert_preset)
 
-    return web.json_response(result[0].to_dict())
+    return web.json_response(_with_string_ids(result[0].to_dict()))
 
 
 async def _handle_comp_presets_delete(request: web.Request) -> web.Response:
@@ -303,7 +344,7 @@ async def _handle_comp_presets_delete(request: web.Request) -> web.Response:
 async def _handle_comp_schedules_list(request: web.Request) -> web.Response:
     bot, gid = _guild_ctx(request)
     config = await asyncio.to_thread(bot.storage.get_config, gid)
-    return web.json_response([s.to_dict() for s in config.comp_schedules])
+    return web.json_response([_with_string_ids(s.to_dict()) for s in config.comp_schedules])
 
 
 async def _handle_comp_schedules_upsert(request: web.Request) -> web.Response:
@@ -332,7 +373,7 @@ async def _handle_comp_schedules_upsert(request: web.Request) -> web.Response:
     async with _write_lock:
         await asyncio.to_thread(_upsert_schedule)
 
-    return web.json_response(result[0].to_dict())
+    return web.json_response(_with_string_ids(result[0].to_dict()))
 
 
 _CONFIG_WHITELIST = ("moderator_role_ids", "build_channel_id", "comp_active_preset")
@@ -343,7 +384,7 @@ async def _handle_config_get(request: web.Request) -> web.Response:
     config = await asyncio.to_thread(bot.storage.get_config, gid)
     body = {key: getattr(config, key) for key in _CONFIG_WHITELIST}
     body["comp_schedule_count"] = len(config.comp_schedules)
-    return web.json_response(body)
+    return web.json_response(_with_string_ids(body))
 
 
 def _iso(value) -> str | None:
@@ -353,9 +394,10 @@ def _iso(value) -> str | None:
     return value.isoformat()
 
 
-def _permissions_value(role) -> int:
+def _permissions_value(role) -> str:
+    # Permissions are a 64-bit bitfield; Discord serializes them as a string.
     perms = getattr(role, "permissions", 0)
-    return int(getattr(perms, "value", perms) or 0)
+    return str(int(getattr(perms, "value", perms) or 0))
 
 
 def _resolve_discord_guild(request: web.Request):
@@ -369,10 +411,10 @@ def _resolve_discord_guild(request: web.Request):
 
 def _channel_to_json(channel) -> dict:
     return {
-        "id": channel.id,
+        "id": _sid(channel.id),
         "name": channel.name,
         "type": str(channel.type),
-        "category_id": getattr(channel, "category_id", None),
+        "category_id": _sid(getattr(channel, "category_id", None)),
         "topic": getattr(channel, "topic", None),
         "position": getattr(channel, "position", 0),
     }
@@ -386,12 +428,12 @@ async def _handle_discord_snapshot(request: web.Request) -> web.Response:
     category_ids = {c.id for c in categories}
     body = {
         "guild": {
-            "id": guild.id,
+            "id": _sid(guild.id),
             "name": guild.name,
             "member_count": guild.member_count,
         },
         "categories": [
-            {"id": c.id, "name": c.name, "position": getattr(c, "position", 0)}
+            {"id": _sid(c.id), "name": c.name, "position": getattr(c, "position", 0)}
             for c in categories
         ],
         "channels": [
@@ -399,7 +441,7 @@ async def _handle_discord_snapshot(request: web.Request) -> web.Response:
         ],
         "roles": [
             {
-                "id": r.id,
+                "id": _sid(r.id),
                 "name": r.name,
                 "color": str(getattr(r, "color", "") or "#000000"),
                 "position": getattr(r, "position", 0),
@@ -412,21 +454,21 @@ async def _handle_discord_snapshot(request: web.Request) -> web.Response:
         ],
         "threads": [
             {
-                "id": t.id,
+                "id": _sid(t.id),
                 "name": t.name,
-                "parent_id": getattr(t, "parent_id", None),
+                "parent_id": _sid(getattr(t, "parent_id", None)),
                 "archived": getattr(t, "archived", False),
             }
             for t in getattr(guild, "threads", ())
         ],
         "scheduled_events": [
             {
-                "id": e.id,
+                "id": _sid(e.id),
                 "name": e.name,
                 "description": getattr(e, "description", None),
                 "start_time": _iso(getattr(e, "start_time", None)),
                 "end_time": _iso(getattr(e, "end_time", None)),
-                "channel_id": getattr(e, "channel_id", None),
+                "channel_id": _sid(getattr(e, "channel_id", None)),
                 "location": getattr(e, "location", None),
             }
             for e in getattr(guild, "scheduled_events", ())
@@ -438,10 +480,10 @@ async def _handle_discord_snapshot(request: web.Request) -> web.Response:
         body["members_total"] = len(members)
         body["members"] = [
             {
-                "id": m.id,
+                "id": _sid(m.id),
                 "name": m.name,
                 "display_name": getattr(m, "display_name", m.name),
-                "role_ids": [r.id for r in getattr(m, "roles", ())],
+                "role_ids": [_sid(r.id) for r in getattr(m, "roles", ())],
                 "joined_at": _iso(getattr(m, "joined_at", None)),
             }
             for m in members[:1000]
@@ -469,8 +511,8 @@ async def _handle_discord_messages(request: web.Request) -> web.Response:
         return web.json_response({"error": str(exc)}, status=404)
     messages = [
         {
-            "id": m.id,
-            "author_id": m.author.id,
+            "id": _sid(m.id),
+            "author_id": _sid(m.author.id),
             "author_name": m.author.name,
             "content": m.content,
             "created_at": _iso(m.created_at),

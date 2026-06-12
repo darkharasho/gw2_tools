@@ -34,6 +34,15 @@ def _param(type_: str, required: bool = False, description: str = "") -> dict:
     return {"type": type_, "required": required, "description": description}
 
 
+def _sid(value) -> str | None:
+    """Serialize a snowflake id as a string for JSON results (None passes through).
+
+    Snowflakes overflow JavaScript's Number.MAX_SAFE_INTEGER, so ids cross the
+    API boundary as strings — same as Discord's own REST API.
+    """
+    return None if value is None else str(value)
+
+
 # ---------------------------------------------------------------------------
 # Param validation
 # ---------------------------------------------------------------------------
@@ -163,7 +172,7 @@ async def _exec_channel_create(bot, guild, p: dict) -> dict:
         channel = await guild.create_text_channel(
             p["name"], category=category, topic=p.get("topic"), reason=reason
         )
-    return {"id": channel.id, "name": channel.name, "type": ctype}
+    return {"id": _sid(channel.id), "name": channel.name, "type": ctype}
 
 
 async def _exec_channel_update(bot, guild, p: dict) -> dict:
@@ -182,13 +191,13 @@ async def _exec_channel_update(bot, guild, p: dict) -> dict:
     if not kwargs:
         raise ValueError("channel_update requires at least one field to change")
     await channel.edit(reason=audit_reason(None, "channel_update"), **kwargs)
-    return {"id": channel.id, "name": kwargs.get("name", channel.name)}
+    return {"id": _sid(channel.id), "name": kwargs.get("name", channel.name)}
 
 
 async def _exec_channel_delete(bot, guild, p: dict) -> dict:
     channel = resolve_channel(guild, p["channel_id"])
     await channel.delete(reason=audit_reason(p.get("reason"), "channel_delete"))
-    return {"id": channel.id, "name": channel.name, "deleted": True}
+    return {"id": _sid(channel.id), "name": channel.name, "deleted": True}
 
 
 async def _exec_role_create(bot, guild, p: dict) -> dict:
@@ -202,7 +211,7 @@ async def _exec_role_create(bot, guild, p: dict) -> dict:
     if "permissions" in p:
         kwargs["permissions"] = discord.Permissions(p["permissions"])
     role = await guild.create_role(**kwargs)
-    return {"id": role.id, "name": role.name}
+    return {"id": _sid(role.id), "name": role.name}
 
 
 async def _exec_role_update(bot, guild, p: dict) -> dict:
@@ -221,34 +230,34 @@ async def _exec_role_update(bot, guild, p: dict) -> dict:
     if not kwargs:
         raise ValueError("role_update requires at least one field to change")
     await role.edit(reason=audit_reason(None, "role_update"), **kwargs)
-    return {"id": role.id, "name": kwargs.get("name", role.name)}
+    return {"id": _sid(role.id), "name": kwargs.get("name", role.name)}
 
 
 async def _exec_role_delete(bot, guild, p: dict) -> dict:
     role = _resolve_role(guild, p["role_id"])
     await role.delete(reason=audit_reason(p.get("reason"), "role_delete"))
-    return {"id": role.id, "name": role.name, "deleted": True}
+    return {"id": _sid(role.id), "name": role.name, "deleted": True}
 
 
 async def _exec_role_assign(bot, guild, p: dict) -> dict:
     member = await _resolve_member(guild, p["member_id"])
     role = _resolve_role(guild, p["role_id"])
     await member.add_roles(role, reason=audit_reason(None, "role_assign"))
-    return {"member_id": member.id, "role_id": role.id, "role_name": role.name}
+    return {"member_id": _sid(member.id), "role_id": _sid(role.id), "role_name": role.name}
 
 
 async def _exec_role_unassign(bot, guild, p: dict) -> dict:
     member = await _resolve_member(guild, p["member_id"])
     role = _resolve_role(guild, p["role_id"])
     await member.remove_roles(role, reason=audit_reason(None, "role_unassign"))
-    return {"member_id": member.id, "role_id": role.id, "role_name": role.name}
+    return {"member_id": _sid(member.id), "role_id": _sid(role.id), "role_name": role.name}
 
 
 async def _exec_member_nick(bot, guild, p: dict) -> dict:
     member = await _resolve_member(guild, p["member_id"])
     nick = p.get("nick") or None  # null / empty / missing all clear the nick
     await member.edit(nick=nick, reason=audit_reason(None, "member_nick"))
-    return {"id": member.id, "nick": nick}
+    return {"id": _sid(member.id), "nick": nick}
 
 
 async def _exec_member_timeout(bot, guild, p: dict) -> dict:
@@ -262,13 +271,13 @@ async def _exec_member_timeout(bot, guild, p: dict) -> dict:
         dt.timedelta(minutes=minutes),
         reason=audit_reason(p.get("reason"), "member_timeout"),
     )
-    return {"id": member.id, "name": member.name, "timeout_minutes": minutes}
+    return {"id": _sid(member.id), "name": member.name, "timeout_minutes": minutes}
 
 
 async def _exec_member_kick(bot, guild, p: dict) -> dict:
     member = await _resolve_member(guild, p["member_id"])
     await member.kick(reason=audit_reason(p.get("reason"), "member_kick"))
-    return {"id": member.id, "name": member.name, "kicked": True}
+    return {"id": _sid(member.id), "name": member.name, "kicked": True}
 
 
 async def _exec_member_ban(bot, guild, p: dict) -> dict:
@@ -281,20 +290,20 @@ async def _exec_member_ban(bot, guild, p: dict) -> dict:
         reason=audit_reason(p.get("reason"), "member_ban"),
         delete_message_seconds=days * 86400,
     )
-    return {"id": member.id, "name": member.name, "banned": True}
+    return {"id": _sid(member.id), "name": member.name, "banned": True}
 
 
 async def _exec_message_send(bot, guild, p: dict) -> dict:
     channel = resolve_channel(guild, p["channel_id"])
     message = await channel.send(p["content"])
-    return {"id": message.id, "channel_id": channel.id}
+    return {"id": _sid(message.id), "channel_id": _sid(channel.id)}
 
 
 async def _exec_message_pin(bot, guild, p: dict) -> dict:
     channel = resolve_channel(guild, p["channel_id"])
     message = await _resolve_message(channel, p["message_id"])
     await message.pin(reason=audit_reason(None, "message_pin"))
-    return {"id": message.id, "channel_id": channel.id, "pinned": True}
+    return {"id": _sid(message.id), "channel_id": _sid(channel.id), "pinned": True}
 
 
 async def _exec_thread_create(bot, guild, p: dict) -> dict:
@@ -305,7 +314,7 @@ async def _exec_thread_create(bot, guild, p: dict) -> dict:
     else:
         kwargs["type"] = discord.ChannelType.public_thread
     thread = await channel.create_thread(**kwargs)
-    return {"id": thread.id, "name": thread.name, "parent_id": channel.id}
+    return {"id": _sid(thread.id), "name": thread.name, "parent_id": _sid(channel.id)}
 
 
 async def _exec_event_create(bot, guild, p: dict) -> dict:
@@ -336,7 +345,7 @@ async def _exec_event_create(bot, guild, p: dict) -> dict:
     if end is not None:
         kwargs["end_time"] = end
     event = await guild.create_scheduled_event(**kwargs)
-    return {"id": event.id, "name": event.name}
+    return {"id": _sid(event.id), "name": event.name}
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +390,7 @@ ACTIONS: dict[str, dict] = {
             "color": _param("string", False, "Hex color string like '#c8423a'"),
             "hoist": _param("boolean", False, "Show role members separately"),
             "mentionable": _param("boolean", False, "Allow anyone to mention the role"),
-            "permissions": _param("integer", False, "Permissions integer bitfield"),
+            "permissions": _param("integer", False, "Permissions bitfield (integer or numeric string)"),
         },
         "executor": _exec_role_create,
     },
@@ -393,7 +402,7 @@ ACTIONS: dict[str, dict] = {
             "color": _param("string", False, "Hex color string like '#c8423a'"),
             "hoist": _param("boolean", False, "Show role members separately"),
             "mentionable": _param("boolean", False, "Allow anyone to mention the role"),
-            "permissions": _param("integer", False, "Permissions integer bitfield"),
+            "permissions": _param("integer", False, "Permissions bitfield (integer or numeric string)"),
         },
         "executor": _exec_role_update,
     },

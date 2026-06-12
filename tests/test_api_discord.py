@@ -167,23 +167,24 @@ async def test_snapshot_shape(api_client):
     resp = await api_client.get("/guilds/123/discord", headers=_auth())
     assert resp.status == 200
     body = await resp.json()
-    assert body["guild"] == {"id": 123, "name": "Vigil Keep", "member_count": 2}
-    assert body["categories"] == [{"id": 10, "name": "Operations", "position": 0}]
+    # Snowflake ids (and the 64-bit permissions bitfield) serialize as strings.
+    assert body["guild"] == {"id": "123", "name": "Vigil Keep", "member_count": 2}
+    assert body["categories"] == [{"id": "10", "name": "Operations", "position": 0}]
     # Categories are excluded from the flat channel list.
     assert body["channels"] == [{
-        "id": 11, "name": "general", "type": "text",
-        "category_id": 10, "topic": "Chatter", "position": 1,
+        "id": "11", "name": "general", "type": "text",
+        "category_id": "10", "topic": "Chatter", "position": 1,
     }]
     assert body["roles"] == [{
-        "id": 20, "name": "Raider", "color": "#c8423a", "position": 5,
-        "hoist": False, "mentionable": True, "permissions": 104320,
+        "id": "20", "name": "Raider", "color": "#c8423a", "position": 5,
+        "hoist": False, "mentionable": True, "permissions": "104320",
         "member_count": 1,
     }]
     assert body["threads"] == [
-        {"id": 40, "name": "raid-plans", "parent_id": 11, "archived": False}
+        {"id": "40", "name": "raid-plans", "parent_id": "11", "archived": False}
     ]
     assert body["scheduled_events"] == [{
-        "id": 50, "name": "Reset bash", "description": None,
+        "id": "50", "name": "Reset bash", "description": None,
         "start_time": "2026-06-12T18:00:00+00:00", "end_time": None,
         "channel_id": None, "location": "Eternal Battlegrounds",
     }]
@@ -197,8 +198,8 @@ async def test_snapshot_include_members(api_client):
     body = await resp.json()
     assert body["members_total"] == 2
     assert body["members"][0] == {
-        "id": 30, "name": "logan", "display_name": "Logan",
-        "role_ids": [20], "joined_at": "2024-01-01T00:00:00+00:00",
+        "id": "30", "name": "logan", "display_name": "Logan",
+        "role_ids": ["20"], "joined_at": "2024-01-01T00:00:00+00:00",
     }
 
 
@@ -210,6 +211,25 @@ async def test_snapshot_caps_members_at_1000(api_client, bot):
     body = await resp.json()
     assert body["members_total"] == 1005
     assert len(body["members"]) == 1000
+
+
+@pytest.mark.asyncio
+async def test_19_digit_snowflake_round_trips_as_exact_string(aiohttp_client, tmp_path):
+    # 1380283751703445199 rounds to ...200 as a JS number; the API must emit
+    # the exact digits as a string through /guilds and the snapshot.
+    big = 1380283751703445199
+    bot = FakeBot(tmp_path)
+    bot.guilds = [FakeGuild(big, "Big Keep")]
+    client = await aiohttp_client(build_app(bot, token="test-token"))
+
+    resp = await client.get("/guilds", headers=_auth())
+    assert resp.status == 200
+    assert await resp.json() == [{"id": "1380283751703445199", "name": "Big Keep"}]
+
+    resp = await client.get(f"/guilds/{big}/discord", headers=_auth())
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["guild"]["id"] == "1380283751703445199"
 
 
 @pytest.mark.asyncio
@@ -230,9 +250,9 @@ async def test_messages_shape_newest_first(api_client):
     )
     assert resp.status == 200
     body = await resp.json()
-    assert [m["id"] for m in body] == [101, 100]
+    assert [m["id"] for m in body] == ["101", "100"]
     assert body[0] == {
-        "id": 101, "author_id": 30, "author_name": "logan",
+        "id": "101", "author_id": "30", "author_name": "logan",
         "content": "newest", "created_at": "2026-06-11T12:00:00+00:00",
         "pinned": True,
     }
@@ -244,7 +264,7 @@ async def test_messages_limit_param(api_client):
         "/guilds/123/discord/messages?channel_id=11&limit=1", headers=_auth()
     )
     body = await resp.json()
-    assert [m["id"] for m in body] == [101]
+    assert [m["id"] for m in body] == ["101"]
 
 
 @pytest.mark.asyncio
@@ -299,7 +319,7 @@ async def test_post_action_happy_path(api_client, bot):
     )
     assert resp.status == 200
     body = await resp.json()
-    assert body == {"ok": True, "result": {"id": 900, "channel_id": 11}}
+    assert body == {"ok": True, "result": {"id": "900", "channel_id": "11"}}
     assert bot.get_guild(123).get_channel(11).sent == ["o7"]
 
 
