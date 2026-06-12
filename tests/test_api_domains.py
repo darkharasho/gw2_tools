@@ -874,3 +874,55 @@ async def test_scoped_key_rejected_for_other_guild(api_client, scoped_key):
         headers=_bearer(scoped_key),
     )
     assert resp.status == 403
+
+
+# ---------------------------------------------------------------------------
+# Key holders (existence-only, cross-server)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_key_holders_flags_known_accounts_case_insensitively(api_client, bot):
+    _seed_api_keys(bot)
+    # A key registered in ANOTHER Discord server still counts as "has a key".
+    bot.storage.upsert_api_key(OTHER_GID, 77, ApiKeyRecord(
+        name="elsewhere", key="ELSEWHERE-SECRET",
+        account_name="Riversong.2837",
+    ))
+    resp = await api_client.post(
+        f"/guilds/{GID}/key-holders",
+        json={"account_names": ["logan.1234", "Riversong.2837", "Stranger.9999"]},
+        headers=_auth(),
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["holders"] == {
+        "logan.1234": True,
+        "Riversong.2837": True,
+        "Stranger.9999": False,
+    }
+    assert body["matched"] == 2
+    # Only GID registrations count for the local linked-member tally (users 30 + 99).
+    assert body["linked_members_in_this_server"] == 2
+    assert "ELSEWHERE-SECRET" not in json.dumps(body)
+
+
+@pytest.mark.asyncio
+async def test_key_holders_validates_input(api_client):
+    for bad in [{}, {"account_names": "Logan.1234"}, {"account_names": []},
+                {"account_names": ["x"] * 501}]:
+        resp = await api_client.post(
+            f"/guilds/{GID}/key-holders", json=bad, headers=_auth()
+        )
+        assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_key_holders_respects_key_scoping(api_client, bot):
+    scoped_key = generate_app_key("http://127.0.0.1:8642")
+    bot.storage.set_app_key(OTHER_GID, hash_app_key(scoped_key), 1)
+    resp = await api_client.post(
+        f"/guilds/{GID}/key-holders",
+        json={"account_names": ["Logan.1234"]},
+        headers=_bearer(scoped_key),
+    )
+    assert resp.status == 403

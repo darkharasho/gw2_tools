@@ -1297,6 +1297,35 @@ async def _handle_config_patch(request: web.Request) -> web.Response:
 # Linked members (derived from the api_keys store; never exposes key material)
 # ---------------------------------------------------------------------------
 
+async def _handle_key_holders(request: web.Request) -> web.Response:
+    """Existence-only key check: which of these GW2 account names have a key
+    registered with the bot in ANY server. Booleans only — no key data, no
+    cross-server registration details."""
+    bot, gid = _guild_ctx(request)
+    body = await _parse_json_body(request)
+    if body is None:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    names = body.get("account_names")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        return web.json_response({"error": "account_names must be a list of strings"}, status=400)
+    if len(names) == 0 or len(names) > 500:
+        return web.json_response({"error": "account_names must contain 1-500 names"}, status=400)
+
+    def _query():
+        holders = bot.storage.match_key_holders(names)
+        linked_here = {
+            user_id for _g, user_id, _r in bot.storage.query_api_keys(guild_id=gid)
+        }
+        return holders, len(linked_here)
+
+    holders, linked_here = await asyncio.to_thread(_query)
+    return web.json_response({
+        "holders": holders,
+        "matched": sum(1 for v in holders.values() if v),
+        "linked_members_in_this_server": linked_here,
+    })
+
+
 async def _handle_members_linked(request: web.Request) -> web.Response:
     bot, gid = _guild_ctx(request)
     guild = bot.get_guild(gid)
@@ -1371,6 +1400,7 @@ def build_app(bot, token: str) -> web.Application:
         "/guilds/{guild_id:\\d+}/guild-roles-allowlist", _handle_guild_roles_allowlist_put
     )
     app.router.add_get("/guilds/{guild_id:\\d+}/members-linked", _handle_members_linked)
+    app.router.add_post("/guilds/{guild_id:\\d+}/key-holders", _handle_key_holders)
     app.router.add_get("/guilds/{guild_id:\\d+}/discord", _handle_discord_snapshot)
     app.router.add_get("/guilds/{guild_id:\\d+}/discord/messages", _handle_discord_messages)
     app.router.add_get("/guilds/{guild_id:\\d+}/discord/actions", _handle_discord_actions_list)

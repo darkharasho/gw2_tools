@@ -1170,6 +1170,18 @@ class ApiKeyStore:
             for row in rows
         ]
 
+    def match_key_holders(self, account_names: Iterable[str]) -> Dict[str, bool]:
+        """Map each account name to whether ANY stored key (any Discord guild)
+        belongs to it. Existence only — never returns key rows or which guild
+        the registration lives in."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT lower(account_name) AS n FROM api_keys"
+            ).fetchall()
+        known = {row["n"] for row in rows}
+        return {name: name.lower() in known for name in account_names}
+
     def all_gw2_guild_ids(self) -> List[str]:
         """Return all distinct Guild Wars 2 guild IDs referenced by stored keys."""
 
@@ -2088,6 +2100,9 @@ class StorageManager:
 
     def all_api_keys(self) -> List[Tuple[int, int, ApiKeyRecord]]:
         return self.api_key_store.all_api_keys()
+
+    def match_key_holders(self, account_names: Iterable[str]) -> Dict[str, bool]:
+        return self.api_key_store.match_key_holders(account_names)
 
     def get_preferred_guild_role(self, guild_id: int, user_id: int) -> Optional[int]:
         return self.api_key_store.get_preferred_guild_role(guild_id, user_id)
