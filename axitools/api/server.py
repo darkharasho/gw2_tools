@@ -25,11 +25,16 @@ def resolve_api_token(root: Path) -> str:
         return env.strip()
     token_path = root / "api_token"
     if token_path.exists():
-        return token_path.read_text().strip()
+        return token_path.read_text(encoding="utf-8").strip()
     token = secrets.token_hex(32)
     root.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(token)
-    token_path.chmod(0o600)
+    # Deliberate: the token lives in the data root (unlike the DB key) so users
+    # can find it easily to paste into GW2 Officer. It only grants localhost
+    # API access, not at-rest decryption — override with AXITOOLS_API_TOKEN
+    # to keep it out of data backups.
+    fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(token)
     return token
 
 

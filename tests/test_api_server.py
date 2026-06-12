@@ -61,3 +61,4 @@ def test_resolve_api_token_generates_and_persists(tmp_path):
     assert first == second
     assert len(first) == 64  # token_hex(32)
     assert (tmp_path / "api_token").exists()
+    assert (tmp_path / "api_token").stat().st_mode & 0o777 == 0o600
