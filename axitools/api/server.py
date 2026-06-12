@@ -66,9 +66,10 @@ async def _handle_guilds(request: web.Request) -> web.Response:
 async def _parse_json_body(request: web.Request) -> dict | None:
     """Return parsed JSON body, or None if the body is missing / malformed."""
     try:
-        return await request.json()
-    except (json.JSONDecodeError, Exception):
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None
+    return body if isinstance(body, dict) else None
 
 
 async def _handle_builds_list(request: web.Request) -> web.Response:
@@ -109,12 +110,12 @@ async def _handle_builds_update(request: web.Request) -> web.Response:
     bot = request.app["bot"]
     gid = int(request.match_info["guild_id"])
     build_id = request.match_info["build_id"]
-    existing = await asyncio.to_thread(bot.storage.find_build, gid, build_id)
-    if existing is None:
-        return web.json_response({"error": "build not found"}, status=404)
     body = await _parse_json_body(request)
     if body is None:
         return web.json_response({"error": "invalid JSON body"}, status=400)
+    existing = await asyncio.to_thread(bot.storage.find_build, gid, build_id)
+    if existing is None:
+        return web.json_response({"error": "build not found"}, status=404)
     updated = BuildRecord(
         build_id=existing.build_id,
         name=body["name"] if "name" in body else existing.name,
