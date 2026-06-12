@@ -708,13 +708,6 @@ class ApiKeyStore:
             except (IndexError, ValueError):
                 continue
 
-            with self._connect() as connection:
-                existing = connection.execute(
-                    "SELECT COUNT(1) FROM api_keys WHERE guild_id = ?", (guild_id,)
-                ).fetchone()[0]
-            if existing:
-                continue
-
             path = guild_dir / "api_keys.json"
             if not path.exists():
                 continue
@@ -728,6 +721,12 @@ class ApiKeyStore:
             if not isinstance(payload, dict):
                 continue
 
+            # Merge record-by-record: legacy entries fill gaps but never
+            # overwrite rows already in SQLite (those are newer). Guilds with
+            # some SQLite rows still get their remaining legacy keys imported —
+            # an earlier version skipped the whole file in that case, silently
+            # stranding pre-SQLite registrations.
+            imported = 0
             for user_id_raw, records_payload in payload.items():
                 try:
                     user_id = int(user_id_raw)
@@ -735,12 +734,27 @@ class ApiKeyStore:
                     continue
                 if not isinstance(records_payload, list):
                     continue
+                existing_names = {
+                    record.name.strip().lower()
+                    for record in self.get_user_api_keys(guild_id, user_id)
+                }
                 for item in records_payload:
                     try:
                         record = ApiKeyRecord.from_dict(item)
                     except ValueError:
                         continue
+                    if record.name.strip().lower() in existing_names:
+                        continue
                     self.upsert_api_key(guild_id, user_id, record)
+                    imported += 1
+            if imported:
+                logger.info(
+                    "Imported %s legacy API key(s) for guild %s", imported, guild_id
+                )
+
+            # Retire the file so deletions made after this point don't
+            # resurrect on the next boot.
+            path.rename(path.with_suffix(".json.imported"))
 
     @staticmethod
     def _read_json(path: Path, default: Any) -> Any:
