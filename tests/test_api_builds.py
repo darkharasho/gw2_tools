@@ -1,10 +1,7 @@
-from pathlib import Path
-
 import pytest
 import pytest_asyncio
 
 from axitools.api.server import build_app
-from axitools.storage import StorageManager
 
 from tests.test_api_server import FakeBot, _auth  # reuse helpers
 
@@ -109,3 +106,29 @@ async def test_malformed_json_returns_400(api_client):
         headers={**_auth(), "Content-Type": "application/json"},
     )
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_empty_name(api_client, bot):
+    """PUT with empty name on an existing build should return 400."""
+    # First create a build
+    payload = {"name": "Test Build", "profession": "Warrior", "chat_code": "[&x]"}
+    resp = await api_client.post(f"/guilds/{GID}/builds", json=payload, headers=_auth())
+    assert resp.status == 201
+    build_id = (await resp.json())["build_id"]
+
+    # PUT with empty name
+    resp = await api_client.put(
+        f"/guilds/{GID}/builds/{build_id}",
+        json={"name": ""},
+        headers=_auth(),
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid value for field: name"
+
+
+@pytest.mark.asyncio
+async def test_non_numeric_guild_id_returns_404(api_client):
+    """GET /guilds/abc/builds should return 404 (non-numeric guild_id)."""
+    resp = await api_client.get("/guilds/abc/builds", headers=_auth())
+    assert resp.status == 404
