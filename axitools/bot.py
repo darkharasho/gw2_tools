@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from .api.server import start_api
 from .storage import DEFAULT_STORAGE_ROOT, GuildConfig, StorageManager
 
 LOGGER = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class AxiToolsBot(commands.Bot):
         self.tree.on_error = self.on_app_command_error
         self._global_sync_done = False
         self._synced_guilds: Set[int] = set()
+        self._api_runner = None
 
     # ------------------------------------------------------------------
     async def setup_hook(self) -> None:
@@ -53,6 +55,17 @@ class AxiToolsBot(commands.Bot):
         await self.load_extension("axitools.cogs.reset")
         await self.load_extension("axitools.cogs.streaming")
         await self.load_extension("axitools.cogs.dev")
+
+        try:
+            self._api_runner = await start_api(self)
+        except OSError as exc:
+            LOGGER.warning("AxiTools API failed to start: %s", exc)
+
+    async def close(self) -> None:
+        if self._api_runner is not None:
+            await self._api_runner.cleanup()
+            self._api_runner = None
+        await super().close()
 
     async def on_ready(self) -> None:
         await self._sync_global_commands()

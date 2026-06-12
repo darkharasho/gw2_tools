@@ -62,3 +62,28 @@ def test_resolve_api_token_generates_and_persists(tmp_path):
     assert len(first) == 64  # token_hex(32)
     assert (tmp_path / "api_token").exists()
     assert (tmp_path / "api_token").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.asyncio
+async def test_start_api_lifecycle(tmp_path):
+    import socket
+    import aiohttp
+    from axitools.api.server import start_api, resolve_api_token
+
+    # Bind to port 0 to let the OS pick a free ephemeral port.
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        free_port = sock.getsockname()[1]
+
+    bot = FakeBot(tmp_path)
+    runner = await start_api(bot, port=free_port)
+    try:
+        token = resolve_api_token(tmp_path)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"http://127.0.0.1:{free_port}/guilds",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                assert resp.status == 200
+    finally:
+        await runner.cleanup()
