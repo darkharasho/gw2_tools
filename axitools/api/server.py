@@ -397,6 +397,29 @@ async def _handle_comp_schedules_upsert(request: web.Request) -> web.Response:
     return web.json_response(_with_string_ids(result[0].to_dict()))
 
 
+async def _handle_comp_schedules_delete(request: web.Request) -> web.Response:
+    bot, gid = _guild_ctx(request)
+    schedule_id = request.match_info["schedule_id"]
+    removed: list[bool] = []
+
+    def _delete_schedule():
+        config = bot.storage.get_config(gid)
+        before = len(config.comp_schedules)
+        config.comp_schedules = [
+            s for s in config.comp_schedules if s.schedule_id != schedule_id
+        ]
+        if len(config.comp_schedules) != before:
+            bot.storage.save_config(gid, config)
+            removed.append(True)
+
+    async with _write_lock:
+        await asyncio.to_thread(_delete_schedule)
+
+    if not removed:
+        return web.json_response({"error": "schedule not found"}, status=404)
+    return web.Response(status=204)
+
+
 _CONFIG_WHITELIST = (
     "moderator_role_ids",
     "build_channel_id",
@@ -1377,6 +1400,7 @@ def build_app(bot, token: str) -> web.Application:
     app.router.add_delete("/guilds/{guild_id:\\d+}/comp-presets/{name}", _handle_comp_presets_delete)
     app.router.add_get("/guilds/{guild_id:\\d+}/comp-schedules", _handle_comp_schedules_list)
     app.router.add_put("/guilds/{guild_id:\\d+}/comp-schedules/{schedule_id}", _handle_comp_schedules_upsert)
+    app.router.add_delete("/guilds/{guild_id:\\d+}/comp-schedules/{schedule_id}", _handle_comp_schedules_delete)
     app.router.add_get("/guilds/{guild_id:\\d+}/config", _handle_config_get)
     app.router.add_patch("/guilds/{guild_id:\\d+}/config", _handle_config_patch)
     app.router.add_get("/guilds/{guild_id:\\d+}/audit/discord", _handle_audit_discord)

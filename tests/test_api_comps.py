@@ -113,3 +113,18 @@ async def test_invalid_schedule_payload_400(api_client):
         f"/guilds/{GID}/comp-schedules/sched-x", json={"name": 42}, headers=_auth()
     )
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_comp_schedule_delete(api_client, bot):
+    await api_client.put(
+        f"/guilds/{GID}/comp-schedules/s1",
+        json={"name": "Tuesday raid", "post_days": [2], "post_time": "18:00"},
+        headers=_auth(),
+    )
+    resp = await api_client.delete(f"/guilds/{GID}/comp-schedules/s1", headers=_auth())
+    assert resp.status == 204
+    listing = await (await api_client.get(f"/guilds/{GID}/comp-schedules", headers=_auth())).json()
+    assert listing == []
+    resp = await api_client.delete(f"/guilds/{GID}/comp-schedules/s1", headers=_auth())
+    assert resp.status == 404
