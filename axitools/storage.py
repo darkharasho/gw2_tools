@@ -1327,6 +1327,86 @@ class AuditStore:
                 ).fetchall()
         return rows
 
+    def query_discord_events_filtered(
+        self,
+        *,
+        event_type: Optional[str] = None,
+        actor: Optional[str] = None,
+        target: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[sqlite3.Row]:
+        """Query Discord audit events with optional API-style filters.
+
+        ``actor``/``target`` match by exact id when numeric, otherwise by
+        case-insensitive name substring (mirrors ``query_discord_events``).
+        """
+        limit = max(1, min(limit, 200))
+        clauses: List[str] = []
+        params: List[Any] = []
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        for id_column, name_column, value in (
+            ("actor_id", "actor_name_normalized", actor),
+            ("target_id", "target_name_normalized", target),
+        ):
+            if not value:
+                continue
+            if value.isdigit():
+                clauses.append(f"{id_column} = ?")
+                params.append(int(value))
+            else:
+                clauses.append(f"{name_column} LIKE ?")
+                params.append(f"%{self._normalise_name(value)}%")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM discord_audit_events
+                {where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return rows
+
+    def query_gw2_events_filtered(
+        self,
+        *,
+        event_type: Optional[str] = None,
+        user: Optional[str] = None,
+        limit: int = 50,
+        since_log_id: Optional[int] = None,
+    ) -> List[sqlite3.Row]:
+        """Query GW2 audit events with optional API-style filters."""
+        limit = max(1, min(limit, 200))
+        clauses: List[str] = []
+        params: List[Any] = []
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if user:
+            clauses.append("user_normalized LIKE ?")
+            params.append(f"%{self._normalise_name(user)}%")
+        if since_log_id is not None:
+            clauses.append("log_id > ?")
+            params.append(since_log_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM gw2_audit_events
+                {where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return rows
+
     def add_gw2_event(
         self,
         *,
