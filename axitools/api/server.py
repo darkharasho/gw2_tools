@@ -7,16 +7,23 @@ under the storage root as ``api_token`` (mode 0600).
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 import secrets
+from dataclasses import asdict
 from pathlib import Path
 
 from aiohttp import web
 
+from ..storage import BuildRecord, utcnow
+
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8642
+
+API_ACTOR_ID = 0
 
 
 def resolve_api_token(root: Path) -> str:
@@ -47,9 +54,95 @@ async def _auth_middleware(request: web.Request, handler):
     return await handler(request)
 
 
+def _build_to_json(record: BuildRecord) -> dict:
+    return asdict(record)
+
+
 async def _handle_guilds(request: web.Request) -> web.Response:
     bot = request.app["bot"]
     return web.json_response([{"id": g.id, "name": g.name} for g in bot.guilds])
+
+
+async def _parse_json_body(request: web.Request) -> dict | None:
+    """Return parsed JSON body, or None if the body is missing / malformed."""
+    try:
+        return await request.json()
+    except (json.JSONDecodeError, Exception):
+        return None
+
+
+async def _handle_builds_list(request: web.Request) -> web.Response:
+    bot = request.app["bot"]
+    gid = int(request.match_info["guild_id"])
+    builds = await asyncio.to_thread(bot.storage.get_builds, gid)
+    return web.json_response([_build_to_json(b) for b in builds])
+
+
+async def _handle_builds_create(request: web.Request) -> web.Response:
+    bot = request.app["bot"]
+    gid = int(request.match_info["guild_id"])
+    body = await _parse_json_body(request)
+    if body is None:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    for field in ("name", "profession", "chat_code"):
+        if not body.get(field):
+            return web.json_response({"error": f"missing field: {field}"}, status=400)
+    now = utcnow()
+    record = BuildRecord(
+        build_id=secrets.token_hex(8),
+        name=body["name"],
+        profession=body["profession"],
+        specialization=body.get("specialization"),
+        url=body.get("url"),
+        chat_code=body["chat_code"],
+        description=body.get("description"),
+        created_by=API_ACTOR_ID,
+        created_at=now,
+        updated_by=API_ACTOR_ID,
+        updated_at=now,
+    )
+    await asyncio.to_thread(bot.storage.upsert_build, gid, record)
+    return web.json_response(_build_to_json(record), status=201)
+
+
+async def _handle_builds_update(request: web.Request) -> web.Response:
+    bot = request.app["bot"]
+    gid = int(request.match_info["guild_id"])
+    build_id = request.match_info["build_id"]
+    existing = await asyncio.to_thread(bot.storage.find_build, gid, build_id)
+    if existing is None:
+        return web.json_response({"error": "build not found"}, status=404)
+    body = await _parse_json_body(request)
+    if body is None:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    updated = BuildRecord(
+        build_id=existing.build_id,
+        name=body["name"] if "name" in body else existing.name,
+        profession=body["profession"] if "profession" in body else existing.profession,
+        specialization=body["specialization"] if "specialization" in body else existing.specialization,
+        url=body["url"] if "url" in body else existing.url,
+        chat_code=body["chat_code"] if "chat_code" in body else existing.chat_code,
+        description=body["description"] if "description" in body else existing.description,
+        created_by=existing.created_by,
+        created_at=existing.created_at,
+        updated_by=API_ACTOR_ID,
+        updated_at=utcnow(),
+        message_id=existing.message_id,
+        channel_id=existing.channel_id,
+        thread_id=existing.thread_id,
+    )
+    await asyncio.to_thread(bot.storage.upsert_build, gid, updated)
+    return web.json_response(_build_to_json(updated))
+
+
+async def _handle_builds_delete(request: web.Request) -> web.Response:
+    bot = request.app["bot"]
+    gid = int(request.match_info["guild_id"])
+    build_id = request.match_info["build_id"]
+    deleted = await asyncio.to_thread(bot.storage.delete_build, gid, build_id)
+    if not deleted:
+        return web.json_response({"error": "build not found"}, status=404)
+    return web.Response(status=204)
 
 
 def build_app(bot, token: str) -> web.Application:
@@ -57,6 +150,10 @@ def build_app(bot, token: str) -> web.Application:
     app["bot"] = bot
     app["api_token"] = token
     app.router.add_get("/guilds", _handle_guilds)
+    app.router.add_get("/guilds/{guild_id}/builds", _handle_builds_list)
+    app.router.add_post("/guilds/{guild_id}/builds", _handle_builds_create)
+    app.router.add_put("/guilds/{guild_id}/builds/{build_id}", _handle_builds_update)
+    app.router.add_delete("/guilds/{guild_id}/builds/{build_id}", _handle_builds_delete)
     return app
 
 
