@@ -108,3 +108,84 @@ def test_build_status_embed_returns_embed():
     embed = cog._build_status_embed(guild)
     assert isinstance(embed, discord.Embed)
     assert embed.title == "AxiTools Configuration Status"
+
+
+# ---------------------------------------------------------------------------
+# AxiVale API key commands
+# ---------------------------------------------------------------------------
+
+def test_apikey_group_qualified_names():
+    cog = ConfigCog(MagicMock())
+    assert cog.apikey_generate.qualified_name == "config apikey generate"
+    assert cog.apikey_revoke.qualified_name == "config apikey revoke"
+
+
+def _apikey_interaction(manage_guild=True):
+    interaction = AsyncMock(spec=discord.Interaction)
+    interaction.guild = MagicMock()
+    interaction.guild.id = 123
+    interaction.guild.name = "Vigil Keep"
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.id = 42
+    interaction.user.guild_permissions.manage_guild = manage_guild
+    interaction.response.send_message = AsyncMock()
+    return interaction
+
+
+@pytest.mark.asyncio
+async def test_apikey_generate_stores_hash_and_replies_ephemeral(mock_bot_config):
+    cog = ConfigCog(mock_bot_config)
+    interaction = _apikey_interaction()
+
+    await cog.apikey_generate.callback(cog, interaction)
+
+    assert mock_bot_config.storage.set_app_key.called
+    guild_id, token_hash, created_by = mock_bot_config.storage.set_app_key.call_args[0]
+    assert guild_id == 123
+    assert created_by == 42
+    assert len(token_hash) == 64  # sha256 hexdigest, never the raw key
+
+    args, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+    assert "axt1." in args[0]
+    assert "AxiVale" in args[0]
+
+
+@pytest.mark.asyncio
+async def test_apikey_generate_requires_manage_guild(mock_bot_config):
+    cog = ConfigCog(mock_bot_config)
+    interaction = _apikey_interaction(manage_guild=False)
+
+    await cog.apikey_generate.callback(cog, interaction)
+
+    assert not mock_bot_config.storage.set_app_key.called
+    args, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+    assert "Manage Server" in args[0]
+
+
+@pytest.mark.asyncio
+async def test_apikey_revoke_reports_missing_key(mock_bot_config):
+    cog = ConfigCog(mock_bot_config)
+    mock_bot_config.storage.revoke_app_key.return_value = False
+    interaction = _apikey_interaction()
+
+    await cog.apikey_revoke.callback(cog, interaction)
+
+    mock_bot_config.storage.revoke_app_key.assert_called_once_with(123)
+    args, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+    assert "No AxiVale API key" in args[0]
+
+
+@pytest.mark.asyncio
+async def test_apikey_revoke_confirms_removal(mock_bot_config):
+    cog = ConfigCog(mock_bot_config)
+    mock_bot_config.storage.revoke_app_key.return_value = True
+    interaction = _apikey_interaction()
+
+    await cog.apikey_revoke.callback(cog, interaction)
+
+    args, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+    assert "revoked" in args[0]

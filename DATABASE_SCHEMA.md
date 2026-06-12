@@ -52,6 +52,14 @@ prevent the operator from decrypting; see `docs/superpowers/specs/2026-06-09-enc
 | `label` | TEXT NOT NULL | Display label combining the guild name and tag (when available). |
 | `updated_at` | TEXT NOT NULL | ISO 8601 timestamp of the most recent cache refresh. |
 
+### `app_keys`
+| Column | Type | Notes |
+| --- | --- | --- |
+| `guild_id` | INTEGER PRIMARY KEY | Discord guild ID the AxiVale key is scoped to (one key per guild). |
+| `token_hash` | TEXT NOT NULL UNIQUE | SHA-256 hex digest of the full `axt1.` key string; the key itself is never stored. |
+| `created_by` | INTEGER NOT NULL | Discord user ID that generated the key. |
+| `created_at` | TEXT NOT NULL | ISO 8601 timestamp when the key was generated. |
+
 ## Audit tables
 
 ### `discord_audit_events`

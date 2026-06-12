@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ..api.server import generate_app_key, hash_app_key
 from ..bot import AxiToolsBot
 from ..config_status import ConfigStatus, StatusField
 from ..storage import GuildConfig
@@ -186,9 +187,63 @@ class StatusView(discord.ui.View):
 class ConfigCog(commands.GroupCog, name="config", group_extras={"category": "Server Setup"}):
     """Manage server configuration for AxiTools."""
 
+    apikey = app_commands.Group(
+        name="apikey",
+        description="Manage the AxiVale API key for this server.",
+    )
+
     def __init__(self, bot: AxiToolsBot) -> None:
         super().__init__()
         self.bot = bot
+
+    @staticmethod
+    async def _check_manage_guild(interaction: discord.Interaction) -> bool:
+        """Gate apikey commands behind Manage Server, replying ephemerally on failure."""
+        if not interaction.guild:
+            await interaction.response.send_message(
+                "This command can only be used inside a server.", ephemeral=True
+            )
+            return False
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Unable to resolve your server membership.", ephemeral=True
+            )
+            return False
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(
+                "You need the **Manage Server** permission to manage the AxiVale API key.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @apikey.command(name="generate", description="Generate an AxiVale API key for this server.")
+    async def apikey_generate(self, interaction: discord.Interaction) -> None:
+        if not await self._check_manage_guild(interaction):
+            return
+
+        key = generate_app_key()
+        self.bot.storage.set_app_key(interaction.guild.id, hash_app_key(key), interaction.user.id)
+
+        await interaction.response.send_message(
+            f"AxiVale API key for **{interaction.guild.name}**:\n"
+            f"```\n{key}\n```\n"
+            "Paste this into AxiVale → Settings to connect this server.\n"
+            "⚠️ This key is only shown once, and regenerating it invalidates the old key.",
+            ephemeral=True,
+        )
+
+    @apikey.command(name="revoke", description="Revoke this server's AxiVale API key.")
+    async def apikey_revoke(self, interaction: discord.Interaction) -> None:
+        if not await self._check_manage_guild(interaction):
+            return
+
+        removed = self.bot.storage.revoke_app_key(interaction.guild.id)
+        if removed:
+            message = "The AxiVale API key for this server has been revoked."
+        else:
+            message = "No AxiVale API key on file for this server."
+        await interaction.response.send_message(message, ephemeral=True)
 
     @app_commands.command(name="setup", description="Open AxiTools settings for this server.")
     async def config_command(self, interaction: discord.Interaction) -> None:

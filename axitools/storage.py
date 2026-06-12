@@ -665,6 +665,12 @@ class ApiKeyStore:
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY(guild_id, user_id)
                 );
+                CREATE TABLE IF NOT EXISTS app_keys (
+                    guild_id INTEGER PRIMARY KEY,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_by INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild_user ON api_keys(guild_id, user_id);
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild ON api_keys(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_api_key_guilds_lookup ON api_key_guilds(guild_id, api_key_id);
@@ -778,6 +784,41 @@ class ApiKeyStore:
                 "DELETE FROM preferred_guild_roles WHERE guild_id = ? AND role_id = ?",
                 (guild_id, role_id),
             )
+
+    def set_app_key(self, guild_id: int, token_hash: str, created_by: int) -> None:
+        """Store the AxiVale app key hash for a guild, replacing any existing key."""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO app_keys (guild_id, token_hash, created_by, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    token_hash = excluded.token_hash,
+                    created_by = excluded.created_by,
+                    created_at = excluded.created_at
+                """,
+                (guild_id, token_hash, created_by, utcnow()),
+            )
+
+    def get_app_key_guild(self, token_hash: str) -> Optional[int]:
+        """Return the Discord guild id bound to ``token_hash``, if any."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT guild_id FROM app_keys WHERE token_hash = ? LIMIT 1",
+                (token_hash,),
+            ).fetchone()
+        return int(row["guild_id"]) if row else None
+
+    def revoke_app_key(self, guild_id: int) -> bool:
+        """Delete the stored app key for a guild. Returns True if one existed."""
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM app_keys WHERE guild_id = ?", (guild_id,)
+            )
+            return cursor.rowcount > 0
 
     @staticmethod
     def _normalise_permissions(permissions: Iterable[str]) -> List[str]:
@@ -1973,6 +2014,15 @@ class StorageManager:
 
     def clear_preferred_guild_role_for_role(self, guild_id: int, role_id: int) -> None:
         self.api_key_store.clear_preferred_guild_role_for_role(guild_id, role_id)
+
+    def set_app_key(self, guild_id: int, token_hash: str, created_by: int) -> None:
+        self.api_key_store.set_app_key(guild_id, token_hash, created_by)
+
+    def get_app_key_guild(self, token_hash: str) -> Optional[int]:
+        return self.api_key_store.get_app_key_guild(token_hash)
+
+    def revoke_app_key(self, guild_id: int) -> bool:
+        return self.api_key_store.revoke_app_key(guild_id)
 
     def all_gw2_guild_ids(self) -> List[str]:
         return self.api_key_store.all_gw2_guild_ids()

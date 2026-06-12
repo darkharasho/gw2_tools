@@ -41,12 +41,36 @@ AxiTools is a multi-guild Discord bot that helps Guild Wars 2 communities organi
    ```
 3. Invite the bot to your Discord server with the necessary permissions (application commands, manage messages/threads for forum posting, etc.). Once guild commands finish syncing, use `/config setup` to set moderator roles and the build posting channel.
 
-## Local API (for AxiVale)
+## HTTP API (for AxiVale)
 
-The bot serves a localhost-only HTTP API on port 8642 (override with
-`AXITOOLS_API_PORT`). Requests need `Authorization: Bearer <token>`; the token
-is read from `AXITOOLS_API_TOKEN` or auto-generated at `<data root>/api_token`
-on first run. Copy that token into AxiVale's settings.
+The bot serves an HTTP API on port 8642 (override with `AXITOOLS_API_PORT`),
+bound to loopback by default (`AXITOOLS_API_HOST` to change). Two kinds of
+credentials are accepted as `Authorization: Bearer <…>`:
+
+- **Per-server AxiVale keys** (recommended): a member with Manage Server runs
+  `/config apikey generate` in Discord and pastes the resulting `axt1.…` key
+  into AxiVale. The key embeds this bot's address and only grants access to
+  that Discord server's data. `/config apikey revoke` invalidates it;
+  regenerating replaces it.
+- **The global token** (legacy/automation): read from `AXITOOLS_API_TOKEN` or
+  auto-generated at `<data root>/api_token` on first run. Full access to all
+  guilds — for trusted same-machine consumers only.
+
+### Serving AxiVale users on other networks
+
+Generated keys embed `AXITOOLS_PUBLIC_URL` (default `http://127.0.0.1:8642`,
+fine when AxiVale runs on the same machine). To let guild members elsewhere
+connect without a public IP, put the API behind a [Cloudflare
+Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+(or Tailscale Funnel):
+
+1. Run `cloudflared` on the bot's machine, pointing a hostname at
+   `http://127.0.0.1:8642` (keep the API bound to loopback — the tunnel
+   connects locally).
+2. Set `AXITOOLS_PUBLIC_URL=https://<your-tunnel-hostname>` in `.env` and
+   restart the bot.
+3. Regenerate keys with `/config apikey generate` — they now point everyone
+   at the tunnel.
 
 ## Project structure
 

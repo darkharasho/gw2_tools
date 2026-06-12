@@ -8,6 +8,8 @@ under the storage root as ``api_token`` (mode 0600).
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -22,6 +24,9 @@ from ..storage import BuildRecord, CompPreset, CompSchedule, utcnow
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8642
+DEFAULT_PUBLIC_URL = "http://127.0.0.1:8642"
+
+APP_KEY_PREFIX = "axt1."
 
 API_ACTOR_ID = 0
 
@@ -48,12 +53,50 @@ def resolve_api_token(root: Path) -> str:
     return token
 
 
+def resolve_public_url() -> str:
+    """Return the bot's public API base URL embedded into AxiVale keys."""
+    env = os.getenv("AXITOOLS_PUBLIC_URL", "").strip()
+    return env or DEFAULT_PUBLIC_URL
+
+
+def generate_app_key(base_url: str | None = None) -> str:
+    """Build a per-guild AxiVale key: ``axt1.<base64url(base_url)>.<secret>``."""
+    if base_url is None:
+        base_url = resolve_public_url()
+    encoded_url = base64.urlsafe_b64encode(base_url.encode("utf-8")).rstrip(b"=").decode("ascii")
+    secret = secrets.token_urlsafe(32)
+    return f"{APP_KEY_PREFIX}{encoded_url}.{secret}"
+
+
+def hash_app_key(key: str) -> str:
+    """Return the sha256 hex digest of the full key string (what we persist)."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
 @web.middleware
 async def _auth_middleware(request: web.Request, handler):
     expected = f"Bearer {request.app['api_token']}"
     supplied = request.headers.get("Authorization", "")
-    if not secrets.compare_digest(supplied.encode(), expected.encode()):
+    if secrets.compare_digest(supplied.encode(), expected.encode()):
+        # Global token: full access.
+        return await handler(request)
+
+    bearer = supplied[len("Bearer "):] if supplied.startswith("Bearer ") else ""
+    if not bearer.startswith(APP_KEY_PREFIX):
         return web.json_response({"error": "unauthorized"}, status=401)
+
+    # Per-guild AxiVale key: look up by hash. Exact-match lookup of a sha256
+    # digest is not secret-dependent timing, so no constant-time concern here.
+    bot = request.app["bot"]
+    token_hash = hash_app_key(bearer)
+    guild_id = await asyncio.to_thread(bot.storage.get_app_key_guild, token_hash)
+    if guild_id is None:
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    request["scoped_guild_id"] = guild_id
+    path_guild_id = request.match_info.get("guild_id")
+    if path_guild_id is not None and int(path_guild_id) != guild_id:
+        return web.json_response({"error": "key is scoped to another server"}, status=403)
     return await handler(request)
 
 
@@ -86,7 +129,11 @@ def _validate_build_fields(body: dict, required: bool = False) -> web.Response |
 
 async def _handle_guilds(request: web.Request) -> web.Response:
     bot = request.app["bot"]
-    return web.json_response([{"id": g.id, "name": g.name} for g in bot.guilds])
+    scoped_guild_id = request.get("scoped_guild_id")
+    guilds = bot.guilds
+    if scoped_guild_id is not None:
+        guilds = [g for g in guilds if g.id == scoped_guild_id]
+    return web.json_response([{"id": g.id, "name": g.name} for g in guilds])
 
 
 async def _parse_json_body(request: web.Request) -> dict | None:
@@ -315,8 +362,14 @@ def build_app(bot, token: str) -> web.Application:
     return app
 
 
-async def start_api(bot, *, host: str = "127.0.0.1", port: int | None = None) -> web.AppRunner:
-    """Start the API server inside the bot process. Returns the runner for cleanup."""
+async def start_api(bot, *, host: str | None = None, port: int | None = None) -> web.AppRunner:
+    """Start the API server inside the bot process. Returns the runner for cleanup.
+
+    Binds to loopback by default. Set AXITOOLS_API_HOST (e.g. 0.0.0.0 or a LAN
+    address) to serve other machines — auth still applies to every request.
+    """
+    if host is None:
+        host = os.getenv("AXITOOLS_API_HOST", "127.0.0.1")
     if port is None:
         port = int(os.getenv("AXITOOLS_API_PORT", str(DEFAULT_PORT)))
     token = resolve_api_token(bot.storage.root)
