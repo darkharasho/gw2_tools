@@ -128,3 +128,4 @@ async def test_comp_schedule_delete(api_client, bot):
     assert listing == []
     resp = await api_client.delete(f"/guilds/{GID}/comp-schedules/s1", headers=_auth())
     assert resp.status == 404
+

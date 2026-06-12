@@ -431,6 +431,95 @@ _CONFIG_WHITELIST = (
 )
 
 
+def _comp_config_to_json(config) -> dict:
+    comp = config.comp
+    return {
+        "channel_id": _sid(comp.channel_id),
+        "ping_role_id": _sid(comp.ping_role_id),
+        "post_days": list(comp.post_days),
+        "post_time": comp.post_time,
+        "timezone": comp.timezone,
+        "overview": comp.overview,
+        "active_preset": config.comp_active_preset,
+    }
+
+
+async def _handle_comp_config_get(request: web.Request) -> web.Response:
+    bot, gid = _guild_ctx(request)
+    config = await asyncio.to_thread(bot.storage.get_config, gid)
+    return web.json_response(_comp_config_to_json(config))
+
+
+async def _handle_comp_config_patch(request: web.Request) -> web.Response:
+    guild, err = _resolve_discord_guild(request)
+    if err is not None:
+        return err
+    bot, gid = _guild_ctx(request)
+    body = await _parse_json_body(request)
+    if body is None:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+
+    channel_update = _UNSET = object()
+    ping_update = _UNSET
+    if "channel_id" in body:
+        if body["channel_id"] is None:
+            channel_update = None
+        else:
+            cid, cerr = _channel_in_guild(guild, body["channel_id"])
+            if cerr is not None:
+                return cerr
+            channel_update = cid
+    if "ping_role_id" in body:
+        if body["ping_role_id"] is None:
+            ping_update = None
+        else:
+            rid, rerr = _role_in_guild(guild, body["ping_role_id"])
+            if rerr is not None:
+                return rerr
+            ping_update = rid
+
+    post_days = body.get("post_days")
+    if post_days is not None:
+        if not isinstance(post_days, list) or not all(
+            isinstance(d, int) and 0 <= d <= 6 for d in post_days
+        ):
+            return web.json_response(
+                {"error": "post_days must be a list of ints 0-6 (Monday=0)"}, status=400
+            )
+
+    post_time = body.get("post_time")
+    if post_time is not None and post_time != "":
+        import re as _re
+        if not _re.fullmatch(r"[0-2]\d:[0-5]\d", str(post_time)):
+            return web.json_response({"error": "post_time must be HH:MM"}, status=400)
+
+    result: list = []
+
+    def _merge_save():
+        config = bot.storage.get_config(gid)
+        if channel_update is not _UNSET:
+            config.comp.channel_id = channel_update
+        if ping_update is not _UNSET:
+            config.comp.ping_role_id = ping_update
+        if post_days is not None:
+            config.comp.post_days = list(post_days)
+        if post_time is not None:
+            config.comp.post_time = post_time or None
+        if "timezone" in body and body["timezone"]:
+            config.comp.timezone = str(body["timezone"])
+        if "overview" in body:
+            config.comp.overview = str(body["overview"] or "")
+        if "active_preset" in body:
+            config.comp_active_preset = body["active_preset"] or None
+        bot.storage.save_config(gid, config)
+        result.append(config)
+
+    async with _write_lock:
+        await asyncio.to_thread(_merge_save)
+
+    return web.json_response(_comp_config_to_json(result[0]))
+
+
 async def _handle_config_get(request: web.Request) -> web.Response:
     bot, gid = _guild_ctx(request)
     config = await asyncio.to_thread(bot.storage.get_config, gid)
@@ -1395,6 +1484,8 @@ def build_app(bot, token: str) -> web.Application:
     app.router.add_post("/guilds/{guild_id:\\d+}/builds", _handle_builds_create)
     app.router.add_put("/guilds/{guild_id:\\d+}/builds/{build_id}", _handle_builds_update)
     app.router.add_delete("/guilds/{guild_id:\\d+}/builds/{build_id}", _handle_builds_delete)
+    app.router.add_get("/guilds/{guild_id:\\d+}/comp-config", _handle_comp_config_get)
+    app.router.add_patch("/guilds/{guild_id:\\d+}/comp-config", _handle_comp_config_patch)
     app.router.add_get("/guilds/{guild_id:\\d+}/comp-presets", _handle_comp_presets_list)
     app.router.add_put("/guilds/{guild_id:\\d+}/comp-presets/{name}", _handle_comp_presets_upsert)
     app.router.add_delete("/guilds/{guild_id:\\d+}/comp-presets/{name}", _handle_comp_presets_delete)

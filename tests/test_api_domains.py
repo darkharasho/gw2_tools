@@ -926,3 +926,45 @@ async def test_key_holders_respects_key_scoping(api_client, bot):
         headers=_bearer(scoped_key),
     )
     assert resp.status == 403
+
+
+# ---------------------------------------------------------------------------
+# Comp posting config (config.comp.*)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_comp_config_get_default_shape(api_client):
+    body = await (await api_client.get(f"/guilds/{GID}/comp-config", headers=_auth())).json()
+    assert set(body) >= {
+        "channel_id", "ping_role_id", "post_days", "post_time", "timezone", "active_preset"
+    }
+
+
+@pytest.mark.asyncio
+async def test_comp_config_patch_merges(api_client):
+    resp = await api_client.patch(
+        f"/guilds/{GID}/comp-config",
+        json={"channel_id": "11", "ping_role_id": "20", "post_days": [1, 3],
+              "post_time": "18:00", "timezone": "UTC", "active_preset": "tuesday-wvw"},
+        headers=_auth(),
+    )
+    assert resp.status == 200
+    out = await resp.json()
+    assert out["channel_id"] == "11"
+    assert out["ping_role_id"] == "20"
+    assert out["post_days"] == [1, 3]
+    assert out["post_time"] == "18:00"
+    assert out["active_preset"] == "tuesday-wvw"
+    # null clears
+    cleared = await (await api_client.patch(
+        f"/guilds/{GID}/comp-config", json={"channel_id": None}, headers=_auth()
+    )).json()
+    assert cleared["channel_id"] is None
+    assert cleared["ping_role_id"] == "20"  # untouched
+
+
+@pytest.mark.asyncio
+async def test_comp_config_validates(api_client):
+    assert (await api_client.patch(f"/guilds/{GID}/comp-config", json={"post_time": "9pm"}, headers=_auth())).status == 400
+    assert (await api_client.patch(f"/guilds/{GID}/comp-config", json={"post_days": [9]}, headers=_auth())).status == 400
+    assert (await api_client.patch(f"/guilds/{GID}/comp-config", json={"channel_id": "999999"}, headers=_auth())).status == 400
