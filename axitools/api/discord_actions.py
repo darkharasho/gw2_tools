@@ -14,6 +14,7 @@ the target guild; ids belonging to another guild fail with a
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import string
 
@@ -23,6 +24,16 @@ import discord
 _MAX_TIMEOUT_MINUTES = 28 * 24 * 60
 
 _CHANNEL_TYPES = ("text", "voice", "category", "forum")
+
+# DM content limit (kept under Discord's 2000-char cap to leave headroom).
+_MAX_DM_CONTENT = 1900
+
+# Maximum recipients for a bulk DM run.
+_MAX_DM_RECIPIENTS = 250
+
+# Politeness pacing between sequential DM sends. discord.py already handles
+# hard rate limits; this just keeps the pattern non-spammy.
+_DM_PACING_SECONDS = 0.6
 
 
 def audit_reason(reason: str | None, action: str) -> str:
@@ -60,6 +71,9 @@ def _coerce(action: str, name: str, expected: str, value):
     elif expected == "boolean":
         if isinstance(value, bool):
             return value
+    elif expected == "array":
+        if isinstance(value, list):
+            return [_coerce(action, name, "integer", item) for item in value]
     raise ValueError(f"invalid value for {action} parameter '{name}': expected {expected}")
 
 
@@ -293,6 +307,55 @@ async def _exec_member_ban(bot, guild, p: dict) -> dict:
     return {"id": _sid(member.id), "name": member.name, "banned": True}
 
 
+def _validate_dm_content(action: str, content: str) -> str:
+    if not content.strip():
+        raise ValueError(f"{action} content must be a non-empty string")
+    if len(content) > _MAX_DM_CONTENT:
+        raise ValueError(
+            f"{action} content must be at most {_MAX_DM_CONTENT} characters"
+        )
+    return content
+
+
+async def _exec_member_dm(bot, guild, p: dict) -> dict:
+    content = _validate_dm_content("member_dm", p["content"])
+    member = await _resolve_member(guild, p["member_id"])
+    try:
+        await member.send(content)
+    except discord.Forbidden:
+        raise ValueError("member has DMs disabled or blocks the bot") from None
+    return {"member_id": _sid(member.id), "sent": True}
+
+
+async def _exec_members_dm(bot, guild, p: dict) -> dict:
+    content = _validate_dm_content("members_dm", p["content"])
+    member_ids = p["member_ids"]
+    if not 1 <= len(member_ids) <= _MAX_DM_RECIPIENTS:
+        raise ValueError(
+            f"member_ids must contain between 1 and {_MAX_DM_RECIPIENTS} ids"
+        )
+    # Resolve every recipient up front so an unknown id fails the whole run
+    # before any DM is sent.
+    members = [await _resolve_member(guild, member_id) for member_id in member_ids]
+    sent: list[str] = []
+    failed: list[dict] = []
+    for index, member in enumerate(members):
+        if index:
+            await asyncio.sleep(_DM_PACING_SECONDS)
+        try:
+            await member.send(content)
+        except discord.Forbidden:
+            failed.append({
+                "member_id": _sid(member.id),
+                "reason": "member has DMs disabled or blocks the bot",
+            })
+        except discord.HTTPException as exc:
+            failed.append({"member_id": _sid(member.id), "reason": str(exc)})
+        else:
+            sent.append(_sid(member.id))
+    return {"requested": len(member_ids), "sent": sent, "failed": failed}
+
+
 async def _exec_message_send(bot, guild, p: dict) -> dict:
     channel = resolve_channel(guild, p["channel_id"])
     message = await channel.send(p["content"])
@@ -463,6 +526,22 @@ ACTIONS: dict[str, dict] = {
             "delete_message_days": _param("integer", False, "Delete recent messages (0-7 days)"),
         },
         "executor": _exec_member_ban,
+    },
+    "member_dm": {
+        "destructive": True,
+        "params": {
+            "member_id": _param("integer", True, "Member to direct-message"),
+            "content": _param("string", True, "Message content (max 1900 characters)"),
+        },
+        "executor": _exec_member_dm,
+    },
+    "members_dm": {
+        "destructive": True,
+        "params": {
+            "member_ids": _param("array", True, "Members to direct-message (1-250 ids)"),
+            "content": _param("string", True, "Message content (max 1900 characters)"),
+        },
+        "executor": _exec_members_dm,
     },
     "message_send": {
         "destructive": False,

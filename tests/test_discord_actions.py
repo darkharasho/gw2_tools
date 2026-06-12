@@ -1,6 +1,16 @@
+import discord
 import pytest
 
 from axitools.api.discord_actions import ACTIONS, execute_action
+
+
+class FakeHTTPResponse:
+    status = 403
+    reason = "Forbidden"
+
+
+def make_forbidden() -> discord.Forbidden:
+    return discord.Forbidden(FakeHTTPResponse(), "Cannot send messages to this user")
 
 
 # ---------------------------------------------------------------------------
@@ -27,6 +37,13 @@ class FakeMember:
         self.name = name
         self.guild = guild
         self.calls = []
+        self.dm_error = None  # set to an exception to make send() raise
+
+    async def send(self, content):
+        if self.dm_error is not None:
+            raise self.dm_error
+        self.calls.append(("send", content))
+        return FakeMessage(556)
 
     async def add_roles(self, *roles, reason=None):
         self.calls.append(("add_roles", roles, reason))
@@ -152,6 +169,8 @@ EXPECTED_ACTIONS = {
     "member_timeout": True,
     "member_kick": True,
     "member_ban": True,
+    "member_dm": True,
+    "members_dm": True,
     "message_send": False,
     "message_pin": False,
     "thread_create": False,
@@ -169,7 +188,7 @@ def test_registry_params_are_json_able_specs():
         assert callable(spec["executor"]), name
         for param_name, meta in spec["params"].items():
             assert set(meta) == {"type", "required", "description"}, (name, param_name)
-            assert meta["type"] in ("string", "integer", "boolean")
+            assert meta["type"] in ("string", "integer", "boolean", "array")
             assert isinstance(meta["required"], bool)
 
 
@@ -364,6 +383,189 @@ async def test_message_send(guild):
     )
     assert channel.calls == [("send", "o7")]
     assert result == {"id": "555", "channel_id": "11"}
+
+
+# ---------------------------------------------------------------------------
+# Direct messages
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Replace pacing sleeps with a recorder so tests don't wait."""
+    recorded = []
+
+    async def fake_sleep(seconds):
+        recorded.append(seconds)
+
+    monkeypatch.setattr(
+        "axitools.api.discord_actions.asyncio.sleep", fake_sleep
+    )
+    return recorded
+
+
+def test_member_dm_registry_spec():
+    spec = ACTIONS["member_dm"]
+    assert spec["destructive"] is True
+    assert spec["params"]["member_id"] == {
+        "type": "integer", "required": True,
+        "description": spec["params"]["member_id"]["description"],
+    }
+    assert spec["params"]["content"]["type"] == "string"
+    assert spec["params"]["content"]["required"] is True
+
+
+def test_members_dm_registry_spec():
+    spec = ACTIONS["members_dm"]
+    assert spec["destructive"] is True
+    assert spec["params"]["member_ids"]["type"] == "array"
+    assert spec["params"]["member_ids"]["required"] is True
+    assert spec["params"]["content"]["type"] == "string"
+    assert spec["params"]["content"]["required"] is True
+
+
+@pytest.mark.asyncio
+async def test_member_dm_sends_and_reports(guild):
+    member = guild.add_member(FakeMember(30, name="Logan"))
+    result = await execute_action(
+        None, guild, "member_dm", {"member_id": 30, "content": "o7"}
+    )
+    assert member.calls == [("send", "o7")]
+    assert result == {"member_id": "30", "sent": True}
+
+
+@pytest.mark.asyncio
+async def test_member_dm_forbidden_becomes_value_error(guild):
+    member = guild.add_member(FakeMember(30))
+    member.dm_error = make_forbidden()
+    with pytest.raises(ValueError, match="member has DMs disabled or blocks the bot"):
+        await execute_action(
+            None, guild, "member_dm", {"member_id": 30, "content": "o7"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_member_dm_unknown_member_errors(guild):
+    with pytest.raises(ValueError, match="not found in this server"):
+        await execute_action(
+            None, guild, "member_dm", {"member_id": 999, "content": "o7"}
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["", "   ", "x" * 1901])
+async def test_member_dm_rejects_bad_content(guild, content):
+    member = guild.add_member(FakeMember(30))
+    with pytest.raises(ValueError, match="content must be"):
+        await execute_action(
+            None, guild, "member_dm", {"member_id": 30, "content": content}
+        )
+    assert member.calls == []
+
+
+@pytest.mark.asyncio
+async def test_members_dm_happy_path_paces_between_sends(guild, sleeps):
+    alpha = guild.add_member(FakeMember(30, name="Logan"))
+    bravo = guild.add_member(FakeMember(31, name="Rytlock"))
+    charlie = guild.add_member(FakeMember(32, name="Caithe"))
+    result = await execute_action(
+        None, guild, "members_dm", {"member_ids": [30, 31, 32], "content": "reset at 8"}
+    )
+    assert alpha.calls == [("send", "reset at 8")]
+    assert bravo.calls == [("send", "reset at 8")]
+    assert charlie.calls == [("send", "reset at 8")]
+    assert sleeps == [0.6, 0.6]  # between sends, not before the first
+    assert result == {"requested": 3, "sent": ["30", "31", "32"], "failed": []}
+
+
+@pytest.mark.asyncio
+async def test_members_dm_accepts_string_ids(guild, sleeps):
+    member = guild.add_member(FakeMember(1380283751703445199))
+    result = await execute_action(
+        None, guild, "members_dm",
+        {"member_ids": ["1380283751703445199"], "content": "hi"},
+    )
+    assert member.calls == [("send", "hi")]
+    assert result["sent"] == ["1380283751703445199"]
+
+
+@pytest.mark.asyncio
+async def test_members_dm_rejects_empty_list(guild, sleeps):
+    with pytest.raises(ValueError, match="between 1 and 250"):
+        await execute_action(
+            None, guild, "members_dm", {"member_ids": [], "content": "hi"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_members_dm_rejects_oversized_list(guild, sleeps):
+    with pytest.raises(ValueError, match="between 1 and 250"):
+        await execute_action(
+            None, guild, "members_dm",
+            {"member_ids": list(range(1, 252)), "content": "hi"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_members_dm_rejects_non_list(guild, sleeps):
+    with pytest.raises(ValueError, match="expected array"):
+        await execute_action(
+            None, guild, "members_dm", {"member_ids": 30, "content": "hi"}
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["", "   ", "x" * 1901])
+async def test_members_dm_rejects_bad_content(guild, sleeps, content):
+    member = guild.add_member(FakeMember(30))
+    with pytest.raises(ValueError, match="content must be"):
+        await execute_action(
+            None, guild, "members_dm", {"member_ids": [30], "content": content}
+        )
+    assert member.calls == []
+
+
+@pytest.mark.asyncio
+async def test_members_dm_unknown_id_fails_fast_with_nothing_sent(guild, sleeps):
+    known = guild.add_member(FakeMember(30))
+    with pytest.raises(ValueError, match="member 999 not found in this server"):
+        await execute_action(
+            None, guild, "members_dm", {"member_ids": [30, 999], "content": "hi"}
+        )
+    assert known.calls == []
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_members_dm_continues_past_forbidden_member(guild, sleeps):
+    alpha = guild.add_member(FakeMember(30))
+    bravo = guild.add_member(FakeMember(31))
+    charlie = guild.add_member(FakeMember(32))
+    bravo.dm_error = make_forbidden()
+    result = await execute_action(
+        None, guild, "members_dm", {"member_ids": [30, 31, 32], "content": "hi"}
+    )
+    assert alpha.calls == [("send", "hi")]
+    assert bravo.calls == []
+    assert charlie.calls == [("send", "hi")]
+    assert result["requested"] == 3
+    assert result["sent"] == ["30", "32"]
+    assert result["failed"] == [
+        {"member_id": "31", "reason": "member has DMs disabled or blocks the bot"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_members_dm_collects_http_errors(guild, sleeps):
+    alpha = guild.add_member(FakeMember(30))
+    bravo = guild.add_member(FakeMember(31))
+    bravo.dm_error = discord.HTTPException(FakeHTTPResponse(), "boom")
+    result = await execute_action(
+        None, guild, "members_dm", {"member_ids": [30, 31], "content": "hi"}
+    )
+    assert result["sent"] == ["30"]
+    assert len(result["failed"]) == 1
+    assert result["failed"][0]["member_id"] == "31"
+    assert "boom" in result["failed"][0]["reason"]
 
 
 @pytest.mark.asyncio
