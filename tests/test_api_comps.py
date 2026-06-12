@@ -99,8 +99,17 @@ async def test_config_excludes_secrets(api_client, bot):
 
 @pytest.mark.asyncio
 async def test_invalid_preset_payload_400(api_client):
-    # {"bogus": True} has no "name" key → CompPreset.from_dict raises ValueError → 400
+    # {"bogus": True} lacks a "config" dict → rejected by the pre-validation guard → 400
     resp = await api_client.put(
         f"/guilds/{GID}/comp-presets/X", json={"bogus": True}, headers=_auth()
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_invalid_schedule_payload_400(api_client):
+    # non-string name → CompSchedule.from_dict raises → 400
+    resp = await api_client.put(
+        f"/guilds/{GID}/comp-schedules/sched-x", json={"name": 42}, headers=_auth()
     )
     assert resp.status == 400

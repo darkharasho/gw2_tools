@@ -17,7 +17,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from ..storage import BuildRecord, CompPreset, CompSchedule, GuildConfig, utcnow
+from ..storage import BuildRecord, CompPreset, CompSchedule, utcnow
 
 LOGGER = logging.getLogger(__name__)
 
