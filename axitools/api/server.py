@@ -17,9 +17,11 @@ import secrets
 from dataclasses import asdict
 from pathlib import Path
 
+import discord
 from aiohttp import web
 
 from ..storage import BuildRecord, CompPreset, CompSchedule, utcnow
+from . import discord_actions
 
 LOGGER = logging.getLogger(__name__)
 
@@ -344,6 +346,174 @@ async def _handle_config_get(request: web.Request) -> web.Response:
     return web.json_response(body)
 
 
+def _iso(value) -> str | None:
+    """Render datetimes as ISO 8601; pass strings (and None) through."""
+    if value is None or isinstance(value, str):
+        return value
+    return value.isoformat()
+
+
+def _permissions_value(role) -> int:
+    perms = getattr(role, "permissions", 0)
+    return int(getattr(perms, "value", perms) or 0)
+
+
+def _resolve_discord_guild(request: web.Request):
+    """Return (guild, error_response) for /discord handlers."""
+    bot, gid = _guild_ctx(request)
+    guild = bot.get_guild(gid)
+    if guild is None:
+        return None, web.json_response({"error": "guild not found"}, status=404)
+    return guild, None
+
+
+def _channel_to_json(channel) -> dict:
+    return {
+        "id": channel.id,
+        "name": channel.name,
+        "type": str(channel.type),
+        "category_id": getattr(channel, "category_id", None),
+        "topic": getattr(channel, "topic", None),
+        "position": getattr(channel, "position", 0),
+    }
+
+
+async def _handle_discord_snapshot(request: web.Request) -> web.Response:
+    guild, err = _resolve_discord_guild(request)
+    if err is not None:
+        return err
+    categories = list(guild.categories)
+    category_ids = {c.id for c in categories}
+    body = {
+        "guild": {
+            "id": guild.id,
+            "name": guild.name,
+            "member_count": guild.member_count,
+        },
+        "categories": [
+            {"id": c.id, "name": c.name, "position": getattr(c, "position", 0)}
+            for c in categories
+        ],
+        "channels": [
+            _channel_to_json(ch) for ch in guild.channels if ch.id not in category_ids
+        ],
+        "roles": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "color": str(getattr(r, "color", "") or "#000000"),
+                "position": getattr(r, "position", 0),
+                "hoist": getattr(r, "hoist", False),
+                "mentionable": getattr(r, "mentionable", False),
+                "permissions": _permissions_value(r),
+                "member_count": len(getattr(r, "members", ())),
+            }
+            for r in guild.roles
+        ],
+        "threads": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "parent_id": getattr(t, "parent_id", None),
+                "archived": getattr(t, "archived", False),
+            }
+            for t in getattr(guild, "threads", ())
+        ],
+        "scheduled_events": [
+            {
+                "id": e.id,
+                "name": e.name,
+                "description": getattr(e, "description", None),
+                "start_time": _iso(getattr(e, "start_time", None)),
+                "end_time": _iso(getattr(e, "end_time", None)),
+                "channel_id": getattr(e, "channel_id", None),
+                "location": getattr(e, "location", None),
+            }
+            for e in getattr(guild, "scheduled_events", ())
+        ],
+    }
+    include = request.query.get("include", "")
+    if "members" in include.split(","):
+        members = list(guild.members)
+        body["members_total"] = len(members)
+        body["members"] = [
+            {
+                "id": m.id,
+                "name": m.name,
+                "display_name": getattr(m, "display_name", m.name),
+                "role_ids": [r.id for r in getattr(m, "roles", ())],
+                "joined_at": _iso(getattr(m, "joined_at", None)),
+            }
+            for m in members[:1000]
+        ]
+    return web.json_response(body)
+
+
+async def _handle_discord_messages(request: web.Request) -> web.Response:
+    guild, err = _resolve_discord_guild(request)
+    if err is not None:
+        return err
+    raw_channel_id = request.query.get("channel_id", "")
+    if not raw_channel_id.isdigit():
+        return web.json_response(
+            {"error": "channel_id query parameter is required"}, status=400
+        )
+    raw_limit = request.query.get("limit", "25")
+    if not raw_limit.isdigit() or not 1 <= int(raw_limit) <= 100:
+        return web.json_response(
+            {"error": "limit must be an integer between 1 and 100"}, status=400
+        )
+    try:
+        channel = discord_actions.resolve_channel(guild, int(raw_channel_id))
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    messages = [
+        {
+            "id": m.id,
+            "author_id": m.author.id,
+            "author_name": m.author.name,
+            "content": m.content,
+            "created_at": _iso(m.created_at),
+            "pinned": getattr(m, "pinned", False),
+        }
+        async for m in channel.history(limit=int(raw_limit))
+    ]
+    return web.json_response(messages)
+
+
+async def _handle_discord_actions_list(request: web.Request) -> web.Response:
+    return web.json_response(discord_actions.registry_listing())
+
+
+async def _handle_discord_actions_post(request: web.Request) -> web.Response:
+    guild, err = _resolve_discord_guild(request)
+    if err is not None:
+        return err
+    body = await _parse_json_body(request)
+    if body is None:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    action = body.get("action")
+    if action not in discord_actions.ACTIONS:
+        return web.json_response(
+            {
+                "error": f"unknown action: {action}",
+                "valid_actions": sorted(discord_actions.ACTIONS),
+            },
+            status=400,
+        )
+    params = body.get("params") or {}
+    bot = request.app["bot"]
+    try:
+        result = await discord_actions.execute_action(bot, guild, action, params)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except discord.Forbidden as exc:
+        return web.json_response(
+            {"error": f"the bot lacks permission: {exc.text or action}"}, status=403
+        )
+    return web.json_response({"ok": True, "result": result})
+
+
 def build_app(bot, token: str) -> web.Application:
     app = web.Application(middlewares=[_auth_middleware])
     app["bot"] = bot
@@ -359,6 +529,10 @@ def build_app(bot, token: str) -> web.Application:
     app.router.add_get("/guilds/{guild_id:\\d+}/comp-schedules", _handle_comp_schedules_list)
     app.router.add_put("/guilds/{guild_id:\\d+}/comp-schedules/{schedule_id}", _handle_comp_schedules_upsert)
     app.router.add_get("/guilds/{guild_id:\\d+}/config", _handle_config_get)
+    app.router.add_get("/guilds/{guild_id:\\d+}/discord", _handle_discord_snapshot)
+    app.router.add_get("/guilds/{guild_id:\\d+}/discord/messages", _handle_discord_messages)
+    app.router.add_get("/guilds/{guild_id:\\d+}/discord/actions", _handle_discord_actions_list)
+    app.router.add_post("/guilds/{guild_id:\\d+}/discord/actions", _handle_discord_actions_post)
     return app
 
 
