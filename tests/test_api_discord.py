@@ -532,3 +532,14 @@ async def test_messages_unknown_thread_404(api_client):
     )
     assert resp.status == 404
     assert "not found in this server" in (await resp.json())["error"]
+
+
+@pytest.mark.asyncio
+async def test_messages_rejects_both_channel_id_and_thread_id(api_client):
+    resp = await api_client.get(
+        "/guilds/123/discord/messages?channel_id=11&thread_id=77", headers=_auth()
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == (
+        "provide exactly one of channel_id or thread_id, not both"
+    )

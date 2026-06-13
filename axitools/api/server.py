@@ -682,6 +682,11 @@ async def _handle_discord_messages(request: web.Request) -> web.Response:
         return err
     raw_thread_id = request.query.get("thread_id", "")
     raw_channel_id = request.query.get("channel_id", "")
+    if raw_thread_id and raw_channel_id:
+        return web.json_response(
+            {"error": "provide exactly one of channel_id or thread_id, not both"},
+            status=400,
+        )
     target_id = raw_thread_id if raw_thread_id else raw_channel_id
     if not target_id.isdigit():
         return web.json_response(
