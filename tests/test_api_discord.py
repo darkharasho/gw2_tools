@@ -61,7 +61,7 @@ class FakeChannel:
         self.sent = []
         self.send_error = None
 
-    def history(self, *, limit):
+    def history(self, *, limit, before=None, after=None):
         messages = self.messages[:limit]
 
         async def _gen():
@@ -418,3 +418,117 @@ async def test_scoped_key_rejected_for_other_guild_discord_routes(api_client, sc
         resp = await getattr(api_client, method)(path, **kwargs)
         assert resp.status == 403, path
         assert await resp.json() == {"error": "key is scoped to another server"}
+
+
+# ---------------------------------------------------------------------------
+# parse_history_window (pure) — the digits/ISO/garbage logic
+# ---------------------------------------------------------------------------
+
+from multidict import MultiDict
+
+from axitools.api.server import parse_history_window
+
+
+def _win(**params):
+    """parse_history_window takes a mapping like request.query."""
+    return parse_history_window(MultiDict(params))
+
+
+def test_window_defaults_to_no_bounds():
+    win, err = _win()
+    assert err is None
+    assert win == {"before": None, "after": None}
+
+
+def test_window_before_after_as_snowflake_ids():
+    win, err = _win(before="101", after="100")
+    assert err is None
+    assert isinstance(win["before"], discord.Object)
+    assert win["before"].id == 101
+    assert isinstance(win["after"], discord.Object)
+    assert win["after"].id == 100
+
+
+def test_window_before_as_iso_date_is_utc_aware():
+    win, err = _win(before="2026-06-10")
+    assert err is None
+    value = win["before"]
+    assert isinstance(value, dt.datetime)
+    assert value == dt.datetime(2026, 6, 10, tzinfo=UTC)
+
+
+def test_window_after_as_iso_datetime_with_offset():
+    win, err = _win(after="2026-06-10T08:30:00+00:00")
+    assert err is None
+    assert win["after"] == dt.datetime(2026, 6, 10, 8, 30, tzinfo=UTC)
+
+
+def test_window_garbage_before_is_error():
+    win, err = _win(before="not-a-date")
+    assert win is None
+    assert "before" in err
+
+
+def test_window_garbage_after_is_error():
+    win, err = _win(after="2026-13-99")
+    assert win is None
+    assert "after" in err
+
+
+# ---------------------------------------------------------------------------
+# GET /guilds/{id}/discord/messages — thread + paging integration
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_messages_reads_a_thread_by_thread_id(api_client, bot):
+    guild = bot.get_guild(123)
+    author = FakeMember(30, "logan")
+    thread = FakeChannel(
+        77, "raid-plans", guild, type="public_thread",
+        messages=[FakeMessage(201, author, "thread msg")],
+    )
+    guild.channels.append(thread)
+    resp = await api_client.get(
+        "/guilds/123/discord/messages?thread_id=77", headers=_auth()
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert [m["id"] for m in body] == ["201"]
+
+
+@pytest.mark.asyncio
+async def test_messages_requires_channel_or_thread(api_client):
+    resp = await api_client.get("/guilds/123/discord/messages", headers=_auth())
+    assert resp.status == 400
+    assert "channel_id or thread_id" in (await resp.json())["error"]
+
+
+@pytest.mark.asyncio
+async def test_messages_bad_before_is_400_before_reading(api_client):
+    resp = await api_client.get(
+        "/guilds/123/discord/messages?channel_id=11&before=garbage", headers=_auth()
+    )
+    assert resp.status == 400
+    assert "before" in (await resp.json())["error"]
+
+
+@pytest.mark.asyncio
+async def test_messages_accepts_before_after_passthrough(api_client):
+    # The fake channel ignores before/after; this asserts valid params don't 400
+    # and the response shape is unchanged. (Live before/after filtering is
+    # verified against a real Discord connection — see plan note.)
+    resp = await api_client.get(
+        "/guilds/123/discord/messages?channel_id=11&before=101&after=2026-06-01",
+        headers=_auth(),
+    )
+    assert resp.status == 200
+    assert [m["id"] for m in await resp.json()] == ["101", "100"]
+
+
+@pytest.mark.asyncio
+async def test_messages_unknown_thread_404(api_client):
+    resp = await api_client.get(
+        "/guilds/123/discord/messages?thread_id=99999", headers=_auth()
+    )
+    assert resp.status == 404
+    assert "not found in this server" in (await resp.json())["error"]

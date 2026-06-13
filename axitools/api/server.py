@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import calendar
+import datetime as _dt
 import hashlib
 import json
 import logging
@@ -648,22 +649,55 @@ async def _handle_discord_snapshot(request: web.Request) -> web.Response:
     return web.json_response(body)
 
 
+def parse_history_window(query):
+    """Parse before/after history params from a request query mapping.
+
+    Each of *before* / *after* is optional and may be either a Discord
+    snowflake id (all digits → discord.Object) or an ISO-8601 date/datetime
+    (→ UTC-aware datetime). Returns (window, None) on success or
+    (None, error_message) on a value that is neither.
+    """
+    window: dict = {}
+    for key in ("before", "after"):
+        raw = (query.get(key) or "").strip()
+        if not raw:
+            window[key] = None
+            continue
+        if raw.isdigit():
+            window[key] = discord.Object(id=int(raw))
+            continue
+        try:
+            parsed = _dt.datetime.fromisoformat(raw)
+        except ValueError:
+            return None, f"{key} must be a message id (digits) or an ISO-8601 date"
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+        window[key] = parsed
+    return window, None
+
+
 async def _handle_discord_messages(request: web.Request) -> web.Response:
     guild, err = _resolve_discord_guild(request)
     if err is not None:
         return err
+    raw_thread_id = request.query.get("thread_id", "")
     raw_channel_id = request.query.get("channel_id", "")
-    if not raw_channel_id.isdigit():
+    target_id = raw_thread_id if raw_thread_id else raw_channel_id
+    if not target_id.isdigit():
         return web.json_response(
-            {"error": "channel_id query parameter is required"}, status=400
+            {"error": "channel_id or thread_id query parameter is required"},
+            status=400,
         )
     raw_limit = request.query.get("limit", "25")
     if not raw_limit.isdigit() or not 1 <= int(raw_limit) <= 100:
         return web.json_response(
             {"error": "limit must be an integer between 1 and 100"}, status=400
         )
+    window, window_err = parse_history_window(request.query)
+    if window_err is not None:
+        return web.json_response({"error": window_err}, status=400)
     try:
-        channel = discord_actions.resolve_channel(guild, int(raw_channel_id))
+        channel = discord_actions.resolve_channel(guild, int(target_id))
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     messages = [
@@ -675,7 +709,9 @@ async def _handle_discord_messages(request: web.Request) -> web.Response:
             "created_at": _iso(m.created_at),
             "pinned": getattr(m, "pinned", False),
         }
-        async for m in channel.history(limit=int(raw_limit))
+        async for m in channel.history(
+            limit=int(raw_limit), before=window["before"], after=window["after"]
+        )
     ]
     return web.json_response(messages)
 
