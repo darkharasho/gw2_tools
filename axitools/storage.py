@@ -552,6 +552,18 @@ class GameNewsStatus:
 
 
 @dataclass
+class AppKeyInfo:
+    """A single AxiVale desktop-app key registered to a guild (multi-key)."""
+
+    id: int
+    guild_id: int
+    label: str
+    created_by: int
+    created_at: str
+    last_used_at: Optional[str] = None
+
+
+@dataclass
 class ApiKeyRecord:
     """Persisted Guild Wars 2 API key details for a member."""
 
@@ -687,11 +699,15 @@ class ApiKeyStore:
                     PRIMARY KEY(guild_id, user_id)
                 );
                 CREATE TABLE IF NOT EXISTS app_keys (
-                    guild_id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    label TEXT NOT NULL DEFAULT 'default',
                     token_hash TEXT NOT NULL UNIQUE,
                     created_by INTEGER NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    last_used_at TEXT
                 );
+                CREATE INDEX IF NOT EXISTS idx_app_keys_guild ON app_keys(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild_user ON api_keys(guild_id, user_id);
                 CREATE INDEX IF NOT EXISTS idx_api_keys_guild ON api_keys(guild_id);
                 CREATE INDEX IF NOT EXISTS idx_api_key_guilds_lookup ON api_key_guilds(guild_id, api_key_id);
@@ -711,6 +727,33 @@ class ApiKeyStore:
             if "guild_labels" not in columns:
                 connection.execute(
                     "ALTER TABLE api_keys ADD COLUMN guild_labels TEXT NOT NULL DEFAULT '{}'"
+                )
+
+            # Migrate app_keys from one-key-per-guild (guild_id PRIMARY KEY) to
+            # many-keys-per-guild. SQLite can't drop a PRIMARY KEY in place, so
+            # rebuild the table, carrying each existing key over as 'default'.
+            app_key_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(app_keys)").fetchall()
+            }
+            if app_key_columns and "label" not in app_key_columns:
+                connection.executescript(
+                    """
+                    CREATE TABLE app_keys_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id INTEGER NOT NULL,
+                        label TEXT NOT NULL DEFAULT 'default',
+                        token_hash TEXT NOT NULL UNIQUE,
+                        created_by INTEGER NOT NULL,
+                        created_at TEXT NOT NULL,
+                        last_used_at TEXT
+                    );
+                    INSERT INTO app_keys_new (guild_id, label, token_hash, created_by, created_at)
+                        SELECT guild_id, 'default', token_hash, created_by, created_at FROM app_keys;
+                    DROP TABLE app_keys;
+                    ALTER TABLE app_keys_new RENAME TO app_keys;
+                    CREATE INDEX IF NOT EXISTS idx_app_keys_guild ON app_keys(guild_id);
+                    """
                 )
 
     def _migrate_json_stores(self) -> None:
@@ -820,21 +863,48 @@ class ApiKeyStore:
                 (guild_id, role_id),
             )
 
-    def set_app_key(self, guild_id: int, token_hash: str, created_by: int) -> None:
-        """Store the AxiVale app key hash for a guild, replacing any existing key."""
+    @staticmethod
+    def _unique_app_key_label(connection, guild_id: int, desired: str) -> str:
+        """Pick a label unique within the guild, suffixing ' 2', ' 3', … on clash."""
 
+        base = (desired or "").strip() or "default"
+        taken = {
+            str(row["label"]).strip().lower()
+            for row in connection.execute(
+                "SELECT label FROM app_keys WHERE guild_id = ?", (guild_id,)
+            ).fetchall()
+        }
+        if base.lower() not in taken:
+            return base
+        n = 2
+        while f"{base} {n}".lower() in taken:
+            n += 1
+        return f"{base} {n}"
+
+    def add_app_key(
+        self, guild_id: int, token_hash: str, created_by: int, label: str = "default"
+    ) -> AppKeyInfo:
+        """Register a new AxiVale app key for a guild without disturbing existing
+        ones. The label is made unique within the guild. Returns the new row."""
+
+        created_at = utcnow()
         with self._connect() as connection:
-            connection.execute(
+            final_label = self._unique_app_key_label(connection, guild_id, label)
+            cursor = connection.execute(
                 """
-                INSERT INTO app_keys (guild_id, token_hash, created_by, created_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET
-                    token_hash = excluded.token_hash,
-                    created_by = excluded.created_by,
-                    created_at = excluded.created_at
+                INSERT INTO app_keys (guild_id, label, token_hash, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (guild_id, token_hash, created_by, utcnow()),
+                (guild_id, final_label, token_hash, created_by, created_at),
             )
+            key_id = int(cursor.lastrowid)
+        return AppKeyInfo(
+            id=key_id,
+            guild_id=guild_id,
+            label=final_label,
+            created_by=created_by,
+            created_at=created_at,
+        )
 
     def get_app_key_guild(self, token_hash: str) -> Optional[int]:
         """Return the Discord guild id bound to ``token_hash``, if any."""
@@ -846,14 +916,59 @@ class ApiKeyStore:
             ).fetchone()
         return int(row["guild_id"]) if row else None
 
-    def revoke_app_key(self, guild_id: int) -> bool:
-        """Delete the stored app key for a guild. Returns True if one existed."""
+    def touch_app_key(self, token_hash: str) -> None:
+        """Record that a key was just used. Best-effort; never raises."""
+
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "UPDATE app_keys SET last_used_at = ? WHERE token_hash = ?",
+                    (utcnow(), token_hash),
+                )
+        except Exception:  # logging-only path; auth must not fail on a stats write
+            logger.debug("touch_app_key failed", exc_info=True)
+
+    def list_app_keys(self, guild_id: int) -> List[AppKeyInfo]:
+        """All registered app keys for a guild, oldest first."""
 
         with self._connect() as connection:
-            cursor = connection.execute(
-                "DELETE FROM app_keys WHERE guild_id = ?", (guild_id,)
+            rows = connection.execute(
+                """
+                SELECT id, guild_id, label, created_by, created_at, last_used_at
+                FROM app_keys WHERE guild_id = ? ORDER BY id
+                """,
+                (guild_id,),
+            ).fetchall()
+        return [
+            AppKeyInfo(
+                id=int(row["id"]),
+                guild_id=int(row["guild_id"]),
+                label=str(row["label"]),
+                created_by=int(row["created_by"]),
+                created_at=str(row["created_at"]),
+                last_used_at=row["last_used_at"],
             )
-            return cursor.rowcount > 0
+            for row in rows
+        ]
+
+    def revoke_app_key(
+        self, guild_id: int, label: Optional[str] = None
+    ) -> int:
+        """Delete app keys for a guild. With ``label`` (case-insensitive) only that
+        key is removed; without it, every key for the guild is removed. Returns the
+        number of keys deleted."""
+
+        with self._connect() as connection:
+            if label is None:
+                cursor = connection.execute(
+                    "DELETE FROM app_keys WHERE guild_id = ?", (guild_id,)
+                )
+            else:
+                cursor = connection.execute(
+                    "DELETE FROM app_keys WHERE guild_id = ? AND lower(label) = lower(?)",
+                    (guild_id, label.strip()),
+                )
+            return cursor.rowcount
 
     @staticmethod
     def _normalise_permissions(permissions: Iterable[str]) -> List[str]:
@@ -2161,14 +2276,22 @@ class StorageManager:
     def clear_preferred_guild_role_for_role(self, guild_id: int, role_id: int) -> None:
         self.api_key_store.clear_preferred_guild_role_for_role(guild_id, role_id)
 
-    def set_app_key(self, guild_id: int, token_hash: str, created_by: int) -> None:
-        self.api_key_store.set_app_key(guild_id, token_hash, created_by)
+    def add_app_key(
+        self, guild_id: int, token_hash: str, created_by: int, label: str = "default"
+    ) -> AppKeyInfo:
+        return self.api_key_store.add_app_key(guild_id, token_hash, created_by, label)
 
     def get_app_key_guild(self, token_hash: str) -> Optional[int]:
         return self.api_key_store.get_app_key_guild(token_hash)
 
-    def revoke_app_key(self, guild_id: int) -> bool:
-        return self.api_key_store.revoke_app_key(guild_id)
+    def touch_app_key(self, token_hash: str) -> None:
+        self.api_key_store.touch_app_key(token_hash)
+
+    def list_app_keys(self, guild_id: int) -> List[AppKeyInfo]:
+        return self.api_key_store.list_app_keys(guild_id)
+
+    def revoke_app_key(self, guild_id: int, label: Optional[str] = None) -> int:
+        return self.api_key_store.revoke_app_key(guild_id, label)
 
     def all_gw2_guild_ids(self) -> List[str]:
         return self.api_key_store.all_gw2_guild_ids()

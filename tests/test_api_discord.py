@@ -152,7 +152,7 @@ async def api_client(aiohttp_client, bot, _allow_global_token):
 def scoped_key(bot):
     """Generate an AxiVale key scoped to guild 123 and persist its hash."""
     key = generate_app_key()
-    bot.storage.set_app_key(123, hash_app_key(key), created_by=42)
+    bot.storage.add_app_key(123, hash_app_key(key), created_by=42)
     return key
 
 

@@ -117,6 +117,7 @@ def test_build_status_embed_returns_embed():
 def test_apikey_group_qualified_names():
     cog = ConfigCog(MagicMock())
     assert cog.apikey_generate.qualified_name == "config apikey generate"
+    assert cog.apikey_list.qualified_name == "config apikey list"
     assert cog.apikey_revoke.qualified_name == "config apikey revoke"
 
 
@@ -132,15 +133,35 @@ def _apikey_interaction(manage_guild=True):
     return interaction
 
 
+def _stub_app_key_store(storage, *, label="default", total=1):
+    """Make a MagicMock storage behave like the multi-key app-key API."""
+    from axitools.storage import AppKeyInfo
+
+    storage.add_app_key.return_value = AppKeyInfo(
+        id=1, guild_id=123, label=label, created_by=42, created_at="2026-06-17T00:00:00.000000Z"
+    )
+    storage.list_app_keys.return_value = [
+        AppKeyInfo(
+            id=i + 1,
+            guild_id=123,
+            label=f"k{i}",
+            created_by=42,
+            created_at="2026-06-17T00:00:00.000000Z",
+        )
+        for i in range(total)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_apikey_generate_stores_hash_and_replies_ephemeral(mock_bot_config):
     cog = ConfigCog(mock_bot_config)
+    _stub_app_key_store(mock_bot_config.storage, label="laptop", total=1)
     interaction = _apikey_interaction()
 
-    await cog.apikey_generate.callback(cog, interaction)
+    await cog.apikey_generate.callback(cog, interaction, name="laptop")
 
-    assert mock_bot_config.storage.set_app_key.called
-    guild_id, token_hash, created_by = mock_bot_config.storage.set_app_key.call_args[0]
+    assert mock_bot_config.storage.add_app_key.called
+    guild_id, token_hash, created_by = mock_bot_config.storage.add_app_key.call_args[0][:3]
     assert guild_id == 123
     assert created_by == 42
     assert len(token_hash) == 64  # sha256 hexdigest, never the raw key
@@ -148,7 +169,7 @@ async def test_apikey_generate_stores_hash_and_replies_ephemeral(mock_bot_config
     args, kwargs = interaction.response.send_message.call_args
     assert kwargs.get("ephemeral") is True
     assert "axt1." in args[0]
-    assert "AxiVale" in args[0]
+    assert "laptop" in args[0]
 
 
 @pytest.mark.asyncio
@@ -158,16 +179,43 @@ async def test_apikey_generate_requires_manage_guild(mock_bot_config):
 
     await cog.apikey_generate.callback(cog, interaction)
 
-    assert not mock_bot_config.storage.set_app_key.called
+    assert not mock_bot_config.storage.add_app_key.called
     args, kwargs = interaction.response.send_message.call_args
     assert kwargs.get("ephemeral") is True
     assert "Manage Server" in args[0]
 
 
 @pytest.mark.asyncio
+async def test_apikey_list_shows_keys(mock_bot_config):
+    cog = ConfigCog(mock_bot_config)
+    _stub_app_key_store(mock_bot_config.storage, total=2)
+    interaction = _apikey_interaction()
+
+    await cog.apikey_list.callback(cog, interaction)
+
+    args, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+    assert "k0" in args[0] and "k1" in args[0]
+
+
+@pytest.mark.asyncio
+async def test_apikey_revoke_by_name(mock_bot_config):
+    cog = ConfigCog(mock_bot_config)
+    mock_bot_config.storage.revoke_app_key.return_value = 1
+    interaction = _apikey_interaction()
+
+    await cog.apikey_revoke.callback(cog, interaction, name="laptop")
+
+    mock_bot_config.storage.revoke_app_key.assert_called_once_with(123, "laptop")
+    args, kwargs = interaction.response.send_message.call_args
+    assert kwargs.get("ephemeral") is True
+    assert "laptop" in args[0]
+
+
+@pytest.mark.asyncio
 async def test_apikey_revoke_reports_missing_key(mock_bot_config):
     cog = ConfigCog(mock_bot_config)
-    mock_bot_config.storage.revoke_app_key.return_value = False
+    mock_bot_config.storage.revoke_app_key.return_value = 0
     interaction = _apikey_interaction()
 
     await cog.apikey_revoke.callback(cog, interaction)
@@ -179,13 +227,13 @@ async def test_apikey_revoke_reports_missing_key(mock_bot_config):
 
 
 @pytest.mark.asyncio
-async def test_apikey_revoke_confirms_removal(mock_bot_config):
+async def test_apikey_revoke_all_confirms_removal(mock_bot_config):
     cog = ConfigCog(mock_bot_config)
-    mock_bot_config.storage.revoke_app_key.return_value = True
+    mock_bot_config.storage.revoke_app_key.return_value = 3
     interaction = _apikey_interaction()
 
     await cog.apikey_revoke.callback(cog, interaction)
 
     args, kwargs = interaction.response.send_message.call_args
     assert kwargs.get("ephemeral") is True
-    assert "revoked" in args[0]
+    assert "Revoked" in args[0]

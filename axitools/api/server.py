@@ -125,6 +125,9 @@ async def _auth_middleware(request: web.Request, handler):
     if guild_id is None:
         return web.json_response({"error": "unauthorized"}, status=401)
 
+    # Record last-used out of band so the stats write never slows auth.
+    asyncio.create_task(asyncio.to_thread(bot.storage.touch_app_key, token_hash))
+
     request["scoped_guild_id"] = guild_id
     path_guild_id = request.match_info.get("guild_id")
     if path_guild_id is not None and int(path_guild_id) != guild_id:

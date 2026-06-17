@@ -57,7 +57,7 @@ async def global_token_client(aiohttp_client, bot, monkeypatch):
 def scoped_key(bot):
     """Generate an AxiVale key scoped to guild 123 and persist its hash."""
     key = generate_app_key()
-    bot.storage.set_app_key(123, hash_app_key(key), created_by=42)
+    bot.storage.add_app_key(123, hash_app_key(key), created_by=42)
     return key
 
 
@@ -101,23 +101,80 @@ def test_generated_keys_are_unique():
 # Storage roundtrip
 # ---------------------------------------------------------------------------
 
-def test_app_key_set_get_revoke_roundtrip(tmp_path):
+def test_app_key_add_get_revoke_roundtrip(tmp_path):
     storage = StorageManager(tmp_path)
-    storage.set_app_key(123, "hash-one", created_by=42)
+    storage.add_app_key(123, "hash-one", created_by=42)
     assert storage.get_app_key_guild("hash-one") == 123
 
-    assert storage.revoke_app_key(123) is True
+    assert storage.revoke_app_key(123) == 1
     assert storage.get_app_key_guild("hash-one") is None
-    assert storage.revoke_app_key(123) is False
+    assert storage.revoke_app_key(123) == 0
 
 
-def test_app_key_replace_invalidates_old_hash(tmp_path):
+def test_multiple_keys_per_guild_coexist(tmp_path):
     storage = StorageManager(tmp_path)
-    storage.set_app_key(123, "hash-old", created_by=42)
-    storage.set_app_key(123, "hash-new", created_by=99)
+    storage.add_app_key(123, "hash-old", created_by=42, label="laptop")
+    storage.add_app_key(123, "hash-new", created_by=99, label="desktop")
 
-    assert storage.get_app_key_guild("hash-old") is None
+    # Adding a second key leaves the first valid (no replace).
+    assert storage.get_app_key_guild("hash-old") == 123
     assert storage.get_app_key_guild("hash-new") == 123
+    assert {k.label for k in storage.list_app_keys(123)} == {"laptop", "desktop"}
+
+
+def test_duplicate_label_is_suffixed(tmp_path):
+    storage = StorageManager(tmp_path)
+    a = storage.add_app_key(123, "h1", created_by=1, label="laptop")
+    b = storage.add_app_key(123, "h2", created_by=1, label="laptop")
+    assert a.label == "laptop"
+    assert b.label == "laptop 2"
+
+
+def test_revoke_by_label_targets_one_key(tmp_path):
+    storage = StorageManager(tmp_path)
+    storage.add_app_key(123, "h1", created_by=1, label="laptop")
+    storage.add_app_key(123, "h2", created_by=1, label="desktop")
+
+    assert storage.revoke_app_key(123, "laptop") == 1
+    assert storage.get_app_key_guild("h1") is None
+    assert storage.get_app_key_guild("h2") == 123  # untouched
+    assert storage.revoke_app_key(123, "nope") == 0
+
+
+def test_touch_app_key_records_last_used(tmp_path):
+    storage = StorageManager(tmp_path)
+    storage.add_app_key(123, "h1", created_by=1, label="laptop")
+    assert storage.list_app_keys(123)[0].last_used_at is None
+    storage.touch_app_key("h1")
+    assert storage.list_app_keys(123)[0].last_used_at is not None
+
+
+def test_migration_from_single_key_schema(tmp_path):
+    # Recreate the legacy one-key-per-guild table, then reopen so _ensure_schema
+    # runs the rebuild migration.
+    storage = StorageManager(tmp_path)
+    with storage.api_key_store._connect() as conn:
+        conn.executescript(
+            """
+            DROP TABLE app_keys;
+            CREATE TABLE app_keys (
+                guild_id INTEGER PRIMARY KEY,
+                token_hash TEXT NOT NULL UNIQUE,
+                created_by INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO app_keys (guild_id, token_hash, created_by, created_at)
+                VALUES (123, 'legacy-hash', 42, '2026-01-01T00:00:00.000000Z');
+            """
+        )
+
+    migrated = StorageManager(tmp_path)
+    assert migrated.get_app_key_guild("legacy-hash") == 123
+    keys = migrated.list_app_keys(123)
+    assert len(keys) == 1 and keys[0].label == "default"
+    # The rebuilt table now accepts additional keys for the same guild.
+    migrated.add_app_key(123, "second-hash", created_by=1, label="laptop")
+    assert {k.label for k in migrated.list_app_keys(123)} == {"default", "laptop"}
 
 
 # ---------------------------------------------------------------------------

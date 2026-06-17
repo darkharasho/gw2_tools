@@ -53,12 +53,17 @@ prevent the operator from decrypting; see `docs/superpowers/specs/2026-06-09-enc
 | `updated_at` | TEXT NOT NULL | ISO 8601 timestamp of the most recent cache refresh. |
 
 ### `app_keys`
+Multiple AxiVale desktop keys per guild (each a distinct `axt1.` secret). Managed via `/config apikey generate|list|revoke`.
+
 | Column | Type | Notes |
 | --- | --- | --- |
-| `guild_id` | INTEGER PRIMARY KEY | Discord guild ID the AxiVale key is scoped to (one key per guild). |
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Row id for the key. |
+| `guild_id` | INTEGER NOT NULL (indexed) | Discord guild ID the key is scoped to. Many rows per guild. |
+| `label` | TEXT NOT NULL DEFAULT 'default' | Human label to tell keys apart; unique within a guild (auto-suffixed on clash). |
 | `token_hash` | TEXT NOT NULL UNIQUE | SHA-256 hex digest of the full `axt1.` key string; the key itself is never stored. |
 | `created_by` | INTEGER NOT NULL | Discord user ID that generated the key. |
 | `created_at` | TEXT NOT NULL | ISO 8601 timestamp when the key was generated. |
+| `last_used_at` | TEXT | ISO 8601 timestamp of the most recent successful auth with this key (best-effort). |
 
 ## Audit tables
 

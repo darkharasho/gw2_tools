@@ -1,6 +1,7 @@
 """Configuration cog for AxiTools."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 
 import discord
@@ -11,6 +12,17 @@ from ..api.server import generate_app_key, hash_app_key
 from ..bot import AxiToolsBot
 from ..config_status import ConfigStatus, StatusField
 from ..storage import GuildConfig
+
+
+def _discord_ts(iso: Optional[str]) -> str:
+    """Render a stored ISO timestamp as a relative Discord timestamp."""
+    if not iso:
+        return "never"
+    try:
+        dt = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return iso
+    return f"<t:{int(dt.timestamp())}:R>"
 
 
 class ModeratorRoleSelect(discord.ui.RoleSelect):
@@ -278,32 +290,83 @@ class ConfigCog(commands.GroupCog, name="config", group_extras={"category": "Ser
             return False
         return True
 
-    @apikey.command(name="generate", description="Generate an AxiVale API key for this server.")
-    async def apikey_generate(self, interaction: discord.Interaction) -> None:
+    @apikey.command(name="generate", description="Generate a new AxiVale API key for this server.")
+    @app_commands.describe(name="A label to tell this key apart (e.g. laptop, work-pc).")
+    async def apikey_generate(
+        self, interaction: discord.Interaction, name: Optional[str] = None
+    ) -> None:
         if not await self._check_manage_guild(interaction):
             return
 
         key = generate_app_key()
-        self.bot.storage.set_app_key(interaction.guild.id, hash_app_key(key), interaction.user.id)
-
+        info = self.bot.storage.add_app_key(
+            interaction.guild.id, hash_app_key(key), interaction.user.id, name or "default"
+        )
+        total = len(self.bot.storage.list_app_keys(interaction.guild.id))
+        note = (
+            f"\nThis server now has **{total}** keys — existing keys stay valid. "
+            "Use `/config apikey list` to review or `/config apikey revoke` to remove one."
+            if total > 1
+            else ""
+        )
         await interaction.response.send_message(
-            f"AxiVale API key for **{interaction.guild.name}**:\n"
+            f"AxiVale API key **{info.label}** for **{interaction.guild.name}**:\n"
             f"```\n{key}\n```\n"
-            "Paste this into AxiVale → Settings to connect this server.\n"
-            "⚠️ This key is only shown once, and regenerating it invalidates the old key.",
+            "Paste this into AxiVale → Settings → AxiTools to connect this server.\n"
+            f"⚠️ This key is only shown once.{note}",
             ephemeral=True,
         )
 
-    @apikey.command(name="revoke", description="Revoke this server's AxiVale API key.")
-    async def apikey_revoke(self, interaction: discord.Interaction) -> None:
+    @apikey.command(name="list", description="List this server's AxiVale API keys.")
+    async def apikey_list(self, interaction: discord.Interaction) -> None:
         if not await self._check_manage_guild(interaction):
             return
 
-        removed = self.bot.storage.revoke_app_key(interaction.guild.id)
-        if removed:
-            message = "The AxiVale API key for this server has been revoked."
+        keys = self.bot.storage.list_app_keys(interaction.guild.id)
+        if not keys:
+            await interaction.response.send_message(
+                "No AxiVale API keys on file for this server. "
+                "Generate one with `/config apikey generate`.",
+                ephemeral=True,
+            )
+            return
+
+        lines = [
+            f"• **{k.label}** — added {_discord_ts(k.created_at)} by <@{k.created_by}> "
+            f"· last used {_discord_ts(k.last_used_at)}"
+            for k in keys
+        ]
+        await interaction.response.send_message(
+            f"**AxiVale API keys for {interaction.guild.name}** ({len(keys)}):\n"
+            + "\n".join(lines)
+            + "\n\nRevoke one with `/config apikey revoke name:<label>`.",
+            ephemeral=True,
+        )
+
+    @apikey.command(name="revoke", description="Revoke an AxiVale API key by name (or all).")
+    @app_commands.describe(
+        name="The key label to revoke. Leave empty to revoke ALL keys for this server."
+    )
+    async def apikey_revoke(
+        self, interaction: discord.Interaction, name: Optional[str] = None
+    ) -> None:
+        if not await self._check_manage_guild(interaction):
+            return
+
+        if name:
+            removed = self.bot.storage.revoke_app_key(interaction.guild.id, name)
+            message = (
+                f"Revoked the AxiVale key **{name}**."
+                if removed
+                else f"No AxiVale key named **{name}** on this server. See `/config apikey list`."
+            )
         else:
-            message = "No AxiVale API key on file for this server."
+            removed = self.bot.storage.revoke_app_key(interaction.guild.id)
+            message = (
+                f"Revoked **all {removed}** AxiVale key(s) for this server."
+                if removed
+                else "No AxiVale API keys on file for this server."
+            )
         await interaction.response.send_message(message, ephemeral=True)
 
     @app_commands.command(name="setup", description="Open AxiTools settings for this server.")

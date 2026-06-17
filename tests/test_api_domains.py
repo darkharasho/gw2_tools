@@ -95,7 +95,7 @@ async def api_client(aiohttp_client, bot, _allow_global_token):
 def scoped_key(bot):
     """An AxiVale key scoped to guild 123."""
     key = generate_app_key()
-    bot.storage.set_app_key(GID, hash_app_key(key), created_by=42)
+    bot.storage.add_app_key(GID, hash_app_key(key), created_by=42)
     return key
 
 
@@ -925,7 +925,7 @@ async def test_key_holders_validates_input(api_client):
 @pytest.mark.asyncio
 async def test_key_holders_respects_key_scoping(api_client, bot):
     scoped_key = generate_app_key("http://127.0.0.1:8642")
-    bot.storage.set_app_key(OTHER_GID, hash_app_key(scoped_key), 1)
+    bot.storage.add_app_key(OTHER_GID, hash_app_key(scoped_key), 1)
     resp = await api_client.post(
         f"/guilds/{GID}/key-holders",
         json={"account_names": ["Logan.1234"]},
