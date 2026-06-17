@@ -538,14 +538,17 @@ class UpdateNotesStatus:
 
 @dataclass
 class GameNewsStatus:
-    """Per-source boundaries for the multi-source game news feed.
+    """Per-source record of already-posted entries for the game news feed.
 
-    Keys are source identifiers ("gw2", "gw3"). Stored independently so one
-    source advancing never disturbs another.
+    Keys are source identifiers ("gw2", "gw3"). Each maps to a bounded list of
+    recently-seen entry ids (oldest first, newest last). Dedup is membership in
+    this set, NOT position relative to a single boundary id — so a source that
+    reorders its index (e.g. pins an older article) cannot resurface an
+    already-posted entry. Stored independently so one source never disturbs
+    another.
     """
 
-    last_entry_ids: Dict[str, str] = field(default_factory=dict)
-    last_published_at: Dict[str, str] = field(default_factory=dict)
+    seen_entry_ids: Dict[str, List[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -2094,8 +2097,10 @@ class StorageManager:
         if not payload:
             return None
         return GameNewsStatus(
-            last_entry_ids=dict(payload.get("last_entry_ids", {})),
-            last_published_at=dict(payload.get("last_published_at", {})),
+            seen_entry_ids={
+                key: list(value)
+                for key, value in payload.get("seen_entry_ids", {}).items()
+            },
         )
 
     def save_game_news_status(self, guild_id: int, status: GameNewsStatus) -> None:

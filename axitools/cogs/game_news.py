@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 from urllib.parse import urljoin
 
 import discord
@@ -32,6 +32,11 @@ GW2_FEED_URL = "https://www.guildwars2.com/en/feed/"
 GW3_NEWS_PAGE_URL = "https://www.guildwars3.com/en/news/"
 GW3_BASE_URL = "https://www.guildwars3.com"
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+
+# Upper bound on remembered entry ids per source. Far larger than any source's
+# index (GW2 feed ~10 items, GW3 index a handful), so trimming never drops an
+# id that is still live on the page — which would otherwise re-post it.
+SEEN_IDS_LIMIT = 200
 
 REQUEST_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -87,36 +92,42 @@ class GameNewsCog(commands.Cog):
 
     # ---- shared helpers ---------------------------------------------------
 
-    def _resolve_new_entries(
+    def _select_new_entries(
         self,
         entries: Sequence[GameNewsEntry],
-        last_entry_id: Optional[str],
-        last_published_at: Optional[str],
-    ) -> "Tuple[List[GameNewsEntry], bool]":
-        """Return ``(new_entries_oldest_first, boundary_found)``.
+        seen_ids: Sequence[str],
+    ) -> List[GameNewsEntry]:
+        """Return entries whose id has never been seen, oldest-first.
 
-        ``boundary_found`` is ``False`` when the recorded entry can no longer be
-        located (it scrolled off). The caller re-anchors instead of re-posting
-        everything. Mirrors update_notes; the timestamp branch is skipped for
-        sources without dates (GW3 passes ``None``).
+        Dedup is set membership, not position relative to a single boundary id.
+        A source that reorders its index (e.g. pins an older article above the
+        newest) therefore cannot resurface an already-posted entry, and a
+        boundary scrolling off the index is a non-event. Works identically for
+        sources with dates (GW2) and without (GW3).
         """
-        if not entries:
-            return [], True
+        seen = set(seen_ids)
+        # ``entries`` arrive newest-first; reverse so we post oldest-first.
+        return [entry for entry in reversed(list(entries)) if entry.entry_id not in seen]
 
-        collected: List[GameNewsEntry] = []
-        cutoff = self._parse_timestamp(last_published_at)
-        boundary_found = not last_entry_id
-        for entry in entries:
-            if last_entry_id and entry.entry_id == last_entry_id:
-                boundary_found = True
-                break
-            entry_timestamp = self._parse_timestamp(entry.published_at)
-            if cutoff and entry_timestamp and entry_timestamp <= cutoff:
-                boundary_found = True
-                break
-            collected.append(entry)
+    def _remember(self, status: GameNewsStatus, source_key: str, entry_id: str) -> None:
+        """Record ``entry_id`` as seen for ``source_key`` (bounded, newest-last)."""
+        seen = status.seen_entry_ids.setdefault(source_key, [])
+        if entry_id in seen:
+            return
+        seen.append(entry_id)
+        if len(seen) > SEEN_IDS_LIMIT:
+            del seen[:-SEEN_IDS_LIMIT]
 
-        return list(reversed(collected)), boundary_found
+    def _mark_all_seen(
+        self, status: GameNewsStatus, source_key: str, entries: Sequence[GameNewsEntry]
+    ) -> None:
+        """Record every current entry id as seen (oldest-first, bounded).
+
+        Used to seed silently on first run and after a forced post, so the poll
+        loop never floods a channel with the existing backlog.
+        """
+        for entry in reversed(list(entries)):  # oldest-first -> newest at the tail
+            self._remember(status, source_key, entry.entry_id)
 
     def _parse_timestamp(self, value: Optional[str]) -> Optional[datetime]:
         if not value:
@@ -321,11 +332,6 @@ class GameNewsCog(commands.Cog):
             return None
         return fetched if isinstance(fetched, discord.TextChannel) else None
 
-    def _seed(self, status: GameNewsStatus, source_key: str, latest: GameNewsEntry) -> None:
-        status.last_entry_ids[source_key] = latest.entry_id
-        if latest.published_at:
-            status.last_published_at[source_key] = latest.published_at
-
     async def _process_guild(
         self, guild: discord.Guild, source_entries: Dict[str, List[GameNewsEntry]]
     ) -> None:
@@ -343,25 +349,14 @@ class GameNewsCog(commands.Cog):
             if not entries:
                 continue
 
-            last_id = status.last_entry_ids.get(source.key)
-            last_pub = status.last_published_at.get(source.key)
-
-            if not last_id:
-                self._seed(status, source.key, entries[0])
+            if source.key not in status.seen_entry_ids:
+                # First time we've seen this source for this guild: record the
+                # existing backlog as seen and post nothing.
+                self._mark_all_seen(status, source.key, entries)
                 changed = True
                 continue
 
-            new_entries, boundary_found = self._resolve_new_entries(entries, last_id, last_pub)
-
-            if not boundary_found:
-                self._seed(status, source.key, entries[0])
-                changed = True
-                LOGGER.info(
-                    "Game news boundary for guild %s source %s scrolled off; re-anchored to %s",
-                    guild.id, source.key, entries[0].entry_id,
-                )
-                continue
-
+            new_entries = self._select_new_entries(entries, status.seen_entry_ids[source.key])
             if not new_entries:
                 continue
 
@@ -379,9 +374,7 @@ class GameNewsCog(commands.Cog):
                         channel_id, guild.id,
                     )
                     break
-                status.last_entry_ids[source.key] = entry.entry_id
-                if entry.published_at:
-                    status.last_published_at[source.key] = entry.published_at
+                self._remember(status, source.key, entry.entry_id)
                 changed = True
 
         if changed:
@@ -435,7 +428,9 @@ class GameNewsCog(commands.Cog):
                 continue
             entry = entries[0]
             await self._send_entry(channel, source, entry)
-            self._seed(status, source.key, entry)
+            # Remember the whole current backlog so the poll loop neither
+            # re-posts this entry nor floods with the rest of the index.
+            self._mark_all_seen(status, source.key, entries)
             posted += 1
         if posted:
             self.bot.storage.save_game_news_status(interaction.guild.id, status)

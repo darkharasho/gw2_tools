@@ -48,32 +48,53 @@ GW3_PAGE = [
 ]
 
 
-def test_resolve_boundary_on_page_ids_only():
+def test_select_new_entries_only_unseen_oldest_first():
     cog = _cog()
-    new, found = cog._resolve_new_entries(GW3_PAGE, "slug-a", None)
-    assert found is True
+    new = cog._select_new_entries(GW3_PAGE, ["slug-a"])
     assert [e.entry_id for e in new] == ["slug-b", "slug-c"]
 
 
-def test_resolve_up_to_date():
+def test_select_new_entries_all_seen_returns_empty():
     cog = _cog()
-    new, found = cog._resolve_new_entries(GW3_PAGE, "slug-c", None)
-    assert found is True
+    new = cog._select_new_entries(GW3_PAGE, ["slug-a", "slug-b", "slug-c"])
     assert new == []
 
 
-def test_resolve_boundary_scrolled_off():
+def test_select_new_entries_ignores_reorder():
+    # The site reorders its index (an old card pinned to the top) but adds no
+    # new article. Every id is already seen, so nothing is re-posted. This is
+    # the spam vector the seen-set dedup closes — slug-position is irrelevant.
     cog = _cog()
-    new, found = cog._resolve_new_entries(GW3_PAGE, "slug-gone", None)
-    assert found is False
+    reordered = [
+        _entry("gw3", "slug-a"),  # old card jumped to the top
+        _entry("gw3", "slug-c"),
+        _entry("gw3", "slug-b"),
+    ]
+    new = cog._select_new_entries(reordered, ["slug-a", "slug-b", "slug-c"])
+    assert new == []
 
 
-def test_resolve_timestamp_fallback_for_gw2():
-    # entry_id changed but timestamp says we already have everything up to n2.
+def test_select_new_entries_seen_id_scrolled_off_is_non_event():
+    # An already-seen id is no longer on the page; a genuinely new one appeared.
+    # Only the new one is returned (no whole-page re-anchor flood).
     cog = _cog()
-    new, found = cog._resolve_new_entries(GW2_PAGE, "missing-id", "2026-06-05T16:00:00+00:00")
-    assert found is True
-    assert [e.entry_id for e in new] == ["n3"]
+    page = [_entry("gw3", "slug-d"), _entry("gw3", "slug-c")]  # slug-a/-b scrolled off
+    new = cog._select_new_entries(page, ["slug-a", "slug-b", "slug-c"])
+    assert [e.entry_id for e in new] == ["slug-d"]
+
+
+def test_remember_is_bounded_and_keeps_newest():
+    from axitools.cogs.game_news import SEEN_IDS_LIMIT
+
+    cog = _cog()
+    status = GameNewsStatus()
+    for i in range(SEEN_IDS_LIMIT + 5):
+        cog._remember(status, "gw3", f"slug-{i}")
+    seen = status.seen_entry_ids["gw3"]
+    assert len(seen) == SEEN_IDS_LIMIT
+    # Oldest ids were trimmed; the most recent id is retained at the tail.
+    assert seen[-1] == f"slug-{SEEN_IDS_LIMIT + 4}"
+    assert "slug-0" not in seen
 
 
 from pathlib import Path
@@ -289,15 +310,15 @@ async def test_process_guild_first_run_seeds_silently():
 
     cog._send_entry.assert_not_called()
     st = saved[42]
-    assert st.last_entry_ids == {"gw2": "n2", "gw3": "slug-b"}
+    # Whole existing backlog recorded as seen; nothing posted.
+    assert st.seen_entry_ids == {"gw2": ["n2"], "gw3": ["slug-b"]}
 
 
 @pytest.mark.asyncio
 async def test_process_guild_posts_new_entries_oldest_first():
     cog = _cog()
     status = GameNewsStatus(
-        last_entry_ids={"gw2": "n1", "gw3": "slug-a"},
-        last_published_at={"gw2": "2026-06-01T16:00:00+00:00"},
+        seen_entry_ids={"gw2": ["n1"], "gw3": ["slug-a"]},
     )
     bot, guild, config, saved = _poll_bot(status, MagicMock())
     cog.bot = bot
@@ -318,24 +339,30 @@ async def test_process_guild_posts_new_entries_oldest_first():
     posted = [c.args[2].entry_id for c in cog._send_entry.call_args_list]
     assert posted == ["n2", "n3", "slug-b"]
     st = saved[42]
-    assert st.last_entry_ids["gw2"] == "n3"
-    assert st.last_entry_ids["gw3"] == "slug-b"
+    # Newly-posted ids appended to each source's seen set (newest last).
+    assert st.seen_entry_ids["gw2"] == ["n1", "n2", "n3"]
+    assert st.seen_entry_ids["gw3"] == ["slug-a", "slug-b"]
 
 
 @pytest.mark.asyncio
-async def test_process_guild_reanchors_when_boundary_scrolled_off():
+async def test_process_guild_reorder_does_not_repost():
+    # Already-seen GW3 slugs reappear reordered with no genuinely-new article:
+    # nothing is posted (the seen-set hardening for finding I1).
     cog = _cog()
-    status = GameNewsStatus(last_entry_ids={"gw3": "slug-gone"})
+    status = GameNewsStatus(seen_entry_ids={"gw3": ["slug-a", "slug-b", "slug-c"]})
     bot, guild, config, saved = _poll_bot(status, MagicMock())
     cog.bot = bot
     cog._send_entry = AsyncMock()
     cog._resolve_channel = AsyncMock(return_value=MagicMock())
 
-    source_entries = {"gw3": [_entry("gw3", "slug-c"), _entry("gw3", "slug-b")]}
+    # Old card "slug-a" pinned to the top; no new article.
+    source_entries = {
+        "gw3": [_entry("gw3", "slug-a"), _entry("gw3", "slug-c"), _entry("gw3", "slug-b")]
+    }
     await cog._process_guild(guild, source_entries)
 
     cog._send_entry.assert_not_called()
-    assert saved[42].last_entry_ids["gw3"] == "slug-c"
+    assert saved == {}  # nothing changed -> no write
 
 
 @pytest.mark.asyncio
