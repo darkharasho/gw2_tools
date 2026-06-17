@@ -282,6 +282,7 @@ class GuildConfig:
     build_channel_id: Optional[int] = None
     arcdps_channel_id: Optional[int] = None
     update_notes_channel_id: Optional[int] = None
+    game_news_channel_id: Optional[int] = None
     audit_channel_id: Optional[int] = None
     audit_gw2_admin_api_key: Optional[str] = None
     audit_gw2_guild_id: Optional[str] = None
@@ -533,6 +534,18 @@ class UpdateNotesStatus:
 
     last_entry_id: Optional[str] = None
     last_entry_published_at: Optional[str] = None
+
+
+@dataclass
+class GameNewsStatus:
+    """Per-source boundaries for the multi-source game news feed.
+
+    Keys are source identifiers ("gw2", "gw3"). Stored independently so one
+    source advancing never disturbs another.
+    """
+
+    last_entry_ids: Dict[str, str] = field(default_factory=dict)
+    last_published_at: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -2073,6 +2086,20 @@ class StorageManager:
 
     def save_update_notes_status(self, guild_id: int, status: UpdateNotesStatus) -> None:
         path = self._guild_path(guild_id) / "update_notes.json"
+        self._write_json(path, asdict(status))
+
+    def get_game_news_status(self, guild_id: int) -> Optional[GameNewsStatus]:
+        path = self._guild_path(guild_id) / "game_news.json"
+        payload = self._read_json(path, None)
+        if not payload:
+            return None
+        return GameNewsStatus(
+            last_entry_ids=dict(payload.get("last_entry_ids", {})),
+            last_published_at=dict(payload.get("last_published_at", {})),
+        )
+
+    def save_game_news_status(self, guild_id: int, status: GameNewsStatus) -> None:
+        path = self._guild_path(guild_id) / "game_news.json"
         self._write_json(path, asdict(status))
 
     # ------------------------------------------------------------------
