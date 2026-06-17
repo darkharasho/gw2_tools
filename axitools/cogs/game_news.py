@@ -138,6 +138,55 @@ class GameNewsCog(commands.Cog):
             return value
         return value[: limit - 1].rstrip() + "…"
 
+    def _parse_gw3_html(self, html: str) -> List[GameNewsEntry]:
+        soup = BeautifulSoup(html, "html.parser")
+        entries: List[GameNewsEntry] = []
+        for card in soup.select("article.news-article"):
+            try:
+                entry = self._parse_gw3_card(card)
+            except Exception:  # pragma: no cover - defensive per-card guard
+                LOGGER.debug("Failed to parse a GW3 news card", exc_info=True)
+                continue
+            if entry:
+                entries.append(entry)
+        return entries
+
+    def _parse_gw3_card(self, card) -> Optional[GameNewsEntry]:
+        slug: Optional[str] = None
+        card_id = card.get("id") or ""
+        if card_id.startswith("article-"):
+            slug = card_id[len("article-"):].strip()
+
+        anchor = card.find_parent("a")
+        href = anchor.get("href") if anchor else None
+        if not slug and href:
+            slug = href.rstrip("/").split("/")[-1].strip()
+        if not slug:
+            return None
+
+        heading = card.select_one("h2.title") or card.find("h2")
+        title = heading.get_text(strip=True) if heading else ""
+        if not title:
+            return None
+
+        if href:
+            url = urljoin(GW3_NEWS_PAGE_URL, href)
+        else:
+            url = f"{GW3_BASE_URL}/en/news/{slug}"
+
+        image = card.find("img")
+        image_url = image.get("src") if image and image.get("src") else None
+
+        return GameNewsEntry(
+            source_key="gw3",
+            entry_id=slug,
+            title=title,
+            url=url,
+            image_url=image_url,
+            published_at=None,
+            summary=None,
+        )
+
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poll_news(self) -> None:  # pragma: no cover - tested via unit tests
         pass

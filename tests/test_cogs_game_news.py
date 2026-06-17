@@ -73,3 +73,51 @@ def test_resolve_timestamp_fallback_for_gw2():
     new, found = cog._resolve_new_entries(GW2_PAGE, "missing-id", "2026-06-05T16:00:00+00:00")
     assert found is True
     assert [e.entry_id for e in new] == ["n3"]
+
+
+from pathlib import Path
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_parse_gw3_html():
+    cog = _cog()
+    html = (FIXTURES / "gw3_news.html").read_text(encoding="utf-8")
+    entries = cog._parse_gw3_html(html)
+    assert entries, "expected at least one GW3 article"
+    first = entries[0]
+    assert first.source_key == "gw3"
+    assert first.entry_id and "/" not in first.entry_id  # a slug, not a path
+    assert first.title
+    assert first.url.startswith("https://www.guildwars3.com/en/news/")
+    assert first.published_at is None
+    assert first.summary is None
+
+
+def test_parse_gw3_ignores_svelte_hash():
+    # Hash suffix differs from capture time; parser must still find the card.
+    cog = _cog()
+    html = (
+        '<a href="../../en/news/some-post">'
+        '<article class="news-article svelte-DIFFERENT" id="article-some-post">'
+        '<img src="https://cdn/x.jpg"/><h2 class="title">Some Post</h2>'
+        "</article></a>"
+    )
+    entries = cog._parse_gw3_html(html)
+    assert len(entries) == 1
+    e = entries[0]
+    assert e.entry_id == "some-post"
+    assert e.title == "Some Post"
+    assert e.url == "https://www.guildwars3.com/en/news/some-post"
+    assert e.image_url == "https://cdn/x.jpg"
+
+
+def test_parse_gw3_skips_cards_without_slug_or_title():
+    cog = _cog()
+    html = (
+        '<article class="news-article"><h2 class="title">No Id No Anchor</h2></article>'
+        '<a href="/en/news/has-title"><article class="news-article" id="article-has-title">'
+        '<h2 class="title">Has Title</h2></article></a>'
+    )
+    entries = cog._parse_gw3_html(html)
+    assert [e.entry_id for e in entries] == ["has-title"]
