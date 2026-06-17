@@ -187,6 +187,60 @@ class GameNewsCog(commands.Cog):
             summary=None,
         )
 
+    def _first_image_from_entry(self, entry) -> Optional[str]:
+        """Pull the first <img src> from the entry's content/summary HTML.
+
+        The GW2 feed embeds images inline in content:encoded (no media tags),
+        so _extract_entry_thumbnail returns None and we fall back to this.
+        """
+        html_candidates: List[str] = []
+        contents = entry.get("content")
+        if isinstance(contents, list):
+            for item in contents:
+                if isinstance(item, dict) and item.get("value"):
+                    html_candidates.append(str(item["value"]))
+        summary = entry.get("summary") or entry.get("description")
+        if summary:
+            html_candidates.append(str(summary))
+
+        for html in html_candidates:
+            soup = BeautifulSoup(html, "html.parser")
+            img = soup.find("img")
+            src = img.get("src") if img else None
+            if not src:
+                continue
+            if src.startswith("//"):
+                src = "https:" + src
+            if src.startswith("http"):
+                return src
+        return None
+
+    def _parse_gw2_feed(self, raw: str) -> List[GameNewsEntry]:
+        parsed = feedparser.parse(raw)
+        entries: List[GameNewsEntry] = []
+        for entry in parsed.entries:
+            entry_id = _entry_identifier(entry)
+            link = entry.get("link")
+            if not entry_id or not link:
+                continue
+            title = entry.get("title") or "Guild Wars 2 News"
+            published = _convert_struct_time(entry.get("published_parsed"))
+            published_at = published.isoformat() if published else None
+            summary = _extract_entry_description(entry)
+            image = _extract_entry_thumbnail(entry) or self._first_image_from_entry(entry)
+            entries.append(
+                GameNewsEntry(
+                    source_key="gw2",
+                    entry_id=entry_id,
+                    title=str(title),
+                    url=str(link),
+                    image_url=image,
+                    published_at=published_at,
+                    summary=summary,
+                )
+            )
+        return entries
+
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poll_news(self) -> None:  # pragma: no cover - tested via unit tests
         pass

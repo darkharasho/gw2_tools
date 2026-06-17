@@ -121,3 +121,34 @@ def test_parse_gw3_skips_cards_without_slug_or_title():
     )
     entries = cog._parse_gw3_html(html)
     assert [e.entry_id for e in entries] == ["has-title"]
+
+
+def test_parse_gw2_feed():
+    cog = _cog()
+    raw = (FIXTURES / "gw2_feed.xml").read_text(encoding="utf-8")
+    entries = cog._parse_gw2_feed(raw)
+    assert entries, "expected GW2 feed items"
+    first = entries[0]
+    assert first.source_key == "gw2"
+    assert first.entry_id
+    assert first.url.startswith("https://www.guildwars2.com/")
+    assert first.title
+    # GW2 feed items carry pubDate -> ISO timestamp.
+    assert first.published_at and first.published_at.endswith("+00:00")
+
+
+def test_first_image_from_entry_reads_content_html():
+    cog = _cog()
+
+    class _E(dict):
+        pass
+
+    entry = _E()
+    entry["content"] = [{"value": '<p>hi</p><img src="//cdn/x.jpg"><img src="y.jpg">'}]
+    assert cog._first_image_from_entry(entry) == "https://cdn/x.jpg"
+
+
+def test_first_image_from_entry_none_when_no_img():
+    cog = _cog()
+    entry = {"summary": "<p>no images here</p>"}
+    assert cog._first_image_from_entry(entry) is None
