@@ -447,11 +447,12 @@ git commit -m "feat(game-news): cog scaffold, entry model, source registry, reso
 
 Run:
 ```bash
+mkdir -p tests/fixtures
 curl -sL -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36" \
   https://www.guildwars3.com/en/news/ -o tests/fixtures/gw3_news.html
-grep -c 'article class="news-article' tests/fixtures/gw3_news.html
+grep -o 'news-article' tests/fixtures/gw3_news.html | wc -l
 ```
-Expected: at least `1`. If `0`, the markup changed — inspect and update the selector in Step 3 before continuing.
+Expected: a positive count (the page minifies markup onto wrapped lines, so use `grep -o ... | wc -l`, NOT line-based `grep -c`). If `0`, the markup changed — inspect and update the selector in Step 3 before continuing.
 
 - [ ] **Step 2: Write the failing test**
 
