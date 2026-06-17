@@ -275,9 +275,199 @@ class GameNewsCog(commands.Cog):
         else:
             await channel.send(embed=embed)
 
+    async def _fetch_url(self, url: str, retries: int = 3) -> Optional[str]:
+        last_error: Optional[BaseException] = None
+        for attempt in range(retries):
+            try:
+                response = await asyncio.to_thread(self._session.get, url, timeout=30)
+                response.raise_for_status()
+                response.encoding = response.encoding or "utf-8"
+                return response.text
+            except requests.RequestException as error:
+                last_error = error
+                LOGGER.warning(
+                    "Failed to fetch %s (attempt %s/%s)", url, attempt + 1, retries,
+                    exc_info=True,
+                )
+                if attempt + 1 < retries:
+                    await asyncio.sleep(min(5, 2 ** attempt))
+        if last_error is not None:
+            LOGGER.warning("Giving up on %s after repeated failures", url, exc_info=last_error)
+        return None
+
+    async def _fetch_entries(self, source_key: str) -> List[GameNewsEntry]:
+        if source_key == "gw2":
+            raw = await self._fetch_url(GW2_FEED_URL)
+            return self._parse_gw2_feed(raw) if raw else []
+        if source_key == "gw3":
+            html = await self._fetch_url(GW3_NEWS_PAGE_URL)
+            return self._parse_gw3_html(html) if html else []
+        return []
+
+    async def _resolve_channel(
+        self, guild: discord.Guild, channel_id: int
+    ) -> Optional[discord.TextChannel]:
+        channel = guild.get_channel(channel_id)
+        if isinstance(channel, discord.TextChannel):
+            return channel
+        if channel is not None:
+            return None
+        try:
+            fetched = await self.bot.fetch_channel(channel_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            LOGGER.warning(
+                "Unable to fetch game news channel %s for guild %s", channel_id, guild.id
+            )
+            return None
+        return fetched if isinstance(fetched, discord.TextChannel) else None
+
+    def _seed(self, status: GameNewsStatus, source_key: str, latest: GameNewsEntry) -> None:
+        status.last_entry_ids[source_key] = latest.entry_id
+        if latest.published_at:
+            status.last_published_at[source_key] = latest.published_at
+
+    async def _process_guild(
+        self, guild: discord.Guild, source_entries: Dict[str, List[GameNewsEntry]]
+    ) -> None:
+        config = self.bot.get_config(guild.id)
+        channel_id = config.game_news_channel_id
+        if not channel_id:
+            return
+
+        status = self.bot.storage.get_game_news_status(guild.id) or GameNewsStatus()
+        channel: Optional[discord.TextChannel] = None
+        changed = False
+
+        for source in self.SOURCES:
+            entries = source_entries.get(source.key) or []
+            if not entries:
+                continue
+
+            last_id = status.last_entry_ids.get(source.key)
+            last_pub = status.last_published_at.get(source.key)
+
+            if not last_id:
+                self._seed(status, source.key, entries[0])
+                changed = True
+                continue
+
+            new_entries, boundary_found = self._resolve_new_entries(entries, last_id, last_pub)
+
+            if not boundary_found:
+                self._seed(status, source.key, entries[0])
+                changed = True
+                LOGGER.info(
+                    "Game news boundary for guild %s source %s scrolled off; re-anchored to %s",
+                    guild.id, source.key, entries[0].entry_id,
+                )
+                continue
+
+            if not new_entries:
+                continue
+
+            if channel is None:
+                channel = await self._resolve_channel(guild, channel_id)
+            if not channel:
+                break
+
+            for entry in new_entries:
+                try:
+                    await self._send_entry(channel, source, entry)
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning(
+                        "Failed to post game news in channel %s for guild %s",
+                        channel_id, guild.id,
+                    )
+                    break
+                status.last_entry_ids[source.key] = entry.entry_id
+                if entry.published_at:
+                    status.last_published_at[source.key] = entry.published_at
+                changed = True
+
+        if changed:
+            self.bot.storage.save_game_news_status(guild.id, status)
+
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
-    async def _poll_news(self) -> None:  # pragma: no cover - tested via unit tests
-        pass
+    async def _poll_news(self) -> None:
+        if not self.bot.guilds:
+            return
+        source_entries: Dict[str, List[GameNewsEntry]] = {
+            source.key: await self._fetch_entries(source.key) for source in self.SOURCES
+        }
+        if not any(source_entries.values()):
+            return
+        for guild in self.bot.guilds:
+            await self._process_guild(guild, source_entries)
+
+    @_poll_news.before_loop
+    async def _before_poll_news(self) -> None:  # pragma: no cover - discord.py lifecycle
+        await self.bot.wait_until_ready()
+
+    async def run_force_notification(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message(
+                "This command must be used inside a server.", ephemeral=True
+            )
+            return
+        if not await self.bot.ensure_authorised(interaction):
+            return
+
+        config = self.bot.get_config(interaction.guild.id)
+        channel_id = config.game_news_channel_id
+        if not channel_id:
+            await interaction.response.send_message(
+                "Game news notifications are disabled for this server.", ephemeral=True
+            )
+            return
+
+        channel = await self._resolve_channel(interaction.guild, channel_id)
+        if not channel:
+            await interaction.response.send_message(
+                "Unable to locate the configured game news channel.", ephemeral=True
+            )
+            return
+
+        posted = 0
+        status = self.bot.storage.get_game_news_status(interaction.guild.id) or GameNewsStatus()
+        for source in self.SOURCES:
+            entries = await self._fetch_entries(source.key)
+            if not entries:
+                continue
+            entry = entries[0]
+            await self._send_entry(channel, source, entry)
+            self._seed(status, source.key, entry)
+            posted += 1
+        self.bot.storage.save_game_news_status(interaction.guild.id, status)
+
+        if posted:
+            await interaction.response.send_message(
+                f"Posted the latest game news ({posted} source(s)) in {channel.mention}.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "Unable to fetch any game news right now.", ephemeral=True
+            )
+
+    def get_config_status(self, guild_id: int) -> ConfigStatus:
+        config = self.bot.get_config(guild_id)
+        if config.game_news_channel_id:
+            field = StatusField(
+                label="Game News Channel",
+                value=f"<#{config.game_news_channel_id}>",
+                state="ok",
+            )
+        else:
+            field = StatusField(
+                label="Game News Channel",
+                value="Not configured — use /config setup",
+                state="missing",
+            )
+        return ConfigStatus(
+            title="Game News (GW2 + GW3)",
+            fields=[field],
+            setup_command="/config setup",
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:

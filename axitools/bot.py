@@ -49,6 +49,7 @@ class AxiToolsBot(commands.Bot):
         await self.load_extension("axitools.cogs.builds")
         await self.load_extension("axitools.cogs.arcdps")
         await self.load_extension("axitools.cogs.update_notes")
+        await self.load_extension("axitools.cogs.game_news")
         await self.load_extension("axitools.cogs.rss")
         await self.load_extension("axitools.cogs.comps")
         await self.load_extension("axitools.cogs.wvw_alliance")

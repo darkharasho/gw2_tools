@@ -5,6 +5,7 @@ from axitools.cogs.game_news import (
     GameNewsEntry,
     NewsSource,
 )
+from axitools.storage import GameNewsStatus
 
 
 def _cog() -> GameNewsCog:
@@ -248,3 +249,106 @@ async def test_send_entry_without_logo_omits_file():
         await cog._send_entry(channel, src, entry)
     _, kwargs = channel.send.call_args
     assert "embed" in kwargs and "file" not in kwargs
+
+
+def _poll_bot(status, channel):
+    bot = MagicMock()
+    guild = MagicMock()
+    guild.id = 42
+    bot.guilds = [guild]
+    config = MagicMock()
+    config.game_news_channel_id = 999
+    bot.get_config.return_value = config
+    bot.storage.get_game_news_status.return_value = status
+    saved = {}
+    bot.storage.save_game_news_status.side_effect = lambda gid, st: saved.update({gid: st})
+    return bot, guild, config, saved
+
+
+@pytest.mark.asyncio
+async def test_process_guild_first_run_seeds_silently():
+    cog = _cog()
+    bot, guild, config, saved = _poll_bot(None, MagicMock())
+    cog.bot = bot
+    cog._send_entry = AsyncMock()
+    cog._resolve_channel = AsyncMock(return_value=MagicMock())
+
+    source_entries = {
+        "gw2": [_entry("gw2", "n2", "2026-06-06T16:00:00+00:00")],
+        "gw3": [_entry("gw3", "slug-b")],
+    }
+    await cog._process_guild(guild, source_entries)
+
+    cog._send_entry.assert_not_called()
+    st = saved[42]
+    assert st.last_entry_ids == {"gw2": "n2", "gw3": "slug-b"}
+
+
+@pytest.mark.asyncio
+async def test_process_guild_posts_new_entries_oldest_first():
+    cog = _cog()
+    status = GameNewsStatus(
+        last_entry_ids={"gw2": "n1", "gw3": "slug-a"},
+        last_published_at={"gw2": "2026-06-01T16:00:00+00:00"},
+    )
+    bot, guild, config, saved = _poll_bot(status, MagicMock())
+    cog.bot = bot
+    cog._send_entry = AsyncMock()
+    channel = MagicMock()
+    cog._resolve_channel = AsyncMock(return_value=channel)
+
+    source_entries = {
+        "gw2": [
+            _entry("gw2", "n3", "2026-06-06T16:00:00+00:00"),
+            _entry("gw2", "n2", "2026-06-05T16:00:00+00:00"),
+            _entry("gw2", "n1", "2026-06-01T16:00:00+00:00"),
+        ],
+        "gw3": [_entry("gw3", "slug-b"), _entry("gw3", "slug-a")],
+    }
+    await cog._process_guild(guild, source_entries)
+
+    posted = [c.args[2].entry_id for c in cog._send_entry.call_args_list]
+    assert posted == ["n2", "n3", "slug-b"]
+    st = saved[42]
+    assert st.last_entry_ids["gw2"] == "n3"
+    assert st.last_entry_ids["gw3"] == "slug-b"
+
+
+@pytest.mark.asyncio
+async def test_process_guild_reanchors_when_boundary_scrolled_off():
+    cog = _cog()
+    status = GameNewsStatus(last_entry_ids={"gw3": "slug-gone"})
+    bot, guild, config, saved = _poll_bot(status, MagicMock())
+    cog.bot = bot
+    cog._send_entry = AsyncMock()
+    cog._resolve_channel = AsyncMock(return_value=MagicMock())
+
+    source_entries = {"gw3": [_entry("gw3", "slug-c"), _entry("gw3", "slug-b")]}
+    await cog._process_guild(guild, source_entries)
+
+    cog._send_entry.assert_not_called()
+    assert saved[42].last_entry_ids["gw3"] == "slug-c"
+
+
+@pytest.mark.asyncio
+async def test_process_guild_skips_when_no_channel_configured():
+    cog = _cog()
+    bot, guild, config, saved = _poll_bot(None, MagicMock())
+    config.game_news_channel_id = None
+    cog.bot = bot
+    cog._send_entry = AsyncMock()
+    await cog._process_guild(guild, {"gw2": [_entry("gw2", "n", "2026-06-06T16:00:00+00:00")]})
+    cog._send_entry.assert_not_called()
+    assert saved == {}
+
+
+def test_get_config_status_configured():
+    cog = _cog()
+    bot = MagicMock()
+    config = MagicMock()
+    config.game_news_channel_id = 555
+    bot.get_config.return_value = config
+    cog.bot = bot
+    status = cog.get_config_status(42)
+    assert status.fields[0].state == "ok"
+    assert "555" in status.fields[0].value
