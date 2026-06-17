@@ -74,8 +74,8 @@ New cog `axitools/cogs/game_news.py`, modeled on `update_notes.py`:
 - Single per-guild channel `game_news_channel_id`; feed is on when set.
 - `get_config_status(guild_id)` implemented and registered for the config
   status display (parallel to `UpdateNotesCog`).
-- Optional `/dev gamenewstest` dev command (force-post latest per source,
-  non-prod) parallel to the existing update-notes dev test.
+- `/dev gamenewstest` dev command (force-post latest per source, non-prod)
+  parallel to the existing update-notes dev test. **Included.**
 
 ### Source adapters
 
@@ -232,14 +232,13 @@ The poll loop and `/dev gamenewstest` share `_send_entry`.
 Run with the repo's existing pytest suite; follow `tests/test_cogs_rss.py` and
 `tests/test_cogs_update_notes.py` for structure.
 
-## Open Decisions (carry into the plan)
+## Resolved Decisions
 
 1. **Helper reuse:** import the module-level helpers directly from
-   `axitools.cogs.rss`, or extract the shared ones (`_entry_identifier`,
-   `_resolve_new_entries`, `_extract_entry_*`, `_convert_struct_time`) into a
-   neutral `axitools/news_sources.py` that both cogs import. Lean toward direct
-   import first; extract only if it reads cleanly.
-2. **Include `/dev gamenewstest`?** Marked optional.
+   `axitools.cogs.rss` (`_entry_identifier`, `_extract_entry_*`,
+   `_convert_struct_time`). Only extract into a neutral module if the import
+   reads poorly during implementation.
+2. **`/dev gamenewstest`:** included.
 
 ## Files Touched
 
