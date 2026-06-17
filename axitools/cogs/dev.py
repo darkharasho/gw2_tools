@@ -33,6 +33,14 @@ class DevCog(commands.GroupCog, name="dev", group_extras={"category": "Dev"}):
         await cog.run_force_notification(interaction)
 
     @app_commands.command(
+        name="gamenewstest",
+        description="Post the latest GW2 + GW3 news to the configured channel.",
+    )
+    async def gamenewstest(self, interaction: discord.Interaction) -> None:
+        cog = self.bot.get_cog("GameNewsCog")
+        await cog.run_force_notification(interaction)
+
+    @app_commands.command(
         name="rsstest",
         description="Post the latest entry from a configured RSS feed to its channel.",
     )

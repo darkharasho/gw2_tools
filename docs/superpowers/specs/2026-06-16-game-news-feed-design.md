@@ -164,21 +164,38 @@ Open Decisions):
 4. DOM order (newest-first). Per-card errors are skipped (debug log), never
    aborting the parse.
 
-## Dedup / Boundary Logic (shared)
+## Dedup Logic (shared)
 
-One resolver used by both sources, generalizing the `update_notes` method:
+> **Design update (post final-review, finding I1):** the original single-boundary
+> approach below was replaced with per-source **seen-id sets** before merge. A
+> slug-position boundary re-posts already-seen entries if a dateless source (GW3)
+> reorders its index (e.g. pins an older article above the newest). The seen-set
+> approach dedups by membership instead, which is immune to reorder and makes the
+> "scrolled off" re-anchor a non-event. The current implementation is described
+> first; the superseded design is kept after it for history.
 
-`_resolve_new_entries(entries, last_entry_id, last_published_at) -> (new_oldest_first, boundary_found)`
-- Walk newest-first; stop at the entry whose `entry_id == last_entry_id`
-  (boundary). For sources with timestamps (GW2), also stop when
-  `entry.published_at <= last_published_at` (handles guid churn). GW3 passes
-  `None` timestamps, so only the id branch applies.
+**Current — per-source seen-id sets.** `GameNewsStatus.seen_entry_ids: Dict[str,
+List[str]]` maps each source key to a bounded list (`SEEN_IDS_LIMIT = 200`,
+oldest-first, newest-last) of already-posted entry ids.
+
+`_select_new_entries(entries, seen_ids) -> new_oldest_first`
+- An entry is new iff `entry.entry_id not in set(seen_ids)`. Returns the unseen
+  entries oldest-first (entries arrive newest-first, so reversed).
 - Per source, per guild:
-  - **No status for this source:** seed silently to newest entry, post nothing.
-  - **Boundary found:** post collected entries oldest-first; advance
-    `last_entry_ids[key]` / `last_published_at[key]` after each successful send.
-  - **Boundary not found** (recorded id scrolled off): re-anchor silently to
-    newest, post nothing (spam prevention). Log at info.
+  - **Source key absent from status:** record the whole current backlog as seen
+    (`_mark_all_seen`), post nothing — silent first-run seed.
+  - **Otherwise:** post each unseen entry oldest-first; `_remember` its id
+    (append, trim to `SEEN_IDS_LIMIT`) after each successful send. On send
+    failure, break without remembering — it retries next cycle.
+- Identical for GW2 and GW3; timestamps are used only for the embed, not dedup.
+  The bound (200) far exceeds any source index, so trimming never drops a still-
+  live id.
+
+**Superseded — single boundary (`_resolve_new_entries`).** Walked newest-first,
+stopping at `entry_id == last_entry_id`; for GW2 also stopped at
+`published_at <= last_published_at`. Seeded/re-anchored to the newest entry when
+the boundary was absent or scrolled off. Replaced because the id-only path (GW3)
+re-posts on index reorder.
 
 ## Discord Embed
 
