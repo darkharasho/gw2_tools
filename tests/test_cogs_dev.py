@@ -49,4 +49,9 @@ async def test_dev_rsstest_delegates():
 def test_dev_command_surface():
     cog = DevCog(MagicMock())
     qualified_names = {cmd.qualified_name for cmd in cog.walk_app_commands()}
-    assert qualified_names == {"dev arcdps", "dev updatenotes", "dev rsstest"}
+    assert qualified_names == {
+        "dev arcdps",
+        "dev updatenotes",
+        "dev rsstest",
+        "dev gamenewstest",
+    }
