@@ -116,6 +116,48 @@ class UpdateNotesChannelSelect(discord.ui.ChannelSelect):
         await interaction.response.send_message(message, ephemeral=True)
 
 
+class GameNewsChannelSelect(discord.ui.ChannelSelect):
+    def __init__(
+        self, view: "discord.ui.View", default_channel: Optional[discord.abc.GuildChannel]
+    ) -> None:
+        super().__init__(
+            placeholder="Select the channel for GW2 + GW3 news",
+            channel_types=(discord.ChannelType.text, discord.ChannelType.news),
+            min_values=0,
+            max_values=1,
+            default_values=[default_channel] if default_channel else None,
+        )
+        self.config_view = view
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values:
+            channel = self.values[0]
+            self.config_view.config.game_news_channel_id = channel.id
+            message = f"Game news channel set to {channel.mention}."
+        else:
+            self.config_view.config.game_news_channel_id = None
+            message = "Game news notifications disabled."
+        self.config_view.persist()
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class MoreChannelsView(discord.ui.View):
+    """Secondary config page for channels that overflow the primary view's
+    5-action-row limit."""
+
+    def __init__(
+        self,
+        parent_view: "ConfigView",
+        default_channel: Optional[discord.abc.GuildChannel],
+    ) -> None:
+        super().__init__(timeout=300)
+        # Reuse the parent's config + persist so edits save to the same place.
+        self.config = parent_view.config
+        self.persist = parent_view.persist
+        self.add_item(GameNewsChannelSelect(self, default_channel))
+        self.add_item(CloseButton())
+
+
 class ResetRolesButton(discord.ui.Button["ConfigView"]):
     def __init__(self) -> None:
         super().__init__(style=discord.ButtonStyle.danger, label="Reset to admins")
@@ -125,6 +167,24 @@ class ResetRolesButton(discord.ui.Button["ConfigView"]):
         self.view.persist()
         await interaction.response.send_message(
             "Moderator roles reset to server administrators only.", ephemeral=True
+        )
+
+
+class MoreChannelsButton(discord.ui.Button["ConfigView"]):
+    def __init__(self) -> None:
+        super().__init__(style=discord.ButtonStyle.secondary, label="More channels…")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        config = self.view.config
+        default_channel = (
+            interaction.guild.get_channel(config.game_news_channel_id)
+            if config.game_news_channel_id
+            else None
+        )
+        await interaction.response.send_message(
+            "Additional channels:",
+            view=MoreChannelsView(self.view, default_channel),
+            ephemeral=True,
         )
 
 
@@ -160,6 +220,7 @@ class ConfigView(discord.ui.View):
         self.add_item(ArcDpsChannelSelect(self, default_arcdps_channel))
         self.add_item(UpdateNotesChannelSelect(self, default_update_notes_channel))
         self.add_item(ResetRolesButton())
+        self.add_item(MoreChannelsButton())
         self.add_item(CloseButton())
 
     def persist(self) -> None:
@@ -288,6 +349,7 @@ class ConfigCog(commands.GroupCog, name="config", group_extras={"category": "Ser
             "RssFeedsCog",
             "ArcDpsUpdatesCog",
             "UpdateNotesCog",
+            "GameNewsCog",
             "SelectCog",
             "CompCog",
             "AccountSelfCog",
