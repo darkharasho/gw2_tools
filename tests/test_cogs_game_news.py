@@ -152,3 +152,99 @@ def test_first_image_from_entry_none_when_no_img():
     cog = _cog()
     entry = {"summary": "<p>no images here</p>"}
     assert cog._first_image_from_entry(entry) is None
+
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def _source(key="gw2"):
+    return next(s for s in GameNewsCog.SOURCES if s.key == key)
+
+
+def test_build_embed_gw2_has_description_image_timestamp_footer():
+    cog = _cog()
+    src = _source("gw2")
+    entry = GameNewsEntry(
+        source_key="gw2",
+        entry_id="id1",
+        title="Title",
+        url="https://gw2/news/x",
+        image_url="https://cdn/hero.jpg",
+        published_at="2026-06-06T16:00:00+00:00",
+        summary="Body text",
+    )
+    embed = cog._build_embed(src, entry)
+    assert embed.title == "Title"
+    assert embed.url == "https://gw2/news/x"
+    assert embed.description == "Body text"
+    assert embed.image.url == "https://cdn/hero.jpg"
+    assert embed.footer.text == "Guild Wars 2 – News"
+    assert embed.timestamp is not None
+
+
+def test_build_embed_gw3_no_description_no_timestamp():
+    cog = _cog()
+    src = _source("gw3")
+    entry = GameNewsEntry(
+        source_key="gw3",
+        entry_id="slug",
+        title="Hello",
+        url="https://gw3/news/slug",
+        image_url="https://cdn/hero.jpg",
+    )
+    embed = cog._build_embed(src, entry)
+    assert embed.description in (None, "")
+    assert embed.timestamp is None
+    assert embed.image.url == "https://cdn/hero.jpg"
+    assert embed.footer.text == "Guild Wars 3 – News"
+
+
+def test_build_file_present_sets_thumbnail():
+    cog = _cog()
+    src = _source("gw2")
+    with patch("axitools.cogs.game_news.Path.exists", return_value=True), \
+         patch("axitools.cogs.game_news.discord.File") as mock_file:
+        file = cog._build_file(src)
+    assert file is not None
+    # Embed thumbnail references the attachment by filename.
+    entry = GameNewsEntry(source_key="gw2", entry_id="i", title="t", url="https://u")
+    with patch("axitools.cogs.game_news.Path.exists", return_value=True):
+        embed = cog._build_embed(src, entry)
+    assert embed.thumbnail.url == "attachment://gw2_logo.png"
+
+
+def test_build_file_absent_returns_none_and_no_thumbnail():
+    cog = _cog()
+    src = _source("gw2")
+    entry = GameNewsEntry(source_key="gw2", entry_id="i", title="t", url="https://u")
+    with patch("axitools.cogs.game_news.Path.exists", return_value=False):
+        assert cog._build_file(src) is None
+        embed = cog._build_embed(src, entry)
+    assert embed.thumbnail.url is None
+
+
+@pytest.mark.asyncio
+async def test_send_entry_with_logo_sends_file():
+    cog = _cog()
+    src = _source("gw2")
+    entry = GameNewsEntry(source_key="gw2", entry_id="i", title="t", url="https://u")
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    with patch("axitools.cogs.game_news.Path.exists", return_value=True), \
+         patch("axitools.cogs.game_news.discord.File") as mock_file:
+        await cog._send_entry(channel, src, entry)
+    _, kwargs = channel.send.call_args
+    assert "embed" in kwargs and kwargs.get("file") is not None
+
+
+@pytest.mark.asyncio
+async def test_send_entry_without_logo_omits_file():
+    cog = _cog()
+    src = _source("gw3")
+    entry = GameNewsEntry(source_key="gw3", entry_id="s", title="t", url="https://u")
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    with patch("axitools.cogs.game_news.Path.exists", return_value=False):
+        await cog._send_entry(channel, src, entry)
+    _, kwargs = channel.send.call_args
+    assert "embed" in kwargs and "file" not in kwargs

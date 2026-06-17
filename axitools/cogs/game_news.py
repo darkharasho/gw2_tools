@@ -241,6 +241,40 @@ class GameNewsCog(commands.Cog):
             )
         return entries
 
+    def _build_embed(self, source: NewsSource, entry: GameNewsEntry) -> discord.Embed:
+        embed = discord.Embed(
+            title=self._truncate(entry.title, 256),
+            url=entry.url,
+            color=BRAND_COLOUR,
+        )
+        if entry.summary:
+            embed.description = self._truncate(entry.summary, 4000)
+        if entry.image_url:
+            embed.set_image(url=entry.image_url)
+        timestamp = self._parse_timestamp(entry.published_at)
+        if timestamp:
+            embed.timestamp = timestamp
+        if (ASSETS_DIR / source.logo_asset).exists():
+            embed.set_thumbnail(url=f"attachment://{source.logo_asset}")
+        embed.set_footer(text=source.label)
+        return embed
+
+    def _build_file(self, source: NewsSource) -> Optional[discord.File]:
+        path = ASSETS_DIR / source.logo_asset
+        if not path.exists():
+            return None
+        return discord.File(str(path), filename=source.logo_asset)
+
+    async def _send_entry(
+        self, channel: discord.abc.Messageable, source: NewsSource, entry: GameNewsEntry
+    ) -> None:
+        embed = self._build_embed(source, entry)
+        file = self._build_file(source)
+        if file is not None:
+            await channel.send(embed=embed, file=file)
+        else:
+            await channel.send(embed=embed)
+
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poll_news(self) -> None:  # pragma: no cover - tested via unit tests
         pass
