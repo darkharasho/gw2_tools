@@ -155,6 +155,14 @@ def test_first_image_from_entry_none_when_no_img():
     assert cog._first_image_from_entry(entry) is None
 
 
+def test_first_image_skips_leading_img_without_src():
+    # A leading <img> with no usable src must not shadow a later valid one
+    # in the same HTML block.
+    cog = _cog()
+    entry = {"summary": '<img alt="spacer"><img src="//cdn/real.jpg">'}
+    assert cog._first_image_from_entry(entry) == "https://cdn/real.jpg"
+
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 

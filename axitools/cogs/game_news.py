@@ -205,14 +205,14 @@ class GameNewsCog(commands.Cog):
 
         for html in html_candidates:
             soup = BeautifulSoup(html, "html.parser")
-            img = soup.find("img")
-            src = img.get("src") if img else None
-            if not src:
-                continue
-            if src.startswith("//"):
-                src = "https:" + src
-            if src.startswith("http"):
-                return src
+            for img in soup.find_all("img"):
+                src = img.get("src")
+                if not src:
+                    continue
+                if src.startswith("//"):
+                    src = "https:" + src
+                if src.startswith("http"):
+                    return src
         return None
 
     def _parse_gw2_feed(self, raw: str) -> List[GameNewsEntry]:
