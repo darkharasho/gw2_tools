@@ -437,9 +437,8 @@ class GameNewsCog(commands.Cog):
             await self._send_entry(channel, source, entry)
             self._seed(status, source.key, entry)
             posted += 1
-        self.bot.storage.save_game_news_status(interaction.guild.id, status)
-
         if posted:
+            self.bot.storage.save_game_news_status(interaction.guild.id, status)
             await interaction.response.send_message(
                 f"Posted the latest game news ({posted} source(s)) in {channel.mention}.",
                 ephemeral=True,
