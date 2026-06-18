@@ -396,53 +396,6 @@ class GameNewsCog(commands.Cog):
     async def _before_poll_news(self) -> None:  # pragma: no cover - discord.py lifecycle
         await self.bot.wait_until_ready()
 
-    async def run_force_notification(self, interaction: discord.Interaction) -> None:
-        if not interaction.guild:
-            await interaction.response.send_message(
-                "This command must be used inside a server.", ephemeral=True
-            )
-            return
-        if not await self.bot.ensure_authorised(interaction):
-            return
-
-        config = self.bot.get_config(interaction.guild.id)
-        channel_id = config.game_news_channel_id
-        if not channel_id:
-            await interaction.response.send_message(
-                "Game news notifications are disabled for this server.", ephemeral=True
-            )
-            return
-
-        channel = await self._resolve_channel(interaction.guild, channel_id)
-        if not channel:
-            await interaction.response.send_message(
-                "Unable to locate the configured game news channel.", ephemeral=True
-            )
-            return
-
-        posted = 0
-        status = self.bot.storage.get_game_news_status(interaction.guild.id) or GameNewsStatus()
-        for source in self.SOURCES:
-            entries = await self._fetch_entries(source.key)
-            if not entries:
-                continue
-            entry = entries[0]
-            await self._send_entry(channel, source, entry)
-            # Remember the whole current backlog so the poll loop neither
-            # re-posts this entry nor floods with the rest of the index.
-            self._mark_all_seen(status, source.key, entries)
-            posted += 1
-        if posted:
-            self.bot.storage.save_game_news_status(interaction.guild.id, status)
-            await interaction.response.send_message(
-                f"Posted the latest game news ({posted} source(s)) in {channel.mention}.",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                "Unable to fetch any game news right now.", ephemeral=True
-            )
-
     def get_config_status(self, guild_id: int) -> ConfigStatus:
         config = self.bot.get_config(guild_id)
         if config.game_news_channel_id:

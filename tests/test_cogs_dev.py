@@ -53,5 +53,4 @@ def test_dev_command_surface():
         "dev arcdps",
         "dev updatenotes",
         "dev rsstest",
-        "dev gamenewstest",
     }
