@@ -74,6 +74,14 @@ def _coerce(action: str, name: str, expected: str, value):
     elif expected == "array":
         if isinstance(value, list):
             return [_coerce(action, name, "integer", item) for item in value]
+    elif expected == "tag_array":
+        # A list whose items are tag names (string) or tag ids (integer); resolved
+        # against the forum's available tags later. bool is an int subclass — reject.
+        if isinstance(value, list) and all(
+            isinstance(item, str) or (isinstance(item, int) and not isinstance(item, bool))
+            for item in value
+        ):
+            return value
     raise ValueError(f"invalid value for {action} parameter '{name}': expected {expected}")
 
 
@@ -411,6 +419,56 @@ async def _exec_event_create(bot, guild, p: dict) -> dict:
     return {"id": _sid(event.id), "name": event.name}
 
 
+def _resolve_forum_tags(parent, items: list):
+    """Map tag names/ids to the forum's ForumTag objects, or raise with the list
+    of valid tags. Tags are matched by id (int) or name (string, case-insensitive)."""
+    available = list(getattr(parent, "available_tags", []) or [])
+    by_id = {t.id: t for t in available}
+    by_name = {t.name.lower(): t for t in available}
+    resolved = []
+    for item in items:
+        tag = by_id.get(item) if isinstance(item, int) else by_name.get(str(item).lower())
+        if tag is None:
+            names = ", ".join(t.name for t in available) or "(this forum has no tags configured)"
+            raise ValueError(f"forum tag {item!r} not found. Available tags: {names}")
+        resolved.append(tag)
+    return resolved
+
+
+async def _exec_thread_update(bot, guild, p: dict) -> dict:
+    thread = resolve_channel(guild, p["thread_id"])
+    if "thread" not in str(getattr(thread, "type", "")):
+        raise ValueError(f"channel {p['thread_id']} is not a thread / forum post")
+    kwargs: dict = {}
+    if "name" in p:
+        kwargs["name"] = p["name"]
+    if "pinned" in p:
+        kwargs["pinned"] = p["pinned"]
+    if "archived" in p:
+        kwargs["archived"] = p["archived"]
+    if "locked" in p:
+        kwargs["locked"] = p["locked"]
+    if "slowmode_seconds" in p:
+        kwargs["slowmode_delay"] = p["slowmode_seconds"]
+    if "applied_tags" in p:
+        parent = getattr(thread, "parent", None)
+        if parent is None or str(getattr(parent, "type", "")) != "forum":
+            raise ValueError(
+                "applied_tags can only be set on a forum post (a thread inside a forum channel)"
+            )
+        kwargs["applied_tags"] = _resolve_forum_tags(parent, p["applied_tags"])
+    if not kwargs:
+        raise ValueError("thread_update requires at least one field to change")
+    await thread.edit(reason=audit_reason(None, "thread_update"), **kwargs)
+    result = {"id": _sid(thread.id), "name": kwargs.get("name", thread.name)}
+    for key in ("pinned", "archived", "locked"):
+        if key in kwargs:
+            result[key] = kwargs[key]
+    if "applied_tags" in kwargs:
+        result["applied_tags"] = [t.name for t in kwargs["applied_tags"]]
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -567,6 +625,19 @@ ACTIONS: dict[str, dict] = {
             "message_id": _param("integer", False, "Start the thread from this message"),
         },
         "executor": _exec_thread_create,
+    },
+    "thread_update": {
+        "destructive": False,
+        "params": {
+            "thread_id": _param("integer", True, "Thread or forum post to update"),
+            "name": _param("string", False, "New thread/post title"),
+            "pinned": _param("boolean", False, "Pin (true) or unpin (false) — pins a forum post to the top of its forum"),
+            "applied_tags": _param("tag_array", False, "Forum tag names or ids to set on a forum post, e.g. [\"Active\"] (replaces the post's current tags)"),
+            "archived": _param("boolean", False, "Archive (true) or reopen (false) the thread"),
+            "locked": _param("boolean", False, "Lock (true) or unlock (false) the thread"),
+            "slowmode_seconds": _param("integer", False, "Slowmode delay in seconds"),
+        },
+        "executor": _exec_thread_update,
     },
     "event_create": {
         "destructive": False,

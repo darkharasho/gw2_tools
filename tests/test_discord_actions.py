@@ -89,6 +89,34 @@ class FakeChannel:
         self.calls.append(("delete", reason))
 
 
+class FakeForumTag:
+    def __init__(self, tag_id: int, name: str) -> None:
+        self.id = tag_id
+        self.name = name
+
+
+class FakeForumChannel:
+    def __init__(self, channel_id: int, name: str = "raid-forum", guild=None, tags=()) -> None:
+        self.id = channel_id
+        self.name = name
+        self.guild = guild
+        self.type = "forum"
+        self.available_tags = list(tags)
+
+
+class FakeThread:
+    def __init__(self, thread_id: int, name: str = "raid-plans", guild=None, parent=None) -> None:
+        self.id = thread_id
+        self.name = name
+        self.guild = guild
+        self.type = "public_thread"
+        self.parent = parent
+        self.calls = []
+
+    async def edit(self, **kwargs):
+        self.calls.append(("edit", kwargs))
+
+
 class FakeGuild:
     def __init__(self, guild_id: int = 123, name: str = "Vigil Keep") -> None:
         self.id = guild_id
@@ -174,6 +202,7 @@ EXPECTED_ACTIONS = {
     "message_send": False,
     "message_pin": False,
     "thread_create": False,
+    "thread_update": False,
     "event_create": False,
 }
 
@@ -188,7 +217,7 @@ def test_registry_params_are_json_able_specs():
         assert callable(spec["executor"]), name
         for param_name, meta in spec["params"].items():
             assert set(meta) == {"type", "required", "description"}, (name, param_name)
-            assert meta["type"] in ("string", "integer", "boolean", "array")
+            assert meta["type"] in ("string", "integer", "boolean", "array", "tag_array")
             assert isinstance(meta["required"], bool)
 
 
@@ -585,3 +614,68 @@ async def test_event_create_requires_channel_or_location(guild):
             "name": "Reset bash",
             "start_time": "2026-06-12T18:00:00Z",
         })
+
+
+# ---------------------------------------------------------------------------
+# thread_update (forum post pin + tags)
+# ---------------------------------------------------------------------------
+
+def _forum_with_thread(guild):
+    forum = guild.add_channel(
+        FakeForumChannel(900, guild=guild, tags=[FakeForumTag(1, "Active"), FakeForumTag(2, "Archived")])
+    )
+    thread = guild.add_channel(FakeThread(901, guild=guild, parent=forum))
+    return forum, thread
+
+
+@pytest.mark.asyncio
+async def test_thread_update_pins_a_forum_post(guild):
+    _forum, thread = _forum_with_thread(guild)
+    result = await execute_action(None, guild, "thread_update", {"thread_id": 901, "pinned": True})
+    assert thread.calls[-1][0] == "edit"
+    assert thread.calls[-1][1]["pinned"] is True
+    assert result["pinned"] is True
+
+
+@pytest.mark.asyncio
+async def test_thread_update_applies_tags_by_name(guild):
+    _forum, thread = _forum_with_thread(guild)
+    result = await execute_action(None, guild, "thread_update", {"thread_id": 901, "applied_tags": ["Active"]})
+    assert [t.name for t in thread.calls[-1][1]["applied_tags"]] == ["Active"]
+    assert result["applied_tags"] == ["Active"]
+
+
+@pytest.mark.asyncio
+async def test_thread_update_applies_tags_by_id(guild):
+    _forum, thread = _forum_with_thread(guild)
+    await execute_action(None, guild, "thread_update", {"thread_id": 901, "applied_tags": [2]})
+    assert [t.name for t in thread.calls[-1][1]["applied_tags"]] == ["Archived"]
+
+
+@pytest.mark.asyncio
+async def test_thread_update_unknown_tag_lists_available(guild):
+    _forum_with_thread(guild)
+    with pytest.raises(ValueError, match="not found. Available tags: Active, Archived"):
+        await execute_action(None, guild, "thread_update", {"thread_id": 901, "applied_tags": ["Nope"]})
+
+
+@pytest.mark.asyncio
+async def test_thread_update_tags_require_a_forum_parent(guild):
+    text = guild.add_channel(FakeChannel(950, type="text"))
+    guild.add_channel(FakeThread(951, guild=guild, parent=text))
+    with pytest.raises(ValueError, match="forum post"):
+        await execute_action(None, guild, "thread_update", {"thread_id": 951, "applied_tags": ["Active"]})
+
+
+@pytest.mark.asyncio
+async def test_thread_update_rejects_non_thread(guild):
+    guild.add_channel(FakeChannel(960, type="text"))
+    with pytest.raises(ValueError, match="is not a thread"):
+        await execute_action(None, guild, "thread_update", {"thread_id": 960, "pinned": True})
+
+
+@pytest.mark.asyncio
+async def test_thread_update_requires_a_field(guild):
+    _forum_with_thread(guild)
+    with pytest.raises(ValueError, match="at least one field"):
+        await execute_action(None, guild, "thread_update", {"thread_id": 901})
