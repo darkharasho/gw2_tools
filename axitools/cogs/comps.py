@@ -1978,6 +1978,16 @@ class CompCog(commands.GroupCog, name="comp", group_extras={"category": "Builds 
                     comp_config.channel_id,
                     exc,
                 )
+                if isinstance(exc, discord.HTTPException) and exc.code == 50035:
+                    try:
+                        LOGGER.warning(
+                            "comp 50035 dump: text=%r embed=%r view=%r",
+                            getattr(exc, "text", None),
+                            embed.to_dict(),
+                            view.to_components(),
+                        )
+                    except Exception:  # diagnostics must never raise
+                        LOGGER.exception("comp 50035 diagnostic dump failed")
                 self._record_failed_schedule_post(guild_id, config, schedule)
                 return
             comp_config.message_id = new_message.id
