@@ -1740,6 +1740,16 @@ class CompCog(commands.GroupCog, name="comp", group_extras={"category": "Builds 
             schedule_id=schedule.schedule_id,
         )
 
+    def _record_failed_schedule_post(self, guild_id, config, schedule) -> None:
+        """Mark a scheduled comp post as attempted after a send/edit failure, so a
+        permanently-failing channel (e.g. the bot lost Send/Embed permission) does
+        not re-fire every scheduler tick forever — it waits for the next scheduled
+        occurrence instead. Manual (non-schedule) posts have no loop to break."""
+        if schedule is None:
+            return
+        schedule.last_post_at = datetime.now(timezone.utc).isoformat()
+        self.bot.save_config(guild_id, config)
+
     def _can_use_external_emojis(
         self, guild: discord.Guild, channel: Optional[discord.abc.GuildChannel] = None
     ) -> bool:
@@ -1961,16 +1971,28 @@ class CompCog(commands.GroupCog, name="comp", group_extras={"category": "Builds 
                     if allowed_mentions is not None:
                         kwargs["allowed_mentions"] = allowed_mentions
                 new_message = await channel.send(**kwargs)
-            except (discord.Forbidden, discord.HTTPException):
-                LOGGER.warning("Failed to send composition message in guild %s", guild_id)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                LOGGER.warning(
+                    "Failed to send composition message in guild %s (channel %s): %s",
+                    guild_id,
+                    comp_config.channel_id,
+                    exc,
+                )
+                self._record_failed_schedule_post(guild_id, config, schedule)
                 return
             comp_config.message_id = new_message.id
         else:
             try:
                 await message.edit(embed=embed, view=view)
                 new_message = message
-            except (discord.Forbidden, discord.HTTPException):
-                LOGGER.warning("Failed to update composition message in guild %s", guild_id)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                LOGGER.warning(
+                    "Failed to update composition message in guild %s (channel %s): %s",
+                    guild_id,
+                    comp_config.channel_id,
+                    exc,
+                )
+                self._record_failed_schedule_post(guild_id, config, schedule)
                 return
 
         comp_config.last_post_at = datetime.now(timezone.utc).isoformat()
