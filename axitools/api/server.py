@@ -708,6 +708,16 @@ async def _handle_discord_messages(request: web.Request) -> web.Response:
         channel = discord_actions.resolve_channel(guild, int(target_id))
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=404)
+    # Forum and category channels hold threads / other channels, not messages, so
+    # they have no history() — calling it raises AttributeError and 500s. Return a
+    # clear 400 instead, hinting that a forum's posts are read via thread_id.
+    if not hasattr(channel, "history"):
+        kind = type(channel).__name__
+        hint = " Read a post inside it by passing its thread_id." if "Forum" in kind else ""
+        return web.json_response(
+            {"error": f"channel {target_id} ({kind}) has no messages to read.{hint}"},
+            status=400,
+        )
     messages = [
         {
             "id": _sid(m.id),

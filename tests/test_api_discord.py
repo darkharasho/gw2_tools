@@ -77,6 +77,17 @@ class FakeChannel:
         return FakeMessage(900, FakeMember(1, "axitools"), content)
 
 
+class FakeForumChannel:
+    """A forum channel holds posts (threads), not messages — so, like discord.py's
+    ForumChannel, it deliberately has no history()."""
+
+    def __init__(self, channel_id, name, guild):
+        self.id = channel_id
+        self.name = name
+        self.guild = guild
+        self.type = "forum"
+
+
 class FakeGuild:
     def __init__(self, guild_id, name):
         self.id = guild_id
@@ -104,8 +115,9 @@ def _build_guild_123():
             FakeMessage(100, author, "older"),
         ],
     )
+    forum = FakeForumChannel(12, "raid-forum", guild)
     guild.categories = [category]
-    guild.channels = [category, general]
+    guild.channels = [category, general, forum]
     role = FakeRole(20, "Raider", position=5, members=[author])
     guild.roles = [role]
     author.roles = [role]
@@ -176,11 +188,18 @@ async def test_snapshot_shape(api_client):
     # Snowflake ids (and the 64-bit permissions bitfield) serialize as strings.
     assert body["guild"] == {"id": "123", "name": "Vigil Keep", "member_count": 2}
     assert body["categories"] == [{"id": "10", "name": "Operations", "position": 0}]
-    # Categories are excluded from the flat channel list.
-    assert body["channels"] == [{
-        "id": "11", "name": "general", "type": "text",
-        "category_id": "10", "topic": "Chatter", "position": 1,
-    }]
+    # Categories are excluded from the flat channel list; other channel kinds
+    # (e.g. forums) are included.
+    assert body["channels"] == [
+        {
+            "id": "11", "name": "general", "type": "text",
+            "category_id": "10", "topic": "Chatter", "position": 1,
+        },
+        {
+            "id": "12", "name": "raid-forum", "type": "forum",
+            "category_id": None, "topic": None, "position": 0,
+        },
+    ]
     assert body["roles"] == [{
         "id": "20", "name": "Raider", "color": "#c8423a", "position": 5,
         "hoist": False, "mentionable": True, "permissions": "104320",
@@ -294,6 +313,18 @@ async def test_messages_channel_not_in_guild_404(api_client):
     )
     assert resp.status == 404
     assert "not found in this server" in (await resp.json())["error"]
+
+
+@pytest.mark.asyncio
+async def test_messages_forum_channel_400_not_500(api_client):
+    # A forum channel has no history() — must be a clear 400, not an AttributeError 500.
+    resp = await api_client.get(
+        "/guilds/123/discord/messages?channel_id=12", headers=_auth()
+    )
+    assert resp.status == 400
+    body = await resp.json()
+    assert "has no messages" in body["error"]
+    assert "thread_id" in body["error"]  # forum hint to read a post instead
 
 
 # ---------------------------------------------------------------------------
