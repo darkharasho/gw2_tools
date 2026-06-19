@@ -1839,10 +1839,10 @@ class CompCog(commands.GroupCog, name="comp", group_extras={"category": "Builds 
             guild_emoji = discord.utils.get(guild.emojis, id=entry.emoji_id)
             if guild_emoji:
                 return guild_emoji
-            if allow_external and entry.emoji_id:
-                return discord.PartialEmoji(
-                    name=_emoji_name_for_class(entry.name), id=entry.emoji_id
-                )
+            # Do NOT fall back to a PartialEmoji built from a bare emoji_id: if the
+            # bot can't resolve it to an emoji it actually has access to, that id is
+            # unusable, and Discord rejects the whole message/component with
+            # 50035 "Invalid emoji" (which silently broke scheduled comp posts).
             return None
 
         emoji_name = _emoji_name_for_class(entry.name)
@@ -1978,16 +1978,6 @@ class CompCog(commands.GroupCog, name="comp", group_extras={"category": "Builds 
                     comp_config.channel_id,
                     exc,
                 )
-                if isinstance(exc, discord.HTTPException) and exc.code == 50035:
-                    try:
-                        LOGGER.warning(
-                            "comp 50035 dump: text=%r embed=%r view=%r",
-                            getattr(exc, "text", None),
-                            embed.to_dict(),
-                            view.to_components(),
-                        )
-                    except Exception:  # diagnostics must never raise
-                        LOGGER.exception("comp 50035 diagnostic dump failed")
                 self._record_failed_schedule_post(guild_id, config, schedule)
                 return
             comp_config.message_id = new_message.id
