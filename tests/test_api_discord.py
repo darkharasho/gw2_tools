@@ -86,6 +86,7 @@ class FakeForumChannel:
         self.name = name
         self.guild = guild
         self.type = "forum"
+        self.available_tags = [SimpleNamespace(id=70, name="Active")]
 
 
 class FakeGuild:
@@ -99,6 +100,7 @@ class FakeGuild:
         self.members = []
         self.threads = []
         self.scheduled_events = []
+        self.emojis = []
 
     def get_channel(self, channel_id):
         return next((c for c in self.channels if c.id == channel_id), None)
@@ -123,6 +125,7 @@ def _build_guild_123():
     author.roles = [role]
     guild.members = [author, FakeMember(31, "rytlock")]
     guild.member_count = 2
+    guild.emojis = [SimpleNamespace(id=80, name="luminary", animated=False)]
     guild.threads = [SimpleNamespace(id=40, name="raid-plans", parent_id=11, archived=False)]
     guild.scheduled_events = [SimpleNamespace(
         id=50, name="Reset bash", description=None,
@@ -198,8 +201,10 @@ async def test_snapshot_shape(api_client):
         {
             "id": "12", "name": "raid-forum", "type": "forum",
             "category_id": None, "topic": None, "position": 0,
+            "available_tags": [{"id": "70", "name": "Active"}],
         },
     ]
+    assert body["emojis"] == [{"id": "80", "name": "luminary", "animated": False}]
     assert body["roles"] == [{
         "id": "20", "name": "Raider", "color": "#c8423a", "position": 5,
         "hoist": False, "mentionable": True, "permissions": "104320",

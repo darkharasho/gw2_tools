@@ -69,6 +69,37 @@ class FakeMessage:
     async def pin(self, *, reason=None):
         self.calls.append(("pin", reason))
 
+    async def unpin(self, *, reason=None):
+        self.calls.append(("unpin", reason))
+
+    async def delete(self):
+        self.calls.append(("delete",))
+
+    async def edit(self, **kwargs):
+        self.calls.append(("edit", kwargs))
+
+    async def add_reaction(self, emoji):
+        self.calls.append(("add_reaction", emoji))
+
+    async def remove_reaction(self, emoji, member):
+        self.calls.append(("remove_reaction", emoji, member))
+
+
+class FakeEmoji:
+    def __init__(self, emoji_id: int, name: str, animated: bool = False) -> None:
+        self.id = emoji_id
+        self.name = name
+        self.animated = animated
+        self.calls = []
+
+    async def edit(self, *, name=None, reason=None):
+        self.calls.append(("edit", name, reason))
+        if name:
+            self.name = name
+
+    async def delete(self, *, reason=None):
+        self.calls.append(("delete", reason))
+
 
 class FakeChannel:
     def __init__(self, channel_id: int, name: str = "general", guild=None, type: str = "text") -> None:
@@ -77,6 +108,7 @@ class FakeChannel:
         self.guild = guild
         self.type = type
         self.calls = []
+        self.last_message = None
 
     async def send(self, content):
         self.calls.append(("send", content))
@@ -88,11 +120,24 @@ class FakeChannel:
     async def delete(self, *, reason=None):
         self.calls.append(("delete", reason))
 
+    async def fetch_message(self, message_id):
+        self.last_message = FakeMessage(message_id)
+        return self.last_message
+
 
 class FakeForumTag:
     def __init__(self, tag_id: int, name: str) -> None:
         self.id = tag_id
         self.name = name
+        self.calls = []
+
+    async def edit(self, **kwargs):
+        self.calls.append(("edit", kwargs))
+        if "name" in kwargs:
+            self.name = kwargs["name"]
+
+    async def delete(self, *, reason=None):
+        self.calls.append(("delete", reason))
 
 
 class FakeForumChannel:
@@ -102,6 +147,13 @@ class FakeForumChannel:
         self.guild = guild
         self.type = "forum"
         self.available_tags = list(tags)
+        self.calls = []
+
+    async def create_tag(self, **kwargs):
+        self.calls.append(("create_tag", kwargs))
+        tag = FakeForumTag(7777, kwargs["name"])
+        self.available_tags.append(tag)
+        return tag
 
 
 class FakeThread:
@@ -125,8 +177,18 @@ class FakeGuild:
         self._channels = {}
         self._roles = {}
         self._members = {}
+        self.emojis = []
+        self.me = FakeMember(1, "axitools", guild=self)
 
     # -- registration helpers -------------------------------------------
+    def add_emoji(self, emoji: "FakeEmoji") -> "FakeEmoji":
+        self.emojis.append(emoji)
+        return emoji
+
+    async def create_custom_emoji(self, *, name, image, reason=None):
+        self.calls.append(("create_custom_emoji", name, len(image), reason))
+        return self.add_emoji(FakeEmoji(9999, name))
+
     def add_channel(self, channel: FakeChannel) -> FakeChannel:
         if channel.guild is None:
             channel.guild = self
@@ -203,6 +265,17 @@ EXPECTED_ACTIONS = {
     "message_pin": False,
     "thread_create": False,
     "thread_update": False,
+    "message_unpin": False,
+    "message_delete": True,
+    "message_edit": False,
+    "reaction_add": False,
+    "reaction_remove": False,
+    "forum_tag_create": False,
+    "forum_tag_edit": False,
+    "forum_tag_delete": True,
+    "emoji_create": False,
+    "emoji_edit": False,
+    "emoji_delete": True,
     "event_create": False,
 }
 
@@ -679,3 +752,136 @@ async def test_thread_update_requires_a_field(guild):
     _forum_with_thread(guild)
     with pytest.raises(ValueError, match="at least one field"):
         await execute_action(None, guild, "thread_update", {"thread_id": 901})
+
+
+# ---------------------------------------------------------------------------
+# messages & reactions
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_message_unpin(guild):
+    channel = guild.add_channel(FakeChannel(11))
+    await execute_action(None, guild, "message_unpin", {"channel_id": 11, "message_id": 555})
+    assert channel.last_message.calls[0][0] == "unpin"
+
+
+@pytest.mark.asyncio
+async def test_message_delete(guild):
+    channel = guild.add_channel(FakeChannel(11))
+    result = await execute_action(None, guild, "message_delete", {"channel_id": 11, "message_id": 555})
+    assert ("delete",) in channel.last_message.calls
+    assert result["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_message_edit(guild):
+    channel = guild.add_channel(FakeChannel(11))
+    await execute_action(None, guild, "message_edit", {"channel_id": 11, "message_id": 555, "content": "fixed"})
+    assert channel.last_message.calls[-1] == ("edit", {"content": "fixed"})
+
+
+@pytest.mark.asyncio
+async def test_reaction_add_unicode(guild):
+    channel = guild.add_channel(FakeChannel(11))
+    await execute_action(None, guild, "reaction_add", {"channel_id": 11, "message_id": 555, "emoji": "👍"})
+    assert channel.last_message.calls[-1] == ("add_reaction", "👍")
+
+
+@pytest.mark.asyncio
+async def test_reaction_add_resolves_custom_emoji_id(guild):
+    channel = guild.add_channel(FakeChannel(11))
+    emoji = guild.add_emoji(FakeEmoji(4242, "luminary"))
+    await execute_action(None, guild, "reaction_add", {"channel_id": 11, "message_id": 555, "emoji": "4242"})
+    assert channel.last_message.calls[-1] == ("add_reaction", emoji)
+
+
+@pytest.mark.asyncio
+async def test_reaction_remove_uses_bot_member(guild):
+    channel = guild.add_channel(FakeChannel(11))
+    await execute_action(None, guild, "reaction_remove", {"channel_id": 11, "message_id": 555, "emoji": "👍"})
+    kind, em, member = channel.last_message.calls[-1]
+    assert (kind, em) == ("remove_reaction", "👍")
+    assert member is guild.me
+
+
+# ---------------------------------------------------------------------------
+# forum tag management
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_forum_tag_create(guild):
+    forum = guild.add_channel(FakeForumChannel(900, guild=guild))
+    result = await execute_action(None, guild, "forum_tag_create", {"channel_id": 900, "name": "Active"})
+    assert forum.calls[-1][0] == "create_tag"
+    assert result["name"] == "Active"
+    assert any(t.name == "Active" for t in forum.available_tags)
+
+
+@pytest.mark.asyncio
+async def test_forum_tag_edit_renames(guild):
+    forum = guild.add_channel(FakeForumChannel(900, guild=guild, tags=[FakeForumTag(1, "Old")]))
+    await execute_action(None, guild, "forum_tag_edit", {"channel_id": 900, "tag": "Old", "name": "New"})
+    assert forum.available_tags[0].name == "New"
+
+
+@pytest.mark.asyncio
+async def test_forum_tag_delete(guild):
+    tag = FakeForumTag(1, "Active")
+    guild.add_channel(FakeForumChannel(900, guild=guild, tags=[tag]))
+    result = await execute_action(None, guild, "forum_tag_delete", {"channel_id": 900, "tag": "Active"})
+    assert tag.calls[-1][0] == "delete"
+    assert result["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_forum_tag_on_non_forum_errors(guild):
+    guild.add_channel(FakeChannel(11, type="text"))
+    with pytest.raises(ValueError, match="not a forum channel"):
+        await execute_action(None, guild, "forum_tag_create", {"channel_id": 11, "name": "X"})
+
+
+# ---------------------------------------------------------------------------
+# guild emoji management
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_emoji_create_fetches_and_uploads(guild, monkeypatch):
+    import axitools.api.discord_actions as da
+    async def fake_fetch(url):
+        assert url == "https://x/y.png"
+        return b"\x89PNG" + b"0" * 100
+    monkeypatch.setattr(da, "_fetch_image_bytes", fake_fetch)
+    result = await execute_action(None, guild, "emoji_create", {"name": "luminary", "image_url": "https://x/y.png"})
+    assert result["name"] == "luminary"
+    assert guild.calls[-1][0] == "create_custom_emoji"
+
+
+@pytest.mark.asyncio
+async def test_emoji_create_rejects_oversize(guild, monkeypatch):
+    import axitools.api.discord_actions as da
+    async def fake_fetch(url):
+        return b"0" * (256 * 1024 + 1)
+    monkeypatch.setattr(da, "_fetch_image_bytes", fake_fetch)
+    with pytest.raises(ValueError, match="at most 256 KB"):
+        await execute_action(None, guild, "emoji_create", {"name": "big", "image_url": "https://x/y.png"})
+
+
+@pytest.mark.asyncio
+async def test_emoji_edit_renames(guild):
+    emoji = guild.add_emoji(FakeEmoji(4242, "old"))
+    await execute_action(None, guild, "emoji_edit", {"emoji_id": 4242, "name": "new"})
+    assert emoji.name == "new"
+
+
+@pytest.mark.asyncio
+async def test_emoji_delete(guild):
+    emoji = guild.add_emoji(FakeEmoji(4242, "doomed"))
+    result = await execute_action(None, guild, "emoji_delete", {"emoji_id": 4242})
+    assert emoji.calls[-1][0] == "delete"
+    assert result["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_emoji_unknown_id_errors(guild):
+    with pytest.raises(ValueError, match="emoji 999 not found"):
+        await execute_action(None, guild, "emoji_delete", {"emoji_id": 999})

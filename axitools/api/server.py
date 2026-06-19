@@ -571,7 +571,7 @@ def _resolve_discord_guild(request: web.Request):
 
 
 def _channel_to_json(channel) -> dict:
-    return {
+    data = {
         "id": _sid(channel.id),
         "name": channel.name,
         "type": str(channel.type),
@@ -579,6 +579,12 @@ def _channel_to_json(channel) -> dict:
         "topic": getattr(channel, "topic", None),
         "position": getattr(channel, "position", 0),
     }
+    # Forum channels expose their selectable post tags so callers can apply them
+    # (discord_action thread_update / forum_tag_*) by name without guessing ids.
+    tags = getattr(channel, "available_tags", None)
+    if tags:
+        data["available_tags"] = [{"id": _sid(t.id), "name": t.name} for t in tags]
+    return data
 
 
 async def _handle_discord_snapshot(request: web.Request) -> web.Response:
@@ -633,6 +639,10 @@ async def _handle_discord_snapshot(request: web.Request) -> web.Response:
                 "location": getattr(e, "location", None),
             }
             for e in getattr(guild, "scheduled_events", ())
+        ],
+        "emojis": [
+            {"id": _sid(e.id), "name": e.name, "animated": getattr(e, "animated", False)}
+            for e in getattr(guild, "emojis", ())
         ],
     }
     include = request.query.get("include", "")

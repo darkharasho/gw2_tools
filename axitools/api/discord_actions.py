@@ -18,6 +18,7 @@ import asyncio
 import datetime as dt
 import string
 
+import aiohttp
 import discord
 
 # Maximum timeout Discord allows: 28 days.
@@ -30,6 +31,9 @@ _MAX_DM_CONTENT = 1900
 
 # Maximum recipients for a bulk DM run.
 _MAX_DM_RECIPIENTS = 250
+
+# Discord's hard cap on custom-emoji image size.
+_MAX_EMOJI_BYTES = 256 * 1024
 
 # Politeness pacing between sequential DM sends. discord.py already handles
 # hard rate limits; this just keeps the pattern non-spammy.
@@ -469,6 +473,156 @@ async def _exec_thread_update(bot, guild, p: dict) -> dict:
     return result
 
 
+# -- messages & reactions ----------------------------------------------------
+
+async def _exec_message_unpin(bot, guild, p: dict) -> dict:
+    channel = resolve_channel(guild, p["channel_id"])
+    message = await _resolve_message(channel, p["message_id"])
+    await message.unpin(reason=audit_reason(None, "message_unpin"))
+    return {"id": _sid(message.id), "channel_id": _sid(channel.id), "pinned": False}
+
+
+async def _exec_message_delete(bot, guild, p: dict) -> dict:
+    channel = resolve_channel(guild, p["channel_id"])
+    message = await _resolve_message(channel, p["message_id"])
+    await message.delete()
+    return {"id": _sid(message.id), "channel_id": _sid(channel.id), "deleted": True}
+
+
+async def _exec_message_edit(bot, guild, p: dict) -> dict:
+    channel = resolve_channel(guild, p["channel_id"])
+    message = await _resolve_message(channel, p["message_id"])
+    try:
+        await message.edit(content=p["content"])
+    except discord.Forbidden:
+        raise ValueError("can only edit the bot's own messages") from None
+    return {"id": _sid(message.id), "channel_id": _sid(channel.id), "edited": True}
+
+
+def _reaction_emoji(guild, emoji: str):
+    """A reaction emoji string: unicode, '<:name:id>'/'name:id', or a bare custom
+    emoji id (resolved to the guild's emoji)."""
+    s = str(emoji).strip()
+    if s.isdigit():
+        return _resolve_emoji(guild, int(s))
+    return s
+
+
+async def _exec_reaction_add(bot, guild, p: dict) -> dict:
+    channel = resolve_channel(guild, p["channel_id"])
+    message = await _resolve_message(channel, p["message_id"])
+    await message.add_reaction(_reaction_emoji(guild, p["emoji"]))
+    return {"id": _sid(message.id), "channel_id": _sid(channel.id), "emoji": p["emoji"]}
+
+
+async def _exec_reaction_remove(bot, guild, p: dict) -> dict:
+    channel = resolve_channel(guild, p["channel_id"])
+    message = await _resolve_message(channel, p["message_id"])
+    await message.remove_reaction(_reaction_emoji(guild, p["emoji"]), guild.me)
+    return {"id": _sid(message.id), "channel_id": _sid(channel.id), "emoji": p["emoji"]}
+
+
+# -- forum tag management ----------------------------------------------------
+
+def _resolve_forum(guild, channel_id: int):
+    channel = resolve_channel(guild, channel_id)
+    if str(getattr(channel, "type", "")) != "forum":
+        raise ValueError(f"channel {channel_id} is not a forum channel")
+    return channel
+
+
+def _resolve_forum_tag(forum, tag):
+    available = list(getattr(forum, "available_tags", []) or [])
+    s = str(tag)
+    by_name = {t.name.lower(): t for t in available}
+    if s.lower() in by_name:
+        return by_name[s.lower()]
+    if s.isdigit():
+        for t in available:
+            if t.id == int(s):
+                return t
+    names = ", ".join(t.name for t in available) or "(this forum has no tags configured)"
+    raise ValueError(f"forum tag {tag!r} not found. Available tags: {names}")
+
+
+def _forum_tag_emoji(guild, emoji: str):
+    s = str(emoji).strip()
+    return _resolve_emoji(guild, int(s)) if s.isdigit() else s
+
+
+async def _exec_forum_tag_create(bot, guild, p: dict) -> dict:
+    forum = _resolve_forum(guild, p["channel_id"])
+    kwargs: dict = {"name": p["name"], "reason": audit_reason(None, "forum_tag_create")}
+    if "emoji" in p:
+        kwargs["emoji"] = _forum_tag_emoji(guild, p["emoji"])
+    if "moderated" in p:
+        kwargs["moderated"] = p["moderated"]
+    tag = await forum.create_tag(**kwargs)
+    return {"id": _sid(tag.id), "name": tag.name, "channel_id": _sid(forum.id)}
+
+
+async def _exec_forum_tag_edit(bot, guild, p: dict) -> dict:
+    forum = _resolve_forum(guild, p["channel_id"])
+    tag = _resolve_forum_tag(forum, p["tag"])
+    kwargs: dict = {}
+    if "name" in p:
+        kwargs["name"] = p["name"]
+    if "emoji" in p:
+        kwargs["emoji"] = _forum_tag_emoji(guild, p["emoji"])
+    if "moderated" in p:
+        kwargs["moderated"] = p["moderated"]
+    if not kwargs:
+        raise ValueError("forum_tag_edit requires at least one field to change")
+    await tag.edit(**kwargs)
+    return {"id": _sid(tag.id), "name": kwargs.get("name", tag.name), "channel_id": _sid(forum.id)}
+
+
+async def _exec_forum_tag_delete(bot, guild, p: dict) -> dict:
+    forum = _resolve_forum(guild, p["channel_id"])
+    tag = _resolve_forum_tag(forum, p["tag"])
+    await tag.delete()
+    return {"id": _sid(tag.id), "name": tag.name, "deleted": True}
+
+
+# -- guild emoji management --------------------------------------------------
+
+def _resolve_emoji(guild, emoji_id: int):
+    emoji = discord.utils.get(guild.emojis, id=emoji_id)
+    if emoji is None:
+        raise ValueError(f"emoji {emoji_id} not found in this server")
+    return emoji
+
+
+async def _fetch_image_bytes(url: str) -> bytes:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                raise ValueError(f"could not fetch image_url (HTTP {resp.status})")
+            return await resp.read()
+
+
+async def _exec_emoji_create(bot, guild, p: dict) -> dict:
+    data = await _fetch_image_bytes(p["image_url"])
+    if len(data) > _MAX_EMOJI_BYTES:
+        raise ValueError(f"emoji image must be at most {_MAX_EMOJI_BYTES // 1024} KB")
+    emoji = await guild.create_custom_emoji(
+        name=p["name"], image=data, reason=audit_reason(None, "emoji_create")
+    )
+    return {"id": _sid(emoji.id), "name": emoji.name}
+
+
+async def _exec_emoji_edit(bot, guild, p: dict) -> dict:
+    emoji = _resolve_emoji(guild, p["emoji_id"])
+    await emoji.edit(name=p["name"], reason=audit_reason(None, "emoji_edit"))
+    return {"id": _sid(emoji.id), "name": p["name"]}
+
+
+async def _exec_emoji_delete(bot, guild, p: dict) -> dict:
+    emoji = _resolve_emoji(guild, p["emoji_id"])
+    await emoji.delete(reason=audit_reason(p.get("reason"), "emoji_delete"))
+    return {"id": _sid(emoji.id), "name": emoji.name, "deleted": True}
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -638,6 +792,103 @@ ACTIONS: dict[str, dict] = {
             "slowmode_seconds": _param("integer", False, "Slowmode delay in seconds"),
         },
         "executor": _exec_thread_update,
+    },
+    "message_unpin": {
+        "destructive": False,
+        "params": {
+            "channel_id": _param("integer", True, "Channel containing the message"),
+            "message_id": _param("integer", True, "Message to unpin"),
+        },
+        "executor": _exec_message_unpin,
+    },
+    "message_delete": {
+        "destructive": True,
+        "params": {
+            "channel_id": _param("integer", True, "Channel containing the message"),
+            "message_id": _param("integer", True, "Message to delete"),
+            "reason": _param("string", False, "Audit log reason"),
+        },
+        "executor": _exec_message_delete,
+    },
+    "message_edit": {
+        "destructive": False,
+        "params": {
+            "channel_id": _param("integer", True, "Channel containing the message"),
+            "message_id": _param("integer", True, "Message to edit (must be the bot's own message)"),
+            "content": _param("string", True, "New message content"),
+        },
+        "executor": _exec_message_edit,
+    },
+    "reaction_add": {
+        "destructive": False,
+        "params": {
+            "channel_id": _param("integer", True, "Channel containing the message"),
+            "message_id": _param("integer", True, "Message to react to"),
+            "emoji": _param("string", True, "Unicode emoji, '<:name:id>', or a custom emoji id"),
+        },
+        "executor": _exec_reaction_add,
+    },
+    "reaction_remove": {
+        "destructive": False,
+        "params": {
+            "channel_id": _param("integer", True, "Channel containing the message"),
+            "message_id": _param("integer", True, "Message to remove the bot's reaction from"),
+            "emoji": _param("string", True, "Unicode emoji, '<:name:id>', or a custom emoji id"),
+        },
+        "executor": _exec_reaction_remove,
+    },
+    "forum_tag_create": {
+        "destructive": False,
+        "params": {
+            "channel_id": _param("integer", True, "Forum channel to add the tag to"),
+            "name": _param("string", True, "Tag name"),
+            "emoji": _param("string", False, "Unicode emoji or custom emoji id for the tag"),
+            "moderated": _param("boolean", False, "Only moderators can apply this tag"),
+        },
+        "executor": _exec_forum_tag_create,
+    },
+    "forum_tag_edit": {
+        "destructive": False,
+        "params": {
+            "channel_id": _param("integer", True, "Forum channel containing the tag"),
+            "tag": _param("string", True, "Existing tag name or id to edit"),
+            "name": _param("string", False, "New tag name"),
+            "emoji": _param("string", False, "Unicode emoji or custom emoji id"),
+            "moderated": _param("boolean", False, "Only moderators can apply this tag"),
+        },
+        "executor": _exec_forum_tag_edit,
+    },
+    "forum_tag_delete": {
+        "destructive": True,
+        "params": {
+            "channel_id": _param("integer", True, "Forum channel containing the tag"),
+            "tag": _param("string", True, "Tag name or id to delete"),
+        },
+        "executor": _exec_forum_tag_delete,
+    },
+    "emoji_create": {
+        "destructive": False,
+        "params": {
+            "name": _param("string", True, "Emoji name (letters, numbers, underscores)"),
+            "image_url": _param("string", True, "URL of the image (png/gif, <= 256 KB)"),
+        },
+        "executor": _exec_emoji_create,
+    },
+    "emoji_edit": {
+        "destructive": False,
+        "params": {
+            "emoji_id": _param("integer", True, "Custom emoji id to rename"),
+            "name": _param("string", True, "New emoji name"),
+        },
+        "executor": _exec_emoji_edit,
+    },
+    "emoji_delete": {
+        "destructive": True,
+        "params": {
+            "emoji_id": _param("integer", True, "Custom emoji id to delete"),
+            "reason": _param("string", False, "Audit log reason"),
+        },
+        "executor": _exec_emoji_delete,
     },
     "event_create": {
         "destructive": False,
