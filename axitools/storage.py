@@ -2323,16 +2323,16 @@ class StorageManager:
         payload = self._read_json(path, [])
         feeds: List[RssFeedConfig] = []
         for item in payload:
-            try:
-                tracked_raw = item.pop("tracked_releases", {}) or {}
-                feed = RssFeedConfig(**item)
-            except TypeError:
-                continue
-            feed.tracked_releases = {
+            data = dict(item)
+            tracked_raw = data.pop("tracked_releases", {}) or {}
+            data["tracked_releases"] = {
                 key: TrackedRelease(**value) if isinstance(value, dict) else value
                 for key, value in tracked_raw.items()
             }
-            feeds.append(feed)
+            try:
+                feeds.append(RssFeedConfig(**data))
+            except TypeError:
+                continue
         return feeds
 
     def save_rss_feeds(self, guild_id: int, feeds: List[RssFeedConfig]) -> None:
