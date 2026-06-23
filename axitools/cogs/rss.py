@@ -491,6 +491,21 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         if not entries:
             return None
 
+        # First poll for this GitHub feed (freshly added, or migrated from the
+        # legacy atom path where only last_entry_id was stored): adopt the
+        # current entries as the baseline WITHOUT announcing, exactly like
+        # priming a newly added feed. Without this, the first poll after an
+        # upgrade would re-announce every repo's recent release history.
+        if not feed_config.seen_entry_ids and not feed_config.tracked_releases:
+            primed: List[str] = []
+            for entry in entries:
+                eid = _entry_identifier(entry)
+                if eid:
+                    primed = _append_seen_id(primed, eid)
+            if not primed:
+                return None
+            return replace(feed_config, seen_entry_ids=primed)
+
         channel = await self._resolve_channel(guild, feed_config.channel_id)
         if not channel:
             LOGGER.warning(

@@ -223,7 +223,10 @@ async def test_github_feed_skips_incomplete_release(mock_bot_rss):
     cog._resolve_channel = AsyncMock(return_value=channel)
     cog._fetch_github_release = AsyncMock(return_value={"draft": False, "assets": [], "body": "   "})
 
-    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1)
+    # seen_entry_ids non-empty => feed already primed, so the v1 entry is
+    # evaluated normally rather than baseline-primed.
+    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1,
+                         seen_entry_ids=["primed-sentinel"])
     parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
 
     result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
@@ -248,7 +251,8 @@ async def test_github_feed_posts_complete_release_once(mock_bot_rss):
                       "html_url": "https://github.com/o/r/releases/tag/v1"}
     )
 
-    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1)
+    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1,
+                         seen_entry_ids=["primed-sentinel"])
     parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
 
     result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
@@ -264,6 +268,33 @@ async def test_github_feed_posts_complete_release_once(mock_bot_rss):
     channel.send.reset_mock()
     result2 = await cog._process_github_feed(MagicMock(), result, parsed, "o", "r")
     channel.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_github_feed_primes_without_announcing_on_first_sight(mock_bot_rss):
+    # A feed with no seen ids and no tracked releases is being seen for the
+    # first time (fresh add, or migrated from the legacy atom path). It must
+    # adopt the current entries as a baseline WITHOUT announcing any of them,
+    # and must not even hit the GitHub API.
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    cog._fetch_github_release = AsyncMock()
+
+    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1)
+    parsed = types.SimpleNamespace(
+        entries=[_atom_entry("v3"), _atom_entry("v2"), _atom_entry("v1")], feed={}
+    )
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    channel.send.assert_not_called()
+    cog._fetch_github_release.assert_not_called()
+    assert result is not None
+    for tag in ("v1", "v2", "v3"):
+        assert _atom_entry(tag)["id"] in result.seen_entry_ids
+    assert result.tracked_releases == {}
 
 
 @pytest.mark.asyncio
