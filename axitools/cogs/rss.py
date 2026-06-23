@@ -9,6 +9,7 @@ import re
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import quote
 
 import aiohttp
 import discord
@@ -77,7 +78,7 @@ def _release_content_hash(release: "feedparser.FeedParserDict") -> str:
         for asset in (release.get("assets") or [])
         if isinstance(asset, dict)
     )
-    payload = " ".join([name, body, *asset_names])
+    payload = "\x00".join([name, body, *asset_names])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -243,7 +244,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         self, owner: str, repo: str, tag: str
     ) -> Optional[dict]:
         session = await self._get_session()
-        url = f"{self.GITHUB_API_BASE}/repos/{owner}/{repo}/releases/tags/{tag}"
+        url = f"{self.GITHUB_API_BASE}/repos/{owner}/{repo}/releases/tags/{quote(tag, safe='')}"
         headers = {"Accept": "application/vnd.github+json"}
         token = os.environ.get("AXITOOLS_GITHUB_TOKEN")
         if token:
@@ -539,6 +540,38 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
                 tracked[entry_id] = replace(existing, content_hash=new_hash)
                 changed = True
                 continue
+            if existing and not existing.message_id:
+                # Seen before but not yet postable. Keep checking only within
+                # the grace window; give up (finalize) afterwards so a release
+                # that never completes is not re-fetched from the API forever.
+                if not _within_grace_window(existing.first_posted_at, now, self.EDIT_GRACE_HOURS):
+                    tracked[entry_id] = replace(existing, finalized=True)
+                    changed = True
+                    continue
+                tag = _github_tag_from_entry(entry)
+                if not tag:
+                    continue
+                release = await self._fetch_github_release(owner, repo, tag)
+                if not release or not _release_is_complete(release):
+                    continue
+                embed = self._build_github_release_embed(feed_config, release)
+                try:
+                    message = await channel.send(embed=embed)
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning(
+                        "Failed to post GitHub release '%s' to channel %s in guild %s",
+                        tag, feed_config.channel_id, guild.id,
+                    )
+                    continue
+                tracked[entry_id] = replace(
+                    existing,
+                    message_id=getattr(message, "id", None),
+                    content_hash=_release_content_hash(release),
+                    first_posted_at=now.isoformat(),  # restart clock for the edit window
+                )
+                seen = _append_seen_id(seen, entry_id)
+                changed = True
+                continue
             if entry_id in seen and not existing:
                 continue
 
@@ -546,7 +579,19 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             if not tag:
                 continue
             release = await self._fetch_github_release(owner, repo, tag)
-            if not release or not _release_is_complete(release):
+            if not release:
+                continue  # transient fetch failure — retry next poll, record nothing
+            if not _release_is_complete(release):
+                # First sighting of an incomplete release: record first-seen so we
+                # can bound re-fetching and eventually give up.
+                tracked[entry_id] = TrackedRelease(
+                    entry_id=entry_id,
+                    message_id=None,
+                    content_hash=None,
+                    first_posted_at=now.isoformat(),
+                    finalized=False,
+                )
+                changed = True
                 continue
 
             embed = self._build_github_release_embed(feed_config, release)

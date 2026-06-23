@@ -48,3 +48,17 @@ def test_tracked_release_roundtrips(storage):
     assert tracked.message_id == 999
     assert tracked.content_hash == "abc"
     assert tracked.finalized is False
+
+
+def test_feed_with_unknown_keys_loads(storage, tmp_path):
+    guild_dir = storage._guild_path(7)
+    guild_dir.mkdir(parents=True, exist_ok=True)
+    (guild_dir / "rss_feeds.json").write_text(
+        '[{"name":"TSA","url":"https://github.com/x/y/releases.atom","channel_id":5,'
+        '"future_field":"ignore me",'
+        '"tracked_releases":{"tag:1/v1":{"entry_id":"tag:1/v1","message_id":9,'
+        '"future_subfield":"ignore me too"}}}]'
+    )
+    feeds = storage.get_rss_feeds(7)
+    assert len(feeds) == 1
+    assert feeds[0].tracked_releases["tag:1/v1"].message_id == 9

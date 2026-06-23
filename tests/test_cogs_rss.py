@@ -228,7 +228,10 @@ async def test_github_feed_skips_incomplete_release(mock_bot_rss):
 
     result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
     channel.send.assert_not_called()
-    assert result is None
+    assert result is not None
+    entry_id = _atom_entry("v1")["id"]
+    assert result.tracked_releases[entry_id].message_id is None
+    assert result.tracked_releases[entry_id].finalized is False
 
 
 @pytest.mark.asyncio
@@ -341,3 +344,63 @@ async def test_non_github_feed_uses_generic_path(mock_bot_rss):
     await cog._process_feed(MagicMock(), feed)
     github_path.assert_not_called()
     cog._post_entries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_github_feed_posts_when_incomplete_becomes_complete(mock_bot_rss):
+    """A release that was previously seen as incomplete gets posted when it becomes complete."""
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    msg = MagicMock(id=888)
+    channel = MagicMock()
+    channel.send = AsyncMock(return_value=msg)
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    # Now returns a complete release
+    cog._fetch_github_release = AsyncMock(
+        return_value={"name": "v1", "tag_name": "v1", "draft": False,
+                      "assets": [{"name": "a.exe"}], "body": "notes",
+                      "html_url": "https://github.com/o/r/releases/tag/v1"}
+    )
+
+    entry_id = _atom_entry("v1")["id"]
+    now = datetime.now(timezone.utc)
+    feed = RssFeedConfig(
+        name="r", url="https://github.com/o/r/releases.atom", channel_id=1,
+        tracked_releases={entry_id: TrackedRelease(
+            entry_id=entry_id, message_id=None, content_hash=None,
+            first_posted_at=now.isoformat(), finalized=False)},
+    )
+    parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    channel.send.assert_awaited_once()
+    assert result is not None
+    assert result.tracked_releases[entry_id].message_id == 888
+    assert entry_id in result.seen_entry_ids
+
+
+@pytest.mark.asyncio
+async def test_github_feed_finalizes_incomplete_after_grace_window(mock_bot_rss):
+    """An incomplete release past the grace window is finalized without calling the API."""
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    cog._fetch_github_release = AsyncMock()
+
+    entry_id = _atom_entry("v1")["id"]
+    old = "2026-06-20T00:00:00Z"  # well past 2h
+    feed = RssFeedConfig(
+        name="r", url="https://github.com/o/r/releases.atom", channel_id=1,
+        tracked_releases={entry_id: TrackedRelease(
+            entry_id=entry_id, message_id=None, content_hash=None,
+            first_posted_at=old, finalized=False)},
+    )
+    parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    cog._fetch_github_release.assert_not_called()  # no API call once past window
+    channel.send.assert_not_called()
+    assert result is not None
+    assert result.tracked_releases[entry_id].finalized is True

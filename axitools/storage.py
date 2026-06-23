@@ -9,7 +9,7 @@ import sqlite3
 from sqlcipher3 import dbapi2 as sqlcipher
 import unicodedata
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -1697,8 +1697,10 @@ class StorageManager:
             return json.load(handle)
 
     def _write_json(self, path: Path, data: Any) -> None:
-        with path.open("w", encoding="utf-8") as handle:
+        tmp = path.with_name(path.name + ".tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
+        os.replace(tmp, path)
 
     @staticmethod
     def _normalise_channel_ids(channel_ids: Iterable[object]) -> List[int]:
@@ -2321,17 +2323,22 @@ class StorageManager:
     def get_rss_feeds(self, guild_id: int) -> List[RssFeedConfig]:
         path = self._guild_path(guild_id) / "rss_feeds.json"
         payload = self._read_json(path, [])
+        rf_fields = {f.name for f in fields(RssFeedConfig)}
+        tr_fields = {f.name for f in fields(TrackedRelease)}
         feeds: List[RssFeedConfig] = []
         for item in payload:
-            data = dict(item)
-            tracked_raw = data.pop("tracked_releases", {}) or {}
-            data["tracked_releases"] = {
-                key: TrackedRelease(**value) if isinstance(value, dict) else value
-                for key, value in tracked_raw.items()
-            }
+            if not isinstance(item, dict):
+                continue
             try:
+                data = {k: v for k, v in item.items() if k in rf_fields}
+                tracked_raw = item.get("tracked_releases") or {}
+                data["tracked_releases"] = {
+                    key: TrackedRelease(**{k: v for k, v in value.items() if k in tr_fields})
+                    for key, value in tracked_raw.items()
+                    if isinstance(value, dict)
+                }
                 feeds.append(RssFeedConfig(**data))
-            except TypeError:
+            except (TypeError, ValueError):
                 continue
         return feeds
 
