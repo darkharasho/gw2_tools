@@ -4,6 +4,7 @@ from __future__ import annotations
 import calendar
 import hashlib
 import logging
+import os
 import re
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -195,6 +196,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
 
     CHECK_INTERVAL_MINUTES = 10
     EMBED_COLOR = BRAND_COLOUR
+    GITHUB_API_BASE = "https://api.github.com"
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -225,6 +227,25 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         if parsed.bozo:
             LOGGER.warning("Parsing RSS feed %s resulted in bozo exception: %s", url, parsed.bozo_exception)
         return parsed
+
+    async def _fetch_github_release(
+        self, owner: str, repo: str, tag: str
+    ) -> Optional[dict]:
+        session = await self._get_session()
+        url = f"{self.GITHUB_API_BASE}/repos/{owner}/{repo}/releases/tags/{tag}"
+        headers = {"Accept": "application/vnd.github+json"}
+        token = os.environ.get("AXITOOLS_GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+        except (aiohttp.ClientError, ValueError):
+            LOGGER.warning("Failed to fetch GitHub release %s/%s@%s", owner, repo, tag, exc_info=True)
+            return None
 
     async def _prime_feed(self, url: str) -> Tuple[Optional[str], Optional[str]]:
         parsed = await self._fetch_feed(url)

@@ -114,3 +114,65 @@ def test_append_seen_id_dedupes_and_caps():
     seen2 = _append_seen_id(seen, "id-54", cap=50)
     assert seen2.count("id-54") == 1
     assert len(seen2) == 50
+
+
+class _FakeResp:
+    def __init__(self, status, payload):
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            import aiohttp
+            raise aiohttp.ClientResponseError(MagicMock(), (), status=self.status)
+
+    async def json(self):
+        return self._payload
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_release_returns_json(mock_bot_rss, monkeypatch):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+
+    session = MagicMock()
+    session.get = MagicMock(return_value=_FakeResp(200, {"name": "v1", "draft": False}))
+    cog._get_session = AsyncMock(return_value=session)
+
+    release = await cog._fetch_github_release("darkharasho", "TopStatsAIO", "v1")
+    assert release == {"name": "v1", "draft": False}
+    url = session.get.call_args[0][0]
+    assert url == "https://api.github.com/repos/darkharasho/TopStatsAIO/releases/tags/v1"
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_release_handles_404(mock_bot_rss):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+
+    session = MagicMock()
+    session.get = MagicMock(return_value=_FakeResp(404, {}))
+    cog._get_session = AsyncMock(return_value=session)
+
+    assert await cog._fetch_github_release("o", "r", "v9") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_github_release_sends_token_when_present(mock_bot_rss, monkeypatch):
+    monkeypatch.setenv("AXITOOLS_GITHUB_TOKEN", "ghp_test")
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+
+    session = MagicMock()
+    session.get = MagicMock(return_value=_FakeResp(200, {"name": "v1"}))
+    cog._get_session = AsyncMock(return_value=session)
+
+    await cog._fetch_github_release("o", "r", "v1")
+    headers = session.get.call_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer ghp_test"
