@@ -1,4 +1,5 @@
 
+import types
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -12,6 +13,15 @@ from axitools.cogs.rss import (
     _within_grace_window,
     _append_seen_id,
 )
+from axitools.storage import RssFeedConfig, TrackedRelease
+
+
+def _atom_entry(tag, repo_id="1"):
+    return {
+        "id": f"tag:github.com,2008:Repository/{repo_id}/{tag}",
+        "link": f"https://github.com/o/r/releases/tag/{tag}",
+        "title": tag,
+    }
 
 @pytest.fixture
 def mock_bot_rss():
@@ -202,3 +212,52 @@ async def test_build_github_release_embed(mock_bot_rss):
     # asset listed
     field_text = "\n".join(f.value for f in embed.fields)
     assert "TopStatsAIO-Setup.exe" in field_text
+
+
+@pytest.mark.asyncio
+async def test_github_feed_skips_incomplete_release(mock_bot_rss):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    channel = MagicMock()
+    channel.send = AsyncMock(return_value=MagicMock(id=777))
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    cog._fetch_github_release = AsyncMock(return_value={"draft": False, "assets": [], "body": "   "})
+
+    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1)
+    parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    channel.send.assert_not_called()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_github_feed_posts_complete_release_once(mock_bot_rss):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    msg = MagicMock(id=777)
+    channel = MagicMock()
+    channel.send = AsyncMock(return_value=msg)
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    cog._fetch_github_release = AsyncMock(
+        return_value={"name": "v1", "tag_name": "v1", "draft": False,
+                      "assets": [{"name": "a.exe"}], "body": "notes",
+                      "html_url": "https://github.com/o/r/releases/tag/v1"}
+    )
+
+    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1)
+    parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    channel.send.assert_awaited_once()
+    assert result is not None
+    entry_id = _atom_entry("v1")["id"]
+    assert entry_id in result.seen_entry_ids
+    tracked = result.tracked_releases[entry_id]
+    assert tracked.message_id == 777
+    assert tracked.content_hash
+
+    # Second poll with same feed state => no re-post.
+    channel.send.reset_mock()
+    result2 = await cog._process_github_feed(MagicMock(), result, parsed, "o", "r")
+    channel.send.assert_not_called()

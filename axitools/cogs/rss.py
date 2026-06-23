@@ -20,7 +20,7 @@ from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..config_status import ConfigStatus, StatusField
 from ..rendering import clean_html, html_to_discord_markdown, truncate_embed_field
-from ..storage import RssFeedConfig
+from ..storage import RssFeedConfig, TrackedRelease
 from ._paginated_select import PaginatedSelectView
 
 LOGGER = logging.getLogger(__name__)
@@ -205,6 +205,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
     """Manage RSS feed subscriptions and push updates to Discord channels."""
 
     CHECK_INTERVAL_MINUTES = 10
+    EDIT_GRACE_HOURS = 2
     EMBED_COLOR = BRAND_COLOUR
     GITHUB_API_BASE = "https://api.github.com"
 
@@ -477,10 +478,84 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         entry_id, published_at = last_processed
         return replace(feed_config, last_entry_id=entry_id, last_entry_published_at=published_at)
 
+    async def _process_github_feed(
+        self,
+        guild: "discord.Guild",
+        feed_config: RssFeedConfig,
+        parsed_feed: "feedparser.FeedParserDict",
+        owner: str,
+        repo: str,
+    ) -> Optional[RssFeedConfig]:
+        entries = list(getattr(parsed_feed, "entries", []) or [])
+        if not entries:
+            return None
+
+        channel = await self._resolve_channel(guild, feed_config.channel_id)
+        if not channel:
+            LOGGER.warning(
+                "Configured RSS channel %s for guild %s is not accessible",
+                feed_config.channel_id, guild.id,
+            )
+            return None
+
+        seen = list(feed_config.seen_entry_ids)
+        tracked = dict(feed_config.tracked_releases)
+        changed = False
+        now = datetime.now(timezone.utc)
+
+        # Oldest -> newest so posts arrive in chronological order.
+        for entry in reversed(entries):
+            entry_id = _entry_identifier(entry)
+            if not entry_id:
+                continue
+            existing = tracked.get(entry_id)
+            if existing and existing.finalized:
+                continue
+            if existing and existing.message_id:
+                # Edit-in-place handled in Task 7.
+                continue
+            if entry_id in seen and not existing:
+                continue
+
+            tag = _github_tag_from_entry(entry)
+            if not tag:
+                continue
+            release = await self._fetch_github_release(owner, repo, tag)
+            if not release or not _release_is_complete(release):
+                continue
+
+            embed = self._build_github_release_embed(feed_config, release)
+            try:
+                message = await channel.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.warning(
+                    "Failed to post GitHub release '%s' to channel %s in guild %s",
+                    tag, feed_config.channel_id, guild.id,
+                )
+                continue
+
+            tracked[entry_id] = TrackedRelease(
+                entry_id=entry_id,
+                message_id=getattr(message, "id", None),
+                content_hash=_release_content_hash(release),
+                first_posted_at=now.isoformat(),
+                finalized=False,
+            )
+            seen = _append_seen_id(seen, entry_id)
+            changed = True
+
+        if not changed:
+            return None
+        return replace(feed_config, seen_entry_ids=seen, tracked_releases=tracked)
+
     async def _process_feed(self, guild: discord.Guild, feed_config: RssFeedConfig) -> Optional[RssFeedConfig]:
         parsed = await self._fetch_feed(feed_config.url)
         if not parsed or not parsed.entries:
             return None
+
+        repo = _parse_github_repo(feed_config.url)
+        if repo:
+            return await self._process_github_feed(guild, feed_config, parsed, repo[0], repo[1])
 
         new_entries = _resolve_new_entries(parsed.entries, feed_config.last_entry_id)
         if not new_entries:
