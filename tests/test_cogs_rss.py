@@ -323,3 +323,21 @@ async def test_github_feed_finalizes_after_grace_window(mock_bot_rss):
     cog._fetch_github_release.assert_not_called()  # no API call once past window
     channel.fetch_message.assert_not_called()
     assert result.tracked_releases[entry_id].finalized is True
+
+
+@pytest.mark.asyncio
+async def test_non_github_feed_uses_generic_path(mock_bot_rss):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    cog._fetch_feed = AsyncMock(return_value=types.SimpleNamespace(
+        entries=[{"id": "x", "title": "GW2 news", "link": "https://www.guildwars2.com/x"}],
+        feed={},
+    ))
+    cog._post_entries = AsyncMock(return_value=None)
+    github_path = AsyncMock()
+    cog._process_github_feed = github_path
+
+    feed = RssFeedConfig(name="GW2", url="https://www.guildwars2.com/en/feed/", channel_id=1)
+    await cog._process_feed(MagicMock(), feed)
+    github_path.assert_not_called()
+    cog._post_entries.assert_awaited_once()
