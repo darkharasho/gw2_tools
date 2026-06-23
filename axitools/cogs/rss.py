@@ -357,6 +357,19 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         url = release.get("html_url") or feed_config.url
         embed = discord.Embed(title=title, url=url, color=self.EMBED_COLOR)
 
+        # Prominent "which repository" header: owner/repo with the owner avatar,
+        # derived from the release URL (falls back to the feed name).
+        repo_match = re.match(r"https?://github\.com/([^/]+)/([^/]+)", url or "")
+        if repo_match:
+            owner, repo = repo_match.group(1), repo_match.group(2)
+            embed.set_author(
+                name=f"{owner}/{repo}",
+                url=f"https://github.com/{owner}/{repo}",
+                icon_url=f"https://github.com/{owner}.png",
+            )
+        else:
+            embed.set_author(name=feed_config.name)
+
         body = (release.get("body") or "").strip()
         if body:
             embed.description = truncate_embed_field(body, 1800)

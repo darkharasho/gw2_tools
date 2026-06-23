@@ -209,6 +209,10 @@ async def test_build_github_release_embed(mock_bot_rss):
     assert embed.title == "v3.4.4"
     assert embed.url == release["html_url"]
     assert "Fixed crash" in embed.description
+    # repo identity header
+    assert embed.author.name == "darkharasho/TopStatsAIO"
+    assert embed.author.url == "https://github.com/darkharasho/TopStatsAIO"
+    assert embed.author.icon_url == "https://github.com/darkharasho.png"
     # asset listed
     field_text = "\n".join(f.value for f in embed.fields)
     assert "TopStatsAIO-Setup.exe" in field_text
