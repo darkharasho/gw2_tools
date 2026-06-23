@@ -213,9 +213,35 @@ async def test_build_github_release_embed(mock_bot_rss):
     assert embed.author.name == "darkharasho/TopStatsAIO"
     assert embed.author.url == "https://github.com/darkharasho/TopStatsAIO"
     assert embed.author.icon_url == "https://github.com/darkharasho.png"
+    # thumbnail defaults to the owner avatar when no per-feed override is set
+    assert embed.thumbnail.url == "https://github.com/darkharasho.png"
     # asset listed
     field_text = "\n".join(f.value for f in embed.fields)
     assert "TopStatsAIO-Setup.exe" in field_text
+
+
+@pytest.mark.asyncio
+async def test_build_github_release_embed_thumbnail_override(mock_bot_rss):
+    from axitools.storage import RssFeedConfig
+
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    feed = RssFeedConfig(
+        name="AxiBridge",
+        url="https://github.com/darkharasho/axibridge/releases.atom",
+        channel_id=1,
+        thumbnail_url="https://raw.githubusercontent.com/darkharasho/axibridge/main/build/icon.png",
+    )
+    release = {
+        "name": "v2.11.4",
+        "html_url": "https://github.com/darkharasho/axibridge/releases/tag/v2.11.4",
+        "body": "notes",
+    }
+    embed = cog._build_github_release_embed(feed, release)
+    # per-feed override wins over the owner-avatar default
+    assert embed.thumbnail.url == "https://raw.githubusercontent.com/darkharasho/axibridge/main/build/icon.png"
+    # author header still identifies the repo
+    assert embed.author.name == "darkharasho/axibridge"
 
 
 @pytest.mark.asyncio

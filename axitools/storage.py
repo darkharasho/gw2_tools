@@ -496,6 +496,7 @@ class RssFeedConfig:
     last_entry_published_at: Optional[str] = None
     seen_entry_ids: List[str] = field(default_factory=list)
     tracked_releases: Dict[str, TrackedRelease] = field(default_factory=dict)
+    thumbnail_url: Optional[str] = None
 
 
 @dataclass

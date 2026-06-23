@@ -360,15 +360,23 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         # Prominent "which repository" header: owner/repo with the owner avatar,
         # derived from the release URL (falls back to the feed name).
         repo_match = re.match(r"https?://github\.com/([^/]+)/([^/]+)", url or "")
+        owner = repo_match.group(1) if repo_match else None
         if repo_match:
-            owner, repo = repo_match.group(1), repo_match.group(2)
             embed.set_author(
-                name=f"{owner}/{repo}",
-                url=f"https://github.com/{owner}/{repo}",
+                name=f"{owner}/{repo_match.group(2)}",
+                url=f"https://github.com/{owner}/{repo_match.group(2)}",
                 icon_url=f"https://github.com/{owner}.png",
             )
         else:
             embed.set_author(name=feed_config.name)
+
+        # Thumbnail: per-feed override (e.g. the app icon) if set, otherwise the
+        # GitHub owner avatar so every release embed still carries an image.
+        thumbnail = feed_config.thumbnail_url or (
+            f"https://github.com/{owner}.png" if owner else None
+        )
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
 
         body = (release.get("body") or "").strip()
         if body:
@@ -717,6 +725,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         name="Unique name for the feed.",
         url="URL to the RSS or Atom feed.",
         channel="Channel where updates should be posted.",
+        thumbnail="Optional image URL for the embed thumbnail (e.g. the app icon). Defaults to the GitHub owner avatar.",
     )
     async def set_feed(
         self,
@@ -724,6 +733,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         name: str,
         url: str,
         channel: discord.TextChannel,
+        thumbnail: Optional[str] = None,
     ) -> None:
         if not await self.bot.ensure_authorised(interaction):
             return
@@ -751,6 +761,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
                 channel_id=channel.id,
                 last_entry_id=baseline_entry_id or existing.last_entry_id,
                 last_entry_published_at=baseline_published or existing.last_entry_published_at,
+                thumbnail_url=thumbnail if thumbnail is not None else existing.thumbnail_url,
             )
             self.bot.storage.upsert_rss_feed(guild.id, updated_feed)
             message = f"RSS feed **{name}** updated to post in {channel.mention}."
@@ -761,6 +772,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
                 channel_id=channel.id,
                 last_entry_id=baseline_entry_id,
                 last_entry_published_at=baseline_published,
+                thumbnail_url=thumbnail,
             )
             self.bot.storage.upsert_rss_feed(guild.id, new_feed)
             message = (
