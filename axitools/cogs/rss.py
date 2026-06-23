@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import calendar
+import hashlib
 import logging
+import os
+import re
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import quote
 
 import aiohttp
 import discord
@@ -17,7 +21,7 @@ from ..bot import AxiToolsBot
 from ..branding import BRAND_COLOUR
 from ..config_status import ConfigStatus, StatusField
 from ..rendering import clean_html, html_to_discord_markdown, truncate_embed_field
-from ..storage import RssFeedConfig
+from ..storage import RssFeedConfig, TrackedRelease
 from ._paginated_select import PaginatedSelectView
 
 LOGGER = logging.getLogger(__name__)
@@ -29,6 +33,76 @@ def _entry_identifier(entry: feedparser.FeedParserDict) -> Optional[str]:
         if value:
             return str(value)
     return None
+
+
+_GITHUB_RELEASES_RE = re.compile(
+    r"^https?://github\.com/([^/]+)/([^/]+)/releases(?:\.atom)?/?$",
+    re.IGNORECASE,
+)
+
+
+def _parse_github_repo(url: str) -> Optional[Tuple[str, str]]:
+    if not url:
+        return None
+    match = _GITHUB_RELEASES_RE.match(url.strip())
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _github_tag_from_entry(entry: feedparser.FeedParserDict) -> Optional[str]:
+    link = entry.get("link")
+    if link and "/releases/tag/" in link:
+        return link.rsplit("/releases/tag/", 1)[1].strip("/") or None
+    entry_id = entry.get("id")
+    if entry_id and "/" in str(entry_id):
+        candidate = str(entry_id).rsplit("/", 1)[1].strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _release_is_complete(release: "feedparser.FeedParserDict") -> bool:
+    if release.get("draft"):
+        return False
+    has_assets = bool(release.get("assets"))
+    body = (release.get("body") or "").strip()
+    return has_assets or bool(body)
+
+
+def _release_content_hash(release: "feedparser.FeedParserDict") -> str:
+    name = str(release.get("name") or "")
+    body = str(release.get("body") or "")
+    asset_names = sorted(
+        str(asset.get("name") or "")
+        for asset in (release.get("assets") or [])
+        if isinstance(asset, dict)
+    )
+    payload = "\x00".join([name, body, *asset_names])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _within_grace_window(
+    first_posted_at: Optional[str], now: datetime, hours: int = 2
+) -> bool:
+    if not first_posted_at:
+        return False
+    try:
+        posted = datetime.fromisoformat(first_posted_at.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return False
+    if posted.tzinfo is None:
+        posted = posted.replace(tzinfo=timezone.utc)
+    delta = now - posted
+    return 0 <= delta.total_seconds() <= hours * 3600
+
+
+def _append_seen_id(seen: List[str], entry_id: str, cap: int = 50) -> List[str]:
+    result = [item for item in seen if item != entry_id]
+    result.append(entry_id)
+    if len(result) > cap:
+        result = result[-cap:]
+    return result
 
 
 def _resolve_new_entries(
@@ -118,11 +192,23 @@ def _convert_struct_time(struct_time: Optional[Tuple[int, ...]]) -> Optional[dat
         return None
 
 
+def _convert_iso8601(value: str) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Announcements"}):
     """Manage RSS feed subscriptions and push updates to Discord channels."""
 
     CHECK_INTERVAL_MINUTES = 10
+    EDIT_GRACE_HOURS = 2
     EMBED_COLOR = BRAND_COLOUR
+    GITHUB_API_BASE = "https://api.github.com"
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -153,6 +239,25 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         if parsed.bozo:
             LOGGER.warning("Parsing RSS feed %s resulted in bozo exception: %s", url, parsed.bozo_exception)
         return parsed
+
+    async def _fetch_github_release(
+        self, owner: str, repo: str, tag: str
+    ) -> Optional[dict]:
+        session = await self._get_session()
+        url = f"{self.GITHUB_API_BASE}/repos/{owner}/{repo}/releases/tags/{quote(tag, safe='')}"
+        headers = {"Accept": "application/vnd.github+json"}
+        token = os.environ.get("AXITOOLS_GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+        except (aiohttp.ClientError, ValueError):
+            LOGGER.warning("Failed to fetch GitHub release %s/%s@%s", owner, repo, tag, exc_info=True)
+            return None
 
     async def _prime_feed(self, url: str) -> Tuple[Optional[str], Optional[str]]:
         parsed = await self._fetch_feed(url)
@@ -243,6 +348,38 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             )
 
         embed.set_footer(text=f"RSS feed: {feed_config.name}")
+        return embed
+
+    def _build_github_release_embed(
+        self, feed_config: RssFeedConfig, release: dict
+    ) -> discord.Embed:
+        title = release.get("name") or release.get("tag_name") or "New release"
+        url = release.get("html_url") or feed_config.url
+        embed = discord.Embed(title=title, url=url, color=self.EMBED_COLOR)
+
+        body = (release.get("body") or "").strip()
+        if body:
+            embed.description = truncate_embed_field(body, 1800)
+
+        published = release.get("published_at")
+        if published:
+            parsed = _convert_iso8601(published)
+            if parsed:
+                embed.timestamp = parsed
+
+        assets = [a for a in (release.get("assets") or []) if isinstance(a, dict)]
+        if assets:
+            lines = []
+            for asset in assets[:10]:
+                name = asset.get("name") or "download"
+                link = asset.get("browser_download_url")
+                lines.append(f"[{name}]({link})" if link else name)
+            embed.add_field(name="Downloads", value="\n".join(lines)[:1024], inline=False)
+
+        if release.get("prerelease"):
+            embed.set_footer(text=f"{feed_config.name} · pre-release")
+        else:
+            embed.set_footer(text=f"{feed_config.name} · release")
         return embed
 
     def _build_feed_list_embeds(
@@ -342,10 +479,153 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         entry_id, published_at = last_processed
         return replace(feed_config, last_entry_id=entry_id, last_entry_published_at=published_at)
 
+    async def _process_github_feed(
+        self,
+        guild: "discord.Guild",
+        feed_config: RssFeedConfig,
+        parsed_feed: "feedparser.FeedParserDict",
+        owner: str,
+        repo: str,
+    ) -> Optional[RssFeedConfig]:
+        entries = list(getattr(parsed_feed, "entries", []) or [])
+        if not entries:
+            return None
+
+        channel = await self._resolve_channel(guild, feed_config.channel_id)
+        if not channel:
+            LOGGER.warning(
+                "Configured RSS channel %s for guild %s is not accessible",
+                feed_config.channel_id, guild.id,
+            )
+            return None
+
+        seen = list(feed_config.seen_entry_ids)
+        tracked = dict(feed_config.tracked_releases)
+        changed = False
+        now = datetime.now(timezone.utc)
+
+        # Oldest -> newest so posts arrive in chronological order.
+        for entry in reversed(entries):
+            entry_id = _entry_identifier(entry)
+            if not entry_id:
+                continue
+            existing = tracked.get(entry_id)
+            if existing and existing.finalized:
+                continue
+            if existing and existing.message_id:
+                if not _within_grace_window(existing.first_posted_at, now, self.EDIT_GRACE_HOURS):
+                    if not existing.finalized:
+                        tracked[entry_id] = replace(existing, finalized=True)
+                        changed = True
+                    continue
+                tag = _github_tag_from_entry(entry)
+                if not tag:
+                    continue
+                release = await self._fetch_github_release(owner, repo, tag)
+                if not release or not _release_is_complete(release):
+                    continue
+                new_hash = _release_content_hash(release)
+                if new_hash == existing.content_hash:
+                    continue
+                try:
+                    message = await channel.fetch_message(existing.message_id)
+                    await message.edit(embed=self._build_github_release_embed(feed_config, release))
+                except discord.NotFound:
+                    tracked[entry_id] = replace(existing, finalized=True)
+                    changed = True
+                    continue
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning("Failed to edit GitHub release message for %s", tag)
+                    continue
+                tracked[entry_id] = replace(existing, content_hash=new_hash)
+                changed = True
+                continue
+            if existing and not existing.message_id:
+                # Seen before but not yet postable. Keep checking only within
+                # the grace window; give up (finalize) afterwards so a release
+                # that never completes is not re-fetched from the API forever.
+                if not _within_grace_window(existing.first_posted_at, now, self.EDIT_GRACE_HOURS):
+                    tracked[entry_id] = replace(existing, finalized=True)
+                    changed = True
+                    continue
+                tag = _github_tag_from_entry(entry)
+                if not tag:
+                    continue
+                release = await self._fetch_github_release(owner, repo, tag)
+                if not release or not _release_is_complete(release):
+                    continue
+                embed = self._build_github_release_embed(feed_config, release)
+                try:
+                    message = await channel.send(embed=embed)
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning(
+                        "Failed to post GitHub release '%s' to channel %s in guild %s",
+                        tag, feed_config.channel_id, guild.id,
+                    )
+                    continue
+                tracked[entry_id] = replace(
+                    existing,
+                    message_id=getattr(message, "id", None),
+                    content_hash=_release_content_hash(release),
+                    first_posted_at=now.isoformat(),  # restart clock for the edit window
+                )
+                seen = _append_seen_id(seen, entry_id)
+                changed = True
+                continue
+            if entry_id in seen and not existing:
+                continue
+
+            tag = _github_tag_from_entry(entry)
+            if not tag:
+                continue
+            release = await self._fetch_github_release(owner, repo, tag)
+            if not release:
+                continue  # transient fetch failure — retry next poll, record nothing
+            if not _release_is_complete(release):
+                # First sighting of an incomplete release: record first-seen so we
+                # can bound re-fetching and eventually give up.
+                tracked[entry_id] = TrackedRelease(
+                    entry_id=entry_id,
+                    message_id=None,
+                    content_hash=None,
+                    first_posted_at=now.isoformat(),
+                    finalized=False,
+                )
+                changed = True
+                continue
+
+            embed = self._build_github_release_embed(feed_config, release)
+            try:
+                message = await channel.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.warning(
+                    "Failed to post GitHub release '%s' to channel %s in guild %s",
+                    tag, feed_config.channel_id, guild.id,
+                )
+                continue
+
+            tracked[entry_id] = TrackedRelease(
+                entry_id=entry_id,
+                message_id=getattr(message, "id", None),
+                content_hash=_release_content_hash(release),
+                first_posted_at=now.isoformat(),
+                finalized=False,
+            )
+            seen = _append_seen_id(seen, entry_id)
+            changed = True
+
+        if not changed:
+            return None
+        return replace(feed_config, seen_entry_ids=seen, tracked_releases=tracked)
+
     async def _process_feed(self, guild: discord.Guild, feed_config: RssFeedConfig) -> Optional[RssFeedConfig]:
         parsed = await self._fetch_feed(feed_config.url)
         if not parsed or not parsed.entries:
             return None
+
+        repo = _parse_github_repo(feed_config.url)
+        if repo:
+            return await self._process_github_feed(guild, feed_config, parsed, repo[0], repo[1])
 
         new_entries = _resolve_new_entries(parsed.entries, feed_config.last_entry_id)
         if not new_entries:
