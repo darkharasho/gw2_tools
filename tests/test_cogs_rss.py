@@ -261,3 +261,65 @@ async def test_github_feed_posts_complete_release_once(mock_bot_rss):
     channel.send.reset_mock()
     result2 = await cog._process_github_feed(MagicMock(), result, parsed, "o", "r")
     channel.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_github_feed_edits_message_when_content_changes(mock_bot_rss):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    edited = AsyncMock()
+    message = MagicMock(id=777)
+    message.edit = edited
+    channel = MagicMock()
+    channel.fetch_message = AsyncMock(return_value=message)
+    channel.send = AsyncMock(return_value=message)
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    # New body => new hash vs the stored one.
+    cog._fetch_github_release = AsyncMock(
+        return_value={"name": "v1", "tag_name": "v1", "draft": False,
+                      "assets": [{"name": "a.exe"}], "body": "notes UPDATED",
+                      "html_url": "https://github.com/o/r/releases/tag/v1"}
+    )
+
+    entry_id = _atom_entry("v1")["id"]
+    now = datetime.now(timezone.utc)
+    feed = RssFeedConfig(
+        name="r", url="https://github.com/o/r/releases.atom", channel_id=1,
+        seen_entry_ids=[entry_id],
+        tracked_releases={entry_id: TrackedRelease(
+            entry_id=entry_id, message_id=777, content_hash="STALE",
+            first_posted_at=now.isoformat(), finalized=False)},
+    )
+    parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    edited.assert_awaited_once()
+    channel.send.assert_not_called()
+    assert result.tracked_releases[entry_id].content_hash != "STALE"
+
+
+@pytest.mark.asyncio
+async def test_github_feed_finalizes_after_grace_window(mock_bot_rss):
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    channel.fetch_message = AsyncMock()
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    cog._fetch_github_release = AsyncMock()
+
+    entry_id = _atom_entry("v1")["id"]
+    old = "2026-06-20T00:00:00Z"  # well past 2h
+    feed = RssFeedConfig(
+        name="r", url="https://github.com/o/r/releases.atom", channel_id=1,
+        seen_entry_ids=[entry_id],
+        tracked_releases={entry_id: TrackedRelease(
+            entry_id=entry_id, message_id=777, content_hash="x",
+            first_posted_at=old, finalized=False)},
+    )
+    parsed = types.SimpleNamespace(entries=[_atom_entry("v1")], feed={})
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    cog._fetch_github_release.assert_not_called()  # no API call once past window
+    channel.fetch_message.assert_not_called()
+    assert result.tracked_releases[entry_id].finalized is True

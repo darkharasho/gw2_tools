@@ -512,7 +512,32 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             if existing and existing.finalized:
                 continue
             if existing and existing.message_id:
-                # Edit-in-place handled in Task 7.
+                if not _within_grace_window(existing.first_posted_at, now, self.EDIT_GRACE_HOURS):
+                    if not existing.finalized:
+                        tracked[entry_id] = replace(existing, finalized=True)
+                        changed = True
+                    continue
+                tag = _github_tag_from_entry(entry)
+                if not tag:
+                    continue
+                release = await self._fetch_github_release(owner, repo, tag)
+                if not release or not _release_is_complete(release):
+                    continue
+                new_hash = _release_content_hash(release)
+                if new_hash == existing.content_hash:
+                    continue
+                try:
+                    message = await channel.fetch_message(existing.message_id)
+                    await message.edit(embed=self._build_github_release_embed(feed_config, release))
+                except discord.NotFound:
+                    tracked[entry_id] = replace(existing, finalized=True)
+                    changed = True
+                    continue
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning("Failed to edit GitHub release message for %s", tag)
+                    continue
+                tracked[entry_id] = replace(existing, content_hash=new_hash)
+                changed = True
                 continue
             if entry_id in seen and not existing:
                 continue
