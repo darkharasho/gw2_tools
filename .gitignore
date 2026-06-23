@@ -222,3 +222,4 @@ __marimo__/
 # At-rest encryption: never commit key material or plaintext backups
 *.db_key
 *.plaintext.bak
+.sai-preview/
