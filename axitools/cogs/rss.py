@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import calendar
 import logging
+import re
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -28,6 +29,33 @@ def _entry_identifier(entry: feedparser.FeedParserDict) -> Optional[str]:
         value = entry.get(key)
         if value:
             return str(value)
+    return None
+
+
+_GITHUB_RELEASES_RE = re.compile(
+    r"^https?://github\.com/([^/]+)/([^/]+)/releases(?:\.atom)?/?$",
+    re.IGNORECASE,
+)
+
+
+def _parse_github_repo(url: str) -> Optional[Tuple[str, str]]:
+    if not url:
+        return None
+    match = _GITHUB_RELEASES_RE.match(url.strip())
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _github_tag_from_entry(entry: feedparser.FeedParserDict) -> Optional[str]:
+    link = entry.get("link")
+    if link and "/releases/tag/" in link:
+        return link.rsplit("/releases/tag/", 1)[1].strip("/") or None
+    entry_id = entry.get("id")
+    if entry_id and "/" in str(entry_id):
+        candidate = str(entry_id).rsplit("/", 1)[1].strip()
+        if candidate:
+            return candidate
     return None
 
 
