@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import calendar
+import hashlib
 import logging
 import re
 from dataclasses import replace
@@ -57,6 +58,49 @@ def _github_tag_from_entry(entry: feedparser.FeedParserDict) -> Optional[str]:
         if candidate:
             return candidate
     return None
+
+
+def _release_is_complete(release: "feedparser.FeedParserDict") -> bool:
+    if release.get("draft"):
+        return False
+    has_assets = bool(release.get("assets"))
+    body = (release.get("body") or "").strip()
+    return has_assets or bool(body)
+
+
+def _release_content_hash(release: "feedparser.FeedParserDict") -> str:
+    name = str(release.get("name") or "")
+    body = str(release.get("body") or "")
+    asset_names = sorted(
+        str(asset.get("name") or "")
+        for asset in (release.get("assets") or [])
+        if isinstance(asset, dict)
+    )
+    payload = " ".join([name, body, *asset_names])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _within_grace_window(
+    first_posted_at: Optional[str], now: datetime, hours: int = 2
+) -> bool:
+    if not first_posted_at:
+        return False
+    try:
+        posted = datetime.fromisoformat(first_posted_at.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return False
+    if posted.tzinfo is None:
+        posted = posted.replace(tzinfo=timezone.utc)
+    delta = now - posted
+    return 0 <= delta.total_seconds() <= hours * 3600
+
+
+def _append_seen_id(seen: List[str], entry_id: str, cap: int = 50) -> List[str]:
+    result = [item for item in seen if item != entry_id]
+    result.append(entry_id)
+    if len(result) > cap:
+        result = result[-cap:]
+    return result
 
 
 def _resolve_new_entries(
