@@ -475,6 +475,17 @@ class CompSchedule:
 
 
 @dataclass
+class TrackedRelease:
+    """A GitHub release the bot has posted and may still edit in place."""
+
+    entry_id: str
+    message_id: Optional[int] = None
+    content_hash: Optional[str] = None
+    first_posted_at: Optional[str] = None  # ISO8601 UTC
+    finalized: bool = False
+
+
+@dataclass
 class RssFeedConfig:
     """Persisted configuration for an RSS or Atom feed subscription."""
 
@@ -483,6 +494,8 @@ class RssFeedConfig:
     channel_id: int
     last_entry_id: Optional[str] = None
     last_entry_published_at: Optional[str] = None
+    seen_entry_ids: List[str] = field(default_factory=list)
+    tracked_releases: Dict[str, TrackedRelease] = field(default_factory=dict)
 
 
 @dataclass
@@ -2311,9 +2324,15 @@ class StorageManager:
         feeds: List[RssFeedConfig] = []
         for item in payload:
             try:
-                feeds.append(RssFeedConfig(**item))
+                tracked_raw = item.pop("tracked_releases", {}) or {}
+                feed = RssFeedConfig(**item)
             except TypeError:
                 continue
+            feed.tracked_releases = {
+                key: TrackedRelease(**value) if isinstance(value, dict) else value
+                for key, value in tracked_raw.items()
+            }
+            feeds.append(feed)
         return feeds
 
     def save_rss_feeds(self, guild_id: int, feeds: List[RssFeedConfig]) -> None:
