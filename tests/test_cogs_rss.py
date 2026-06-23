@@ -176,3 +176,29 @@ async def test_fetch_github_release_sends_token_when_present(mock_bot_rss, monke
     await cog._fetch_github_release("o", "r", "v1")
     headers = session.get.call_args.kwargs["headers"]
     assert headers["Authorization"] == "Bearer ghp_test"
+
+
+@pytest.mark.asyncio
+async def test_build_github_release_embed(mock_bot_rss):
+    from axitools.storage import RssFeedConfig
+
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    feed = RssFeedConfig(name="TSA", url="https://github.com/darkharasho/TopStatsAIO/releases.atom", channel_id=1)
+    release = {
+        "name": "v3.4.4",
+        "tag_name": "v3.4.4",
+        "html_url": "https://github.com/darkharasho/TopStatsAIO/releases/tag/v3.4.4",
+        "body": "## What's new\n- Fixed crash",
+        "assets": [
+            {"name": "TopStatsAIO-Setup.exe", "browser_download_url": "https://example/exe"},
+        ],
+        "published_at": "2026-06-22T12:00:00Z",
+    }
+    embed = cog._build_github_release_embed(feed, release)
+    assert embed.title == "v3.4.4"
+    assert embed.url == release["html_url"]
+    assert "Fixed crash" in embed.description
+    # asset listed
+    field_text = "\n".join(f.value for f in embed.fields)
+    assert "TopStatsAIO-Setup.exe" in field_text

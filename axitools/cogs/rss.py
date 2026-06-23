@@ -191,6 +191,16 @@ def _convert_struct_time(struct_time: Optional[Tuple[int, ...]]) -> Optional[dat
         return None
 
 
+def _convert_iso8601(value: str) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Announcements"}):
     """Manage RSS feed subscriptions and push updates to Discord channels."""
 
@@ -336,6 +346,38 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             )
 
         embed.set_footer(text=f"RSS feed: {feed_config.name}")
+        return embed
+
+    def _build_github_release_embed(
+        self, feed_config: RssFeedConfig, release: dict
+    ) -> discord.Embed:
+        title = release.get("name") or release.get("tag_name") or "New release"
+        url = release.get("html_url") or feed_config.url
+        embed = discord.Embed(title=title, url=url, color=self.EMBED_COLOR)
+
+        body = (release.get("body") or "").strip()
+        if body:
+            embed.description = truncate_embed_field(body, 1800)
+
+        published = release.get("published_at")
+        if published:
+            parsed = _convert_iso8601(published)
+            if parsed:
+                embed.timestamp = parsed
+
+        assets = [a for a in (release.get("assets") or []) if isinstance(a, dict)]
+        if assets:
+            lines = []
+            for asset in assets[:10]:
+                name = asset.get("name") or "download"
+                link = asset.get("browser_download_url")
+                lines.append(f"[{name}]({link})" if link else name)
+            embed.add_field(name="Downloads", value="\n".join(lines)[:1024], inline=False)
+
+        if release.get("prerelease"):
+            embed.set_footer(text=f"{feed_config.name} · pre-release")
+        else:
+            embed.set_footer(text=f"{feed_config.name} · release")
         return embed
 
     def _build_feed_list_embeds(
