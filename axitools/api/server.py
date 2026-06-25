@@ -654,6 +654,7 @@ async def _handle_discord_snapshot(request: web.Request) -> web.Response:
                 "id": _sid(m.id),
                 "name": m.name,
                 "display_name": getattr(m, "display_name", m.name),
+                "bot": bool(getattr(m, "bot", False)),
                 "role_ids": [_sid(r.id) for r in getattr(m, "roles", ())],
                 "joined_at": _iso(getattr(m, "joined_at", None)),
             }

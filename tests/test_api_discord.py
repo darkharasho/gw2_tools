@@ -30,11 +30,12 @@ class FakeRole:
 
 
 class FakeMember:
-    def __init__(self, member_id, name, roles=()):
+    def __init__(self, member_id, name, roles=(), bot=False):
         self.id = member_id
         self.name = name
         self.display_name = name.title()
         self.roles = list(roles)
+        self.bot = bot
         self.joined_at = dt.datetime(2024, 1, 1, tzinfo=UTC)
 
 
@@ -228,7 +229,7 @@ async def test_snapshot_include_members(api_client):
     body = await resp.json()
     assert body["members_total"] == 2
     assert body["members"][0] == {
-        "id": "30", "name": "logan", "display_name": "Logan",
+        "id": "30", "name": "logan", "display_name": "Logan", "bot": False,
         "role_ids": ["20"], "joined_at": "2024-01-01T00:00:00+00:00",
     }
 
