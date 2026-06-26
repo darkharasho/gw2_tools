@@ -1505,6 +1505,7 @@ class AuditStore:
         actor: Optional[str] = None,
         target: Optional[str] = None,
         limit: int = 50,
+        since_id: Optional[int] = None,
     ) -> List[sqlite3.Row]:
         """Query Discord audit events with optional API-style filters.
 
@@ -1529,6 +1530,9 @@ class AuditStore:
             else:
                 clauses.append(f"{name_column} LIKE ?")
                 params.append(f"%{self._normalise_name(value)}%")
+        if since_id is not None:
+            clauses.append("id > ?")
+            params.append(since_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._connect() as connection:

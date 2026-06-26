@@ -844,11 +844,19 @@ async def _handle_audit_discord(request: web.Request) -> web.Response:
     event_type = request.query.get("event_type") or None
     actor = request.query.get("actor") or None
     target = request.query.get("target") or None
+    raw_since = request.query.get("since_id", "")
+    since_id = None
+    if raw_since:
+        if not raw_since.isdigit():
+            return web.json_response(
+                {"error": "since_id must be an integer"}, status=400
+            )
+        since_id = int(raw_since)
 
     def _query():
         store = bot.storage.get_audit_store(gid)
         return store.query_discord_events_filtered(
-            event_type=event_type, actor=actor, target=target, limit=limit
+            event_type=event_type, actor=actor, target=target, limit=limit, since_id=since_id
         )
 
     rows = await asyncio.to_thread(_query)
