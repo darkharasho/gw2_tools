@@ -847,11 +847,12 @@ async def _handle_audit_discord(request: web.Request) -> web.Response:
     raw_since = request.query.get("since_id", "")
     since_id = None
     if raw_since:
-        if not raw_since.isdigit():
+        try:
+            since_id = int(raw_since)
+        except ValueError:
             return web.json_response(
                 {"error": "since_id must be an integer"}, status=400
             )
-        since_id = int(raw_since)
 
     def _query():
         store = bot.storage.get_audit_store(gid)
@@ -885,11 +886,12 @@ async def _handle_audit_gw2(request: web.Request) -> web.Response:
     raw_since = request.query.get("since_log_id", "")
     since_log_id = None
     if raw_since:
-        if not raw_since.isdigit():
+        try:
+            since_log_id = int(raw_since)
+        except ValueError:
             return web.json_response(
                 {"error": "since_log_id must be an integer"}, status=400
             )
-        since_log_id = int(raw_since)
 
     def _query():
         store = bot.storage.get_audit_store(gid)

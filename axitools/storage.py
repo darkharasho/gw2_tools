@@ -1534,13 +1534,14 @@ class AuditStore:
             clauses.append("id > ?")
             params.append(since_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        order = "ORDER BY id ASC" if since_id is not None else "ORDER BY created_at DESC, id DESC"
         params.append(limit)
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
                 SELECT * FROM discord_audit_events
                 {where}
-                ORDER BY created_at DESC, id DESC
+                {order}
                 LIMIT ?
                 """,
                 params,
