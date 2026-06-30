@@ -79,6 +79,31 @@ def _format_channel_label(channel: discord.abc.GuildChannel | discord.Thread) ->
     return getattr(channel, "mention", f"#{name}")
 
 
+def _derive_target_type(event_type: str) -> Optional[str]:
+    if event_type.startswith("channel_"):
+        return "channel"
+    if event_type.startswith("role_"):
+        return "role"
+    if event_type.startswith("message_"):
+        return "message"
+    if event_type.startswith("emoji"):
+        return "emoji"
+    if event_type.startswith("guild_"):
+        return "guild"
+    if event_type.startswith("member_"):
+        return "user"
+    return None
+
+
+def build_discord_event_fields(*, event_type, actor, channel) -> dict:
+    return {
+        "actor_is_bot": bool(getattr(actor, "bot", False)) if actor is not None else None,
+        "target_type": _derive_target_type(event_type),
+        "channel_id": str(channel.id) if channel is not None else None,
+        "channel_name": getattr(channel, "name", None) if channel is not None else None,
+    }
+
+
 def _format_multiline_value(value: str) -> str:
     if not value:
         return "None"
@@ -823,6 +848,7 @@ class AuditCog(commands.Cog):
             actor=actor or author,
             target=author,
             details=details,
+            channel=message.channel,
         )
 
     @commands.Cog.listener()
@@ -874,6 +900,7 @@ class AuditCog(commands.Cog):
             actor=author,
             target=author,
             details=details,
+            channel=after.channel,
         )
 
     @commands.Cog.listener()
@@ -1071,7 +1098,8 @@ class AuditCog(commands.Cog):
             event_type="channel_create",
             actor=actor,
             target=None,
-            details={"Channel": _format_channel_label(channel)},
+            details={},
+            channel=channel,
         )
 
     @commands.Cog.listener()
@@ -1088,7 +1116,8 @@ class AuditCog(commands.Cog):
             event_type="channel_delete",
             actor=actor,
             target=None,
-            details={"Channel": f"#{channel.name}"},
+            details={},
+            channel=channel,
         )
 
     @commands.Cog.listener()
@@ -1113,6 +1142,7 @@ class AuditCog(commands.Cog):
             actor=actor,
             target=None,
             details=details,
+            channel=after,
         )
 
     # ------------------------------------------------------------------
@@ -1263,6 +1293,7 @@ class AuditCog(commands.Cog):
         actor: Optional[discord.abc.User],
         target: Optional[discord.abc.User],
         details: Mapping[str, str],
+        channel: "Optional[discord.abc.GuildChannel | discord.Thread]" = None,
     ) -> None:
         channel_id = self._audit_channel_id(guild)
         if not channel_id:
@@ -1271,6 +1302,7 @@ class AuditCog(commands.Cog):
         created_at = utcnow()
         store = self.bot.storage.get_audit_store(guild.id)
         details_text = "\n".join(f"{key}: {value}" for key, value in details.items())
+        fields = build_discord_event_fields(event_type=event_type, actor=actor, channel=channel)
         store.add_discord_event(
             created_at=created_at,
             event_type=event_type,
@@ -1279,6 +1311,10 @@ class AuditCog(commands.Cog):
             target_id=target.id if target else None,
             target_name=_display_user(target),
             details=details_text,
+            channel_id=fields["channel_id"],
+            channel_name=fields["channel_name"],
+            actor_is_bot=fields["actor_is_bot"],
+            target_type=fields["target_type"],
         )
 
         title = DISCORD_EVENT_TITLES.get(event_type, event_type.replace("_", " ").title())
