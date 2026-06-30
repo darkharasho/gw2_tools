@@ -46,3 +46,24 @@ def test_discord_event_to_dict_old_row_nulls():
     assert out["channel_name"] is None
     assert out["actor_is_bot"] is None
     assert out["target_type"] is None
+
+
+def test_discord_event_to_dict_actor_is_bot_false():
+    """A row with actor_is_bot=0 (SQLite integer) maps to Python False, not None."""
+    row = {
+        "id": 7,
+        "created_at": "2026-06-30T08:00:00Z",
+        "event_type": "message_delete",
+        "actor_id": 99,
+        "actor_name": "HumanUser",
+        "target_id": None,
+        "target_name": None,
+        "details": "",
+        "channel_id": None,
+        "channel_name": None,
+        "actor_is_bot": 0,
+        "target_type": None,
+    }
+    out = _discord_event_to_dict(row)
+    assert out["actor_is_bot"] is False, "actor_is_bot=0 must deserialize to False, not None"
+    assert out["actor_is_bot"] is not None, "actor_is_bot=0 must not be treated as NULL"
