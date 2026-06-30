@@ -836,6 +836,24 @@ def _parse_limit(request: web.Request, *, default: int, maximum: int):
 # Audit (read-only)
 # ---------------------------------------------------------------------------
 
+def _discord_event_to_dict(row) -> dict:
+    raw_bot = row["actor_is_bot"]
+    return {
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "event_type": row["event_type"],
+        "actor_id": _sid(row["actor_id"]),
+        "actor_name": row["actor_name"],
+        "target_id": _sid(row["target_id"]),
+        "target_name": row["target_name"],
+        "details": row["details"],
+        "channel_id": _sid(row["channel_id"]) if row["channel_id"] is not None else None,
+        "channel_name": row["channel_name"],
+        "actor_is_bot": None if raw_bot is None else bool(raw_bot),
+        "target_type": row["target_type"],
+    }
+
+
 async def _handle_audit_discord(request: web.Request) -> web.Response:
     bot, gid = _guild_ctx(request)
     limit, err = _parse_limit(request, default=50, maximum=200)
@@ -861,19 +879,7 @@ async def _handle_audit_discord(request: web.Request) -> web.Response:
         )
 
     rows = await asyncio.to_thread(_query)
-    return web.json_response([
-        {
-            "id": row["id"],
-            "created_at": row["created_at"],
-            "event_type": row["event_type"],
-            "actor_id": _sid(row["actor_id"]),
-            "actor_name": row["actor_name"],
-            "target_id": _sid(row["target_id"]),
-            "target_name": row["target_name"],
-            "details": row["details"],
-        }
-        for row in rows
-    ])
+    return web.json_response([_discord_event_to_dict(row) for row in rows])
 
 
 async def _handle_audit_gw2(request: web.Request) -> web.Response:
