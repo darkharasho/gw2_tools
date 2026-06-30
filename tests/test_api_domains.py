@@ -162,6 +162,10 @@ async def test_audit_discord_shape_newest_first(api_client, bot):
         "target_id": None,
         "target_name": None,
         "details": None,
+        "channel_id": None,
+        "channel_name": None,
+        "actor_is_bot": None,
+        "target_type": None,
     }
     # Snowflake ids serialize as strings.
     assert body[1]["actor_id"] == "31" and body[1]["target_id"] == "30"
