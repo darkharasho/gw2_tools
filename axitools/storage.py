@@ -1393,7 +1393,11 @@ class AuditStore:
                     target_id INTEGER,
                     target_name TEXT,
                     target_name_normalized TEXT,
-                    details TEXT
+                    details TEXT,
+                    channel_id TEXT,
+                    channel_name TEXT,
+                    actor_is_bot INTEGER,
+                    target_type TEXT
                 );
                 CREATE TABLE IF NOT EXISTS gw2_audit_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1418,6 +1422,21 @@ class AuditStore:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_gw2_audit_log_unique ON gw2_audit_events(log_id);
                 """
             )
+            self._migrate_discord_columns(connection)
+
+    @staticmethod
+    def _migrate_discord_columns(connection) -> None:
+        existing = {
+            row["name"] for row in connection.execute("PRAGMA table_info(discord_audit_events)")
+        }
+        for column, ddl in (
+            ("channel_id", "channel_id TEXT"),
+            ("channel_name", "channel_name TEXT"),
+            ("actor_is_bot", "actor_is_bot INTEGER"),
+            ("target_type", "target_type TEXT"),
+        ):
+            if column not in existing:
+                connection.execute(f"ALTER TABLE discord_audit_events ADD COLUMN {ddl}")
 
     @staticmethod
     def _normalise_name(value: Optional[str]) -> Optional[str]:
@@ -1435,6 +1454,10 @@ class AuditStore:
         target_id: Optional[int],
         target_name: Optional[str],
         details: Optional[str],
+        channel_id: Optional[str] = None,
+        channel_name: Optional[str] = None,
+        actor_is_bot: Optional[bool] = None,
+        target_type: Optional[str] = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -1448,9 +1471,13 @@ class AuditStore:
                     target_id,
                     target_name,
                     target_name_normalized,
-                    details
+                    details,
+                    channel_id,
+                    channel_name,
+                    actor_is_bot,
+                    target_type
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     created_at,
@@ -1462,6 +1489,10 @@ class AuditStore:
                     target_name,
                     self._normalise_name(target_name),
                     details,
+                    channel_id,
+                    channel_name,
+                    None if actor_is_bot is None else int(actor_is_bot),
+                    target_type,
                 ),
             )
 

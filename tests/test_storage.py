@@ -208,3 +208,51 @@ def test_audit_channel_blacklist_defaults_empty(tmp_path):
     storage = StorageManager(tmp_path)
     loaded = storage.get_config(999001)
     assert loaded.audit_channel_blacklist == []
+
+
+def test_discord_audit_structured_fields_round_trip(tmp_path):
+    from axitools.storage import StorageManager
+
+    storage = StorageManager(tmp_path)
+    store = storage.get_audit_store(123)
+    store.add_discord_event(
+        created_at="2026-06-30T07:38:00Z",
+        event_type="channel_create",
+        actor_id=42,
+        actor_name="<@42> (rooster)",
+        target_id=None,
+        target_name=None,
+        details="",
+        channel_id="1449262177046495356",
+        channel_name="raid-signups",
+        actor_is_bot=True,
+        target_type="channel",
+    )
+    rows = store.query_discord_events_filtered(limit=10)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["channel_id"] == "1449262177046495356"
+    assert row["channel_name"] == "raid-signups"
+    assert row["actor_is_bot"] == 1
+    assert row["target_type"] == "channel"
+
+
+def test_discord_audit_structured_fields_default_null(tmp_path):
+    from axitools.storage import StorageManager
+
+    storage = StorageManager(tmp_path)
+    store = storage.get_audit_store(124)
+    store.add_discord_event(
+        created_at="2026-06-30T07:38:00Z",
+        event_type="member_leave",
+        actor_id=None,
+        actor_name=None,
+        target_id=7,
+        target_name="<@7> (khava)",
+        details="Details: Member left the server.",
+    )
+    row = store.query_discord_events_filtered(limit=10)[0]
+    assert row["channel_id"] is None
+    assert row["channel_name"] is None
+    assert row["actor_is_bot"] is None
+    assert row["target_type"] is None
