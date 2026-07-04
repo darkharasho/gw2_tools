@@ -365,8 +365,6 @@
 </footer>
 <script>
 (() => {
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting) { e.target.classList.add('inview'); io.unobserve(e.target); }
   }, { threshold:0.15, rootMargin:'0px 0px -40px 0px' });
