@@ -13,6 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<noscript><style>.rv{opacity:1 !important;transform:none !important;}</style></noscript>
 <style>
   :root {
     --bg:#06070f; --ink:#eaf6ff; --muted:#8ea2c4;
@@ -185,6 +186,11 @@
     .feature.flip .ftext { order:1; } .feature.flip .fmock { order:2; }
   }
 
+  @media (max-width:480px) {
+    header .hwrap { padding:0 18px; }
+    .navright .navlink { display:none; }
+  }
+
   @media (prefers-reduced-motion:reduce) {
     *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
     .hero h1, .hero .hsub, .hero .ctas, .appwrap { opacity:1 !important; transform:none !important; }
@@ -202,7 +208,7 @@
       <span class="wm">AXITOOLS</span>
     </a>
     <nav class="navright">
-      <a class="navlink" href="#commands">Commands</a>
+      <a class="navlink" href="/#commands">Commands</a>
       <a class="invite" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add to Discord</a>
     </nav>
   </div>
@@ -414,7 +420,7 @@
 <footer>
   <div class="fwrap">
     <div>© 2026 AxiTools</div>
-    <div><a href="#commands">Commands</a> &nbsp;·&nbsp; <a href="/privacy">Privacy</a> &nbsp;·&nbsp; <a href="/terms">Terms</a> &nbsp;·&nbsp; <a href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">Add to Discord</a></div>
+    <div><a href="/#commands">Commands</a> &nbsp;·&nbsp; <a href="/privacy">Privacy</a> &nbsp;·&nbsp; <a href="/terms">Terms</a> &nbsp;·&nbsp; <a href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">Add to Discord</a></div>
   </div>
 </footer>
 <script>
