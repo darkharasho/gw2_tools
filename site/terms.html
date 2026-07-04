@@ -27,12 +27,17 @@
   body { background:var(--bg); color:var(--ink); font-family:var(--font); line-height:1.65; font-size:16px; overflow-x:hidden; }
   a { color:inherit; }
   ::selection { background:rgba(199,100,255,0.35); }
-  .ambient { position:fixed; inset:0; z-index:-5; pointer-events:none;
-    background:
-      radial-gradient(55% 40% at 82% 12%, rgba(70,230,255,0.12), transparent 65%),
-      radial-gradient(50% 45% at 12% 45%, rgba(199,100,255,0.13), transparent 65%),
-      radial-gradient(55% 45% at 85% 82%, rgba(57,255,208,0.10), transparent 65%);
-    filter:blur(0.5px); }
+  /* aurora fog — no skew band */
+  .aurora{position:fixed;inset:0;z-index:-3;background:
+   radial-gradient(120% 70% at 50% -10%, rgba(70,230,255,.16), transparent 55%),
+   radial-gradient(90% 60% at 15% 5%, rgba(199,100,255,.14), transparent 50%),
+   radial-gradient(90% 60% at 85% 8%, rgba(57,255,208,.12), transparent 50%);}
+  .aurora::after{content:"";position:absolute;inset:0;opacity:.5;
+   background:linear-gradient(transparent 0%, var(--bg) 92%);}
+  /* faint hex/topo grid */
+  .grid{position:fixed;inset:0;z-index:-2;opacity:.06;
+   background-image:linear-gradient(var(--cyan) 1px,transparent 1px),linear-gradient(90deg,var(--cyan) 1px,transparent 1px);
+   background-size:64px 64px;mask-image:radial-gradient(120% 80% at 50% 0%,#000,transparent 70%);}
   header { position:absolute; top:0; left:0; right:0; z-index:30; }
   header .hwrap { max-width:1360px; margin:0 auto; padding:0 34px; display:flex; align-items:center; justify-content:space-between; height:78px; }
   .brand { display:flex; align-items:center; gap:11px; text-decoration:none; }
@@ -40,7 +45,8 @@
   .navright { display:flex; align-items:center; gap:10px; }
   .navlink { color:#fff; font-weight:600; font-size:13.5px; font-family:var(--display); text-decoration:none; padding:9px 14px; border-radius:12px; transition:background 0.25s; }
   .navlink:hover { background:rgba(255,255,255,0.14); }
-  .navright .invite { display:flex; align-items:center; gap:8px; color:#06070f; background:#fff; padding:9px 18px; border-radius:12px;
+  .navright .invite { display:flex; align-items:center; gap:8px; color:#06070f; background:var(--ink); padding:9px 18px;
+    clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
     font-weight:600; font-size:13.5px; text-decoration:none; font-family:var(--display); transition:transform 0.25s var(--ease), box-shadow 0.3s; }
   .navright .invite:hover { transform:translateY(-2px); box-shadow:0 8px 30px rgba(70,230,255,0.35); }
   footer { padding:30px 0 38px; position:relative; z-index:2; }
@@ -64,7 +70,7 @@
 </style>
 </head>
 <body>
-<div class="ambient"></div>
+<div class="aurora"></div><div class="grid"></div>
 <header>
   <div class="hwrap">
     <a class="brand" href="/" aria-label="AxiTools home">
