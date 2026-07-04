@@ -1,0 +1,10 @@
+{
+  "name": "axitools-site",
+  "private": true,
+  "scripts": {
+    "deploy:site": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
