@@ -42,9 +42,6 @@
   .brand { display:flex; align-items:center; gap:11px; text-decoration:none; }
   .brand .wm { font-family:var(--wordmark); font-weight:800; font-size:20px; letter-spacing:1px; color:#fff; }
   .navright { display:flex; align-items:center; gap:10px; }
-  .icobtn { width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center; color:#fff;
-    background:rgba(255,255,255,0.12); backdrop-filter:blur(8px); text-decoration:none; transition:background 0.25s, transform 0.25s var(--ease); }
-  .icobtn:hover { background:rgba(255,255,255,0.22); transform:translateY(-1px); }
   .navlink { color:#fff; font-weight:600; font-size:13.5px; font-family:var(--display); text-decoration:none; padding:9px 14px; border-radius:12px; transition:background 0.25s; }
   .navlink:hover { background:rgba(255,255,255,0.14); }
   .navright .invite { display:flex; align-items:center; gap:8px; color:#06070f; background:#fff; padding:9px 18px; border-radius:12px;
@@ -213,6 +210,7 @@
     </nav>
   </div>
 </header>
+<main>
 <div class="heroband">
   <div class="bgband"></div>
   <div class="stripes"><div class="s s1"></div><div class="s s2"></div><div class="s s3"></div><div class="s s4"></div></div>
@@ -416,7 +414,7 @@
   <p class="rv d1">Free · multi-guild · two-minute setup</p>
   <a class="pill rv d1" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add AxiTools to Discord</a>
 </div>
-
+</main>
 <footer>
   <div class="fwrap">
     <div>© 2026 AxiTools</div>
@@ -438,7 +436,7 @@
     setTimeout(() => { if (typing) typing.style.display = 'none'; msgs[1].classList.add('show'); }, 3200);
     setTimeout(play, 9000);
   }
-  if (msgs.length) play();
+  if (msgs.length >= 2) play();
 
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting) { e.target.classList.add('inview'); io.unobserve(e.target); }
