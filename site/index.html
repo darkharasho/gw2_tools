@@ -154,6 +154,32 @@
   .rv { opacity:0; transform:translateY(30px); transition:opacity 0.9s var(--ease), transform 0.9s var(--ease); }
   .rv.inview { opacity:1; transform:translateY(0); }
   .rv.d1 { transition-delay:0.12s; }
+
+  .gridsection { max-width:1200px; margin:0 auto; padding:150px 34px 0; }
+  .gridsection h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; text-align:center; margin-bottom:8px; }
+  .gridsection .lead { color:var(--muted); text-align:center; max-width:60ch; margin:0 auto 44px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .gcard { background:#16181d; border-radius:14px; padding:22px 24px; box-shadow:0 20px 50px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06); }
+  .gcard h3 { font-family:var(--display); font-size:17px; font-weight:600; margin-bottom:8px; }
+  .gcard p { color:#c3c9dd; font-size:14.5px; }
+  @media (max-width:860px) { .grid3 { grid-template-columns:1fr; } }
+
+  .setuplead { text-align:center; max-width:720px; margin:0 auto; padding:150px 28px 0; }
+  .setuplead h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; margin-bottom:14px; }
+  .setuplead p { color:var(--muted); }
+  .cmd { margin:36px auto 0; text-align:center; }
+  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:14px; padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
+  .cmd .line .prompt { color:var(--cyan); }
+  .cmd .line .okt { color:var(--teal); }
+  .cmd small { display:block; margin-top:14px; color:var(--muted); font-size:13px; }
+
+  .closeband { position:relative; overflow:hidden; margin-top:150px; padding:150px 0 170px; text-align:center; }
+  .closeband .bgband2 { position:absolute; inset:14% -10% -24% -10%; z-index:-2; transform:skewY(-7deg); transform-origin:bottom right;
+    background:linear-gradient(115deg,#0e6fa3 0%,#46e6ff 30%,#c764ff 66%,#39ffd0 100%); opacity:0.9; }
+  .closeband .bgband2::after { content:""; position:absolute; inset:0; background:radial-gradient(50% 70% at 50% 45%, rgba(199,100,255,0.3), transparent 65%); }
+  .closeband h2 { font-family:var(--display); font-size:clamp(30px,4vw,48px); font-weight:700; letter-spacing:-0.5px; margin-bottom:12px; text-shadow:0 4px 30px rgba(0,0,0,0.3); }
+  .closeband p { color:rgba(255,255,255,0.9); margin-bottom:36px; font-weight:500; }
+
   @media (max-width:960px) {
     .feature, .feature.flip { grid-template-columns:1fr; gap:44px; padding-top:100px; }
     .feature.flip .ftext { order:1; } .feature.flip .fmock { order:2; }
@@ -357,6 +383,32 @@
       </div>
     </div>
   </div>
+</div>
+
+<div class="gridsection" id="commands">
+  <h2 class="rv">Everything else your guild runs on</h2>
+  <p class="lead rv">Eleven systems, one bot — every server's data fully isolated. A few more you get out of the box:</p>
+  <div class="grid3">
+    <div class="gcard rv"><h3>Accounts &amp; API keys</h3><p>Members securely link their GW2 API keys; guild lookups by name resolve in seconds.</p></div>
+    <div class="gcard rv d1"><h3>Per-guild config</h3><p>One role-gated setup flow, with every server's settings and data stored separately.</p></div>
+    <div class="gcard rv d1"><h3>Audit logging</h3><p>Log joins, leaves, kicks, bans, edits and role/channel changes to a channel you choose.</p></div>
+  </div>
+</div>
+
+<div class="setuplead">
+  <h2 class="rv">Set up before your coffee cools</h2>
+  <p class="rv">One command. Every server gets its own config, roles, and isolated data.</p>
+</div>
+<div class="cmd rv">
+  <div class="line"><span class="prompt">/setup</span> modlog:#audit-log <span class="okt">✓ done</span></div>
+  <small>Creates roles, wires alerts, and stores this server's settings separately from every other guild.</small>
+</div>
+
+<div class="closeband">
+  <div class="bgband2"></div>
+  <h2 class="rv">Your guild deserves its own colors.</h2>
+  <p class="rv d1">Free · multi-guild · two-minute setup</p>
+  <a class="pill rv d1" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add AxiTools to Discord</a>
 </div>
 
 <footer>
