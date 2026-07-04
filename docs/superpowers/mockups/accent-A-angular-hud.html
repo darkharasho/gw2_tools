@@ -1,0 +1,55 @@
+<!-- Accent language source of truth: aurora + hex-grid ambient (replaces skewed bands),
+     angular clipped panels + corner brackets (replaces teardrop pins + doodles). -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#06070f;--ink:#eaf6ff;--muted:#8ea2c4;--cyan:#46e6ff;--mag:#c764ff;--teal:#39ffd0;--guard:#0c8fd6;--font:'Inter',sans-serif;--display:'Chakra Petch',sans-serif;--wm:'Orbitron',sans-serif;--mono:'JetBrains Mono',monospace;}
+*{margin:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);overflow:hidden}
+/* aurora fog — no skew band */
+.aurora{position:fixed;inset:0;z-index:-3;background:
+ radial-gradient(120% 70% at 50% -10%, rgba(70,230,255,.16), transparent 55%),
+ radial-gradient(90% 60% at 15% 5%, rgba(199,100,255,.14), transparent 50%),
+ radial-gradient(90% 60% at 85% 8%, rgba(57,255,208,.12), transparent 50%);}
+.aurora::after{content:"";position:absolute;inset:0;opacity:.5;
+ background:linear-gradient(transparent 0%, var(--bg) 92%);}
+/* faint hex/topo grid */
+.grid{position:fixed;inset:0;z-index:-2;opacity:.06;
+ background-image:linear-gradient(var(--cyan) 1px,transparent 1px),linear-gradient(90deg,var(--cyan) 1px,transparent 1px);
+ background-size:64px 64px;mask-image:radial-gradient(120% 80% at 50% 0%,#000,transparent 70%);}
+.cta{background:var(--ink);color:#06070f;padding:9px 18px;clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);}
+.b1{background:linear-gradient(90deg,var(--cyan),var(--teal));color:#06070f;font-weight:700;font-family:var(--display);padding:14px 26px;font-size:14px;letter-spacing:.5px;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px)}
+.b2{border:1px solid rgba(255,255,255,.18);color:var(--ink);font-family:var(--display);font-weight:600;padding:14px 26px;font-size:14px;background:rgba(255,255,255,.03)}
+/* HUD-framed panel — replaces .mockcard + teardrop .pin + .doodle */
+.panel{position:relative;background:linear-gradient(160deg,rgba(20,26,40,.9),rgba(10,13,22,.92));border:1px solid rgba(70,230,255,.22);padding:26px 28px;
+ clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,22px 100%,0 calc(100% - 22px));box-shadow:0 40px 90px rgba(0,0,0,.55),inset 0 0 60px rgba(70,230,255,.04)}
+.br{position:absolute;width:16px;height:16px;border:2px solid var(--cyan)}
+.br.tl{top:8px;left:8px;border-right:0;border-bottom:0}.br.br2{bottom:8px;right:8px;border-left:0;border-top:0}
+.ptop{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:var(--muted);border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:14px;margin-bottom:16px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+.cmd{font-family:var(--mono);font-size:13px;color:var(--cyan)}
+.title{font-family:var(--display);font-weight:700;font-size:22px;margin-bottom:4px;color:#dff3ff}
+/* profession accent = colored bar (replaces teardrop pin). Set --acc per row to a --p-* token. */
+.bar{height:3px;width:70px;background:linear-gradient(90deg,var(--acc,var(--guard)),var(--cyan));margin:8px 0 16px}
+.rowl{font-family:var(--mono);font-size:12.5px;line-height:2;color:var(--muted)}
+.rowl b{color:#dbeaff;font-weight:600}
+.tagline{margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic}
+.kick{font-family:var(--mono);font-size:12.5px;letter-spacing:3px;color:var(--cyan);text-transform:uppercase;margin-bottom:18px;display:flex;align-items:center;gap:12px}
+.kick::before{content:"";width:38px;height:1px;background:var(--cyan)}
+h1{font-family:var(--display);font-size:62px;line-height:1.05;font-weight:700;letter-spacing:-1px}
+h1 .g{font-family:var(--wm);font-weight:800;background:linear-gradient(90deg,var(--cyan),var(--teal));-webkit-background-clip:text;background-clip:text;color:transparent}
+</style></head>
+<body>
+<div class="aurora"></div><div class="grid"></div>
+<div style="max-width:560px;margin:80px auto;padding:0 40px">
+ <div class="panel">
+  <span class="br tl"></span><span class="br br2"></span>
+  <div class="ptop"><span class="dot"></span> AXITOOLS · TRANSMISSION <span style="margin-left:auto" class="cmd">/build guardian</span></div>
+  <div class="title">Power Dragonhunter — Roaming</div>
+  <div class="bar" style="--acc:#0c8fd6"></div>
+  <div class="rowl"><b>PROFESSION</b>&nbsp;&nbsp;Dragonhunter (Guardian)<br><b>CHAT CODE</b>&nbsp;&nbsp;[&amp;DQEKAwAAAA]<br><b>ROLE</b>&nbsp;&nbsp;High-mobility power DPS · burst &amp; disengage</div>
+  <div class="tagline">// updated by @Aria · themed to your professions</div>
+ </div>
+</div>
+</body></html>

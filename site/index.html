@@ -31,12 +31,17 @@
   body { background:var(--bg); color:var(--ink); font-family:var(--font); line-height:1.65; font-size:16px; overflow-x:hidden; }
   a { color:inherit; }
   ::selection { background:rgba(199,100,255,0.35); }
-  .ambient { position:fixed; inset:0; z-index:-5; pointer-events:none;
-    background:
-      radial-gradient(55% 40% at 82% 12%, rgba(70,230,255,0.12), transparent 65%),
-      radial-gradient(50% 45% at 12% 45%, rgba(199,100,255,0.13), transparent 65%),
-      radial-gradient(55% 45% at 85% 82%, rgba(57,255,208,0.10), transparent 65%);
-    filter:blur(0.5px); }
+  /* aurora fog — no skew band */
+  .aurora{position:fixed;inset:0;z-index:-3;background:
+   radial-gradient(120% 70% at 50% -10%, rgba(70,230,255,.16), transparent 55%),
+   radial-gradient(90% 60% at 15% 5%, rgba(199,100,255,.14), transparent 50%),
+   radial-gradient(90% 60% at 85% 8%, rgba(57,255,208,.12), transparent 50%);}
+  .aurora::after{content:"";position:absolute;inset:0;opacity:.5;
+   background:linear-gradient(transparent 0%, var(--bg) 92%);}
+  /* faint hex/topo grid */
+  .hex-grid{position:fixed;inset:0;z-index:-2;opacity:.06;
+   background-image:linear-gradient(var(--cyan) 1px,transparent 1px),linear-gradient(90deg,var(--cyan) 1px,transparent 1px);
+   background-size:64px 64px;mask-image:radial-gradient(120% 80% at 50% 0%,#000,transparent 70%);}
   header { position:absolute; top:0; left:0; right:0; z-index:30; }
   header .hwrap { max-width:1360px; margin:0 auto; padding:0 34px; display:flex; align-items:center; justify-content:space-between; height:78px; }
   .brand { display:flex; align-items:center; gap:11px; text-decoration:none; }
@@ -44,7 +49,8 @@
   .navright { display:flex; align-items:center; gap:10px; }
   .navlink { color:#fff; font-weight:600; font-size:13.5px; font-family:var(--display); text-decoration:none; padding:9px 14px; border-radius:12px; transition:background 0.25s; }
   .navlink:hover { background:rgba(255,255,255,0.14); }
-  .navright .invite { display:flex; align-items:center; gap:8px; color:#06070f; background:#fff; padding:9px 18px; border-radius:12px;
+  .navright .invite { display:flex; align-items:center; gap:8px; color:#06070f; background:var(--ink); padding:9px 18px;
+    clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
     font-weight:600; font-size:13.5px; text-decoration:none; font-family:var(--display); transition:transform 0.25s var(--ease), box-shadow 0.3s; }
   .navright .invite:hover { transform:translateY(-2px); box-shadow:0 8px 30px rgba(70,230,255,0.35); }
   footer { padding:30px 0 38px; position:relative; z-index:2; }
@@ -52,79 +58,62 @@
   footer a { color:var(--muted); text-decoration:none; transition:color 0.25s; }
   footer a:hover { color:#fff; }
 
-  .heroband { position:relative; overflow:hidden; padding:170px 0 90px; }
-  .heroband .bgband { position:absolute; inset:-24% -10% 10% -10%; z-index:-3; transform:skewY(-7deg); transform-origin:top left;
-    background:linear-gradient(115deg,#0b3a63 0%,#0e6fa3 20%,#46e6ff 40%,#c764ff 66%,#39ffd0 100%); opacity:0.9; }
-  .heroband .bgband::after { content:""; position:absolute; inset:0;
-    background:radial-gradient(60% 80% at 68% 25%, rgba(199,100,255,0.4), transparent 60%),
-               radial-gradient(50% 70% at 10% 80%, rgba(57,255,208,0.35), transparent 60%); }
-  .stripes { position:absolute; inset:0; z-index:-2; transform:skewY(-7deg); transform-origin:top left; pointer-events:none; }
-  .stripes .s { position:absolute; height:130px; opacity:0.45; animation:stripeIn 1.4s var(--ease) both; }
-  .stripes .s1 { width:56%; left:0; top:2%; background:linear-gradient(90deg,#46e6ff,rgba(70,230,255,0)); animation-delay:0.2s; }
-  .stripes .s2 { width:36%; left:0; top:20%; background:linear-gradient(90deg,#39ffd0,rgba(57,255,208,0)); animation-delay:0.35s; height:95px; }
-  .stripes .s3 { width:46%; right:0; top:52%; background:linear-gradient(270deg,#c764ff,rgba(199,100,255,0)); animation-delay:0.5s; }
-  .stripes .s4 { width:30%; right:0; top:72%; background:linear-gradient(270deg,#46e6ff,rgba(70,230,255,0)); animation-delay:0.65s; height:85px; opacity:0.3; }
-  @keyframes stripeIn { from { transform:translateX(var(--from,-100%)); opacity:0; } }
-  .stripes .s3, .stripes .s4 { --from:100%; }
-
-  .hero { max-width:1360px; margin:0 auto; padding:0 34px; display:grid; grid-template-columns:0.95fr 1.05fr; gap:40px; align-items:center; }
-  .hero h1 { font-family:var(--display); font-size:clamp(38px,4.6vw,60px); line-height:1.12; font-weight:700; letter-spacing:-0.5px;
-    text-shadow:0 4px 34px rgba(0,0,0,0.35); margin-bottom:16px; }
-  .hero h1 .accent { font-family:var(--wordmark); font-weight:800; letter-spacing:1px;
-    background:linear-gradient(90deg,#fff,#eaf6ff); -webkit-background-clip:text; background-clip:text; color:transparent; }
-  .hero .hsub { color:rgba(255,255,255,0.9); font-size:17px; max-width:52ch; margin-bottom:30px; }
-  .hero .ctas { display:flex; gap:14px; flex-wrap:wrap; }
-  .pill { display:inline-flex; align-items:center; gap:9px; padding:13px 26px; border-radius:10px; font-weight:600; font-size:13px;
+  /* command-console hero */
+  .hero-wrap { max-width:900px; margin:0 auto; padding:170px 40px 90px; text-align:center; }
+  .kick { font-family:var(--mono); font-size:12px; letter-spacing:3px; color:var(--cyan); text-transform:uppercase; margin-bottom:20px; }
+  .hero-wrap h1 { font-family:var(--display); font-size:clamp(38px,5.5vw,60px); line-height:1.06; font-weight:700; letter-spacing:-1px; margin-bottom:20px; }
+  .hero-wrap h1 .g { font-family:var(--wordmark); font-weight:800;
+    background:linear-gradient(90deg,var(--cyan),var(--mag)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { color:var(--muted); font-size:17px; max-width:56ch; margin:0 auto 30px; line-height:1.6; }
+  .palette { max-width:680px; margin:0 auto 36px; background:rgba(14,17,28,.92);
+    border:1px solid rgba(255,255,255,.09); border-radius:16px;
+    box-shadow:0 40px 100px rgba(0,0,0,.6); text-align:left; overflow:hidden; }
+  .palette-input { display:flex; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,.07); }
+  .palette-input .slash { font-family:var(--mono); color:var(--cyan); font-size:16px; }
+  .palette-input .txt { font-family:var(--mono); font-size:15px; color:#dbeaff; }
+  .palette-input .caret { width:9px; height:18px; background:var(--cyan); margin-left:2px; animation:bl 1s steps(1) infinite; opacity:.9; }
+  @keyframes bl { 50% { opacity:0; } }
+  .palette-input .kbd { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--muted); border:1px solid rgba(255,255,255,.14); border-radius:6px; padding:3px 8px; }
+  .result { padding:8px 12px; }
+  .opt { display:flex; align-items:center; gap:14px; padding:13px 14px; border-radius:10px; }
+  .opt.sel { background:linear-gradient(90deg,rgba(70,230,255,.12),transparent); }
+  .ic { width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:700; font-size:13px; color:#fff; }
+  .meta .t { font-family:var(--display); font-weight:600; font-size:15px; color:#eaf6ff; }
+  .meta .d { font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:2px; }
+  .opt .go { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--cyan); }
+  .hero-ctas { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+  .pill { display:inline-flex; align-items:center; gap:9px; padding:13px 26px; font-weight:600; font-size:13px;
     font-family:var(--display); letter-spacing:0.8px; text-transform:uppercase; text-decoration:none;
+    clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
     background:#fff; color:#06070f; box-shadow:0 8px 30px rgba(0,0,0,0.3); transition:transform 0.25s var(--ease), box-shadow 0.3s; }
   .pill:hover { transform:translateY(-2px); box-shadow:0 14px 40px rgba(0,0,0,0.4); }
   .pill.alt { background:rgba(255,255,255,0.14); color:#fff; backdrop-filter:blur(8px); }
-  .hero h1, .hero .hsub, .hero .ctas { opacity:0; transform:translateY(22px); animation:rise 0.9s var(--ease) forwards; }
-  .hero .hsub { animation-delay:0.1s; } .hero .ctas { animation-delay:0.18s; }
-  @keyframes rise { to { opacity:1; transform:none; } }
+  /* HUD-framed panel (angular corner brackets, profession accent bar) */
+  .panel{position:relative;background:linear-gradient(160deg,rgba(20,26,40,.9),rgba(10,13,22,.92));border:1px solid rgba(70,230,255,.22);padding:26px 28px;
+   clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,22px 100%,0 calc(100% - 22px));box-shadow:0 40px 90px rgba(0,0,0,.55),inset 0 0 60px rgba(70,230,255,.04)}
+  .br{position:absolute;width:16px;height:16px;border:2px solid var(--cyan)}
+  .br.tl{top:8px;left:8px;border-right:0;border-bottom:0}.br.br2{bottom:8px;right:8px;border-left:0;border-top:0}
+  .ptop{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:var(--muted);border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:14px;margin-bottom:16px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .pcmd{font-family:var(--mono);font-size:13px;color:var(--cyan)}
+  .ptitle{font-family:var(--display);font-weight:700;font-size:22px;margin-bottom:4px;color:#dff3ff}
+  /* profession accent = colored bar. Set --acc per row to a --p-* token. */
+  .bar{height:3px;width:70px;background:linear-gradient(90deg,var(--acc,var(--p-guard)),var(--cyan));margin:8px 0 16px}
+  .rowl{font-family:var(--mono);font-size:12.5px;line-height:2;color:var(--muted)}
+  .rowl b{color:#dbeaff;font-weight:600}
+  .tagline{margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic}
+  /* WvW tactical readout */
+  .hud{position:relative;background:linear-gradient(160deg,rgba(12,16,28,.94),rgba(7,9,17,.96));border:1px solid rgba(70,230,255,.18);border-radius:4px;box-shadow:0 40px 90px rgba(0,0,0,.6)}
+  .hud .top{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .hud .top b{color:var(--cyan);font-weight:600}
+  .pulse{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+  .mmap{height:150px;margin:14px 18px 0;border:1px solid rgba(255,255,255,.08);border-radius:3px;position:relative;overflow:hidden;background:radial-gradient(40% 60% at 30% 40%,rgba(70,230,255,.12),transparent),radial-gradient(40% 60% at 75% 65%,rgba(199,100,255,.12),transparent)}
+  .mmap .obj{position:absolute;font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;color:#05060d;font-weight:700}
+  .rank{padding:14px 18px 18px;font-family:var(--mono);font-size:13px}
+  .rk{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
+  .rk:last-child{border:0}.rk .p{width:20px;color:var(--muted)}.rk .n{flex:1;color:#dbeaff}.rk .v{color:var(--teal)}
+  .rk.you .n{color:var(--cyan);font-weight:600}
 
-  .appwrap { position:relative; opacity:0; transform:translateY(34px); animation:rise 1.1s var(--ease) 0.3s forwards; }
-  .app { border-radius:12px; overflow:hidden; display:grid; grid-template-columns:200px 1fr;
-    background:#313338; color:#dbdee1; font-size:13px; height:470px;
-    box-shadow:0 50px 110px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.09); }
-  .side { background:#2b2d31; display:flex; flex-direction:column; }
-  .side .sname { padding:14px; font-weight:700; color:#f2f3f5; font-size:14px; border-bottom:1px solid #1e1f22; }
-  .chgroup { padding:14px 8px 4px 14px; font-size:10.5px; font-weight:700; letter-spacing:0.4px; color:#80848e; text-transform:uppercase; }
-  .ch { margin:1px 8px; padding:5px 8px; border-radius:6px; color:#80848e; font-weight:500; display:flex; gap:7px; align-items:center; }
-  .ch.active { background:#3f4248; color:#f2f3f5; }
-  .ch .h { font-size:15px; font-weight:400; color:#80848e; }
-  .chat { display:flex; flex-direction:column; min-width:0; }
-  .chat .top { padding:11px 16px; display:flex; align-items:center; gap:8px; font-weight:600; color:#f2f3f5; border-bottom:1px solid #26272b; }
-  .chat .top .h { color:#80848e; font-size:18px; font-weight:400; }
-  .feed { flex:1; overflow:hidden; padding:14px 16px 6px; display:flex; flex-direction:column; gap:14px; justify-content:flex-end; }
-  .msg { display:flex; gap:12px; opacity:0; transform:translateY(10px); transition:opacity 0.45s var(--ease), transform 0.45s var(--ease); }
-  .msg.show { opacity:1; transform:none; }
-  .av { width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:#fff; overflow:hidden; }
-  .av.u1 { background:linear-gradient(135deg,#46e6ff,#4a90ff); }
-  .av.bot { background:#06070f; }
-  .av.bot img { width:24px; height:24px; }
-  .mhead { display:flex; align-items:baseline; gap:8px; }
-  .mname { font-weight:600; color:#f2f3f5; font-size:13px; }
-  .mtag { font-size:9.5px; font-weight:700; padding:1px 5px; border-radius:4px; background:#46e6ff; color:#06070f; }
-  .mtime { color:#80848e; font-size:11px; }
-  .mtext { color:#dbdee1; font-size:13px; }
-  .mtext .cmd { background:rgba(70,230,255,0.14); color:#8fe9ff; border-radius:4px; padding:1px 6px; font-family:var(--mono); font-size:12px; }
-  .dembed { border-left:4px solid var(--p-guard); background:#2b2d31; border-radius:6px; padding:12px 14px; margin-top:7px; max-width:440px; }
-  .dembed .dt { color:#7fd6ff; font-weight:700; font-size:13px; margin-bottom:6px; }
-  .dembed .dd { font-family:var(--mono); font-size:11px; color:#b5bac1; line-height:1.8; }
-  .dembed .dd b { color:#dbdee1; font-weight:600; }
-  .dembed .df { margin-top:8px; font-size:10.5px; color:#80848e; font-style:italic; }
-  .typing { display:flex; align-items:center; gap:8px; color:#80848e; font-size:12px; padding:0 16px 8px 64px; height:20px; }
-  .typing .dots i { display:inline-block; width:5px; height:5px; border-radius:50%; background:#80848e; margin-right:3px; animation:blink 1.2s infinite; }
-  .typing .dots i:nth-child(2){ animation-delay:0.2s; } .typing .dots i:nth-child(3){ animation-delay:0.4s; }
-  @keyframes blink { 0%,60%,100% { opacity:0.25; } 30% { opacity:1; } }
-  .inputbar { margin:0 14px 16px; background:#383a40; border-radius:8px; padding:10px 14px; color:#6d6f78; font-size:13px; }
-
-  @media (max-width:960px) {
-    .hero { grid-template-columns:1fr; }
-    .side { display:none; }
-    .app { grid-template-columns:1fr; height:440px; }
-  }
   .statstrip { background:rgba(6,7,15,0.85); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.05); position:relative; z-index:3; }
   .statstrip .swrap { max-width:1360px; margin:0 auto; padding:22px 34px; display:flex; align-items:center; justify-content:space-between; gap:24px; flex-wrap:wrap; }
   .sitem .lbl { font-size:14px; color:var(--muted); font-weight:500; display:block; line-height:1.3; }
@@ -140,15 +129,6 @@
   .tags { display:flex; flex-wrap:wrap; gap:10px; max-width:440px; }
   .tag { font-size:13px; font-weight:600; padding:6px 16px; border-radius:99px; color:#06070f; background:var(--tagc,#7dd3fc); }
   .fmock { position:relative; }
-  .fmock .doodle { position:absolute; z-index:-1; opacity:0.12; }
-  .mockcard { background:#16181d; border-radius:14px; padding:22px 24px; max-width:520px; margin:0 auto;
-    box-shadow:0 40px 90px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06); position:relative; }
-  .mockcard .row { display:flex; gap:12px; margin-bottom:14px; }
-  .mockcard .row:last-child { margin-bottom:0; }
-  .mockcard .dembed { max-width:none; }
-  .pin { position:absolute; top:-24px; right:-14px; width:52px; height:52px; border-radius:50% 50% 50% 4px;
-    display:flex; align-items:center; justify-content:center; color:#fff; box-shadow:0 12px 30px rgba(0,0,0,0.4); }
-  .pin img { width:28px; height:28px; }
   .rv { opacity:0; transform:translateY(30px); transition:opacity 0.9s var(--ease), transform 0.9s var(--ease); }
   .rv.inview { opacity:1; transform:translateY(0); }
   .rv.d1 { transition-delay:0.12s; }
@@ -157,7 +137,9 @@
   .gridsection h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; text-align:center; margin-bottom:8px; }
   .gridsection .lead { color:var(--muted); text-align:center; max-width:60ch; margin:0 auto 44px; }
   .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
-  .gcard { background:#16181d; border-radius:14px; padding:22px 24px; box-shadow:0 20px 50px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06); }
+  .gcard { background:linear-gradient(160deg,rgba(18,22,36,.92),rgba(10,13,22,.95)); padding:22px 24px;
+    clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%);
+    border:1px solid rgba(70,230,255,.12); box-shadow:0 20px 50px rgba(0,0,0,0.45),inset 0 0 40px rgba(70,230,255,.03); }
   .gcard h3 { font-family:var(--display); font-size:17px; font-weight:600; margin-bottom:8px; }
   .gcard p { color:#c3c9dd; font-size:14.5px; }
   @media (max-width:860px) { .grid3 { grid-template-columns:1fr; } }
@@ -166,15 +148,14 @@
   .setuplead h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; margin-bottom:14px; }
   .setuplead p { color:var(--muted); }
   .cmd { margin:36px auto 0; text-align:center; }
-  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:14px; padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
+  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(70,230,255,.18); clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px); padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
   .cmd .line .prompt { color:var(--cyan); }
   .cmd .line .okt { color:var(--teal); }
   .cmd small { display:block; margin-top:14px; color:var(--muted); font-size:13px; }
 
-  .closeband { position:relative; overflow:hidden; margin-top:150px; padding:150px 0 170px; text-align:center; }
-  .closeband .bgband2 { position:absolute; inset:14% -10% -24% -10%; z-index:-2; transform:skewY(-7deg); transform-origin:bottom right;
-    background:linear-gradient(115deg,#0e6fa3 0%,#46e6ff 30%,#c764ff 66%,#39ffd0 100%); opacity:0.9; }
-  .closeband .bgband2::after { content:""; position:absolute; inset:0; background:radial-gradient(50% 70% at 50% 45%, rgba(199,100,255,0.3), transparent 65%); }
+  .closeband { position:relative; margin-top:150px; padding:150px 0 170px; text-align:center;
+    background:linear-gradient(180deg,rgba(70,230,255,.06),rgba(199,100,255,.06));
+    border-top:1px solid rgba(70,230,255,.15); border-bottom:1px solid rgba(70,230,255,.15); }
   .closeband h2 { font-family:var(--display); font-size:clamp(30px,4vw,48px); font-weight:700; letter-spacing:-0.5px; margin-bottom:12px; text-shadow:0 4px 30px rgba(0,0,0,0.3); }
   .closeband p { color:rgba(255,255,255,0.9); margin-bottom:36px; font-weight:500; }
 
@@ -190,14 +171,13 @@
 
   @media (prefers-reduced-motion:reduce) {
     *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
-    .hero h1, .hero .hsub, .hero .ctas, .appwrap { opacity:1 !important; transform:none !important; }
-    .msg { opacity:1 !important; transform:none !important; }
+    .caret { animation:none; }
     .rv { opacity:1 !important; transform:none !important; }
   }
 </style>
 </head>
 <body>
-<div class="ambient"></div>
+<div class="aurora"></div><div class="hex-grid"></div>
 <header>
   <div class="hwrap">
     <a class="brand" href="/" aria-label="AxiTools home">
@@ -211,57 +191,35 @@
   </div>
 </header>
 <main>
-<div class="heroband">
-  <div class="bgband"></div>
-  <div class="stripes"><div class="s s1"></div><div class="s s2"></div><div class="s s3"></div><div class="s s4"></div></div>
-  <div class="hero">
-    <div>
-      <h1>Project your guild into the <span class="accent">Mists.</span></h1>
-      <p class="hsub">One multi-guild Guild Wars 2 Discord bot — builds, squad comps, WvW matchups, patch notes, streaming alerts and automatic guild-roles, all lit up in your professions' colors.</p>
-      <div class="ctas">
-        <a class="pill" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add to Discord</a>
-        <a class="pill alt" href="#features">→ See what it does</a>
+<div class="hero-wrap">
+  <div class="kick">One bot · Eleven systems · Your professions' colors</div>
+  <h1>Your whole guild,<br>one <span class="g">slash</span> away.</h1>
+  <p class="sub">Builds, squad comps, WvW matchups, patch feeds and auto guild-roles — every AxiTools command answers with a rich, profession-themed embed in Discord.</p>
+  <div class="palette" aria-label="Command palette showing /build guardian">
+    <div class="palette-input">
+      <span class="slash">/</span><span class="txt">build guardian</span><span class="caret" aria-hidden="true"></span><span class="kbd">↵ run</span>
+    </div>
+    <div class="result">
+      <div class="opt sel">
+        <div class="ic" style="background:linear-gradient(135deg,var(--p-guard),#46e6ff)">DH</div>
+        <div class="meta"><div class="t">Power Dragonhunter — Roaming</div><div class="d">Guardian · [&amp;DQEKAwAAAA] · burst &amp; disengage</div></div>
+        <span class="go">open ↵</span>
+      </div>
+      <div class="opt">
+        <div class="ic" style="background:linear-gradient(135deg,var(--p-necro),var(--teal))">SC</div>
+        <div class="meta"><div class="t">Condi Scourge — Zerg</div><div class="d">Necromancer · corruption &amp; barrier</div></div>
+        <span class="go">↑↓</span>
+      </div>
+      <div class="opt">
+        <div class="ic" style="background:linear-gradient(135deg,var(--p-mes),var(--mag))">CH</div>
+        <div class="meta"><div class="t">Support Chronomancer</div><div class="d">Mesmer · quickness &amp; alacrity</div></div>
+        <span class="go">↑↓</span>
       </div>
     </div>
-    <div class="appwrap">
-      <div class="app" aria-label="Discord showing AxiTools posting a themed build">
-        <div class="side">
-          <div class="sname">Mists Vanguard [MV]</div>
-          <div class="chgroup">Text channels</div>
-          <div class="ch"><span class="h">#</span>general</div>
-          <div class="ch active"><span class="h">#</span>builds</div>
-          <div class="ch"><span class="h">#</span>wvw</div>
-          <div class="ch"><span class="h">#</span>comps</div>
-        </div>
-        <div class="chat">
-          <div class="top"><span class="h">#</span>builds</div>
-          <div class="feed" id="feed">
-            <div class="msg">
-              <div class="av u1">A</div>
-              <div><div class="mhead"><span class="mname">Aria</span><span class="mtime">Today at 7:42 PM</span></div>
-              <div class="mtext"><span class="cmd">/build guardian dragonhunter</span></div></div>
-            </div>
-            <div class="msg">
-              <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
-              <div>
-                <div class="mhead"><span class="mname">AxiTools</span> <span class="mtag">✓ APP</span><span class="mtime">Today at 7:42 PM</span></div>
-                <div class="dembed">
-                  <div class="dt">Power Dragonhunter — Roaming</div>
-                  <div class="dd">
-                    <b>Profession</b> Dragonhunter (Guardian)<br>
-                    <b>Chat code</b> [&amp;DQEKAwAAAA]<br>
-                    <b>Description</b> High-mobility power DPS for WvW roaming. Strong burst, great disengage.
-                  </div>
-                  <div class="df">Updated by @Aria · Jun 9, 2026 — themed to your professions</div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="typing" id="typing" style="display:none"><span class="dots"><i></i><i></i><i></i></span> AxiTools is thinking…</div>
-          <div class="inputbar">Message #builds</div>
-        </div>
-      </div>
-    </div>
+  </div>
+  <div class="hero-ctas">
+    <a class="pill" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add to Discord</a>
+    <a class="pill alt" href="#features">→ See what it does</a>
   </div>
 </div>
 <div class="statstrip">
@@ -286,18 +244,13 @@
     </div>
   </div>
   <div class="fmock rv d1">
-    <svg class="doodle" width="220" height="220" viewBox="0 0 200 200" style="top:-60px; left:-40px" fill="none" stroke="#46e6ff" stroke-width="2"><circle cx="100" cy="100" r="60"/><circle cx="100" cy="100" r="90"/></svg>
-    <div class="mockcard">
-      <div class="pin" style="background:var(--p-guard)"><img src="/assets/prof/Dragonhunter.png" alt=""></div>
-      <div class="row">
-        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
-        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#7fd6ff">AxiTools</span><span class="mtag">✓ APP</span><span class="mtime">Today at 7:42 PM</span></div>
-        <div class="dembed">
-          <div class="dt">Power Dragonhunter — Roaming</div>
-          <div class="dd"><b>Profession</b> Dragonhunter (Guardian)<br><b>Chat code</b> [&amp;DQEKAwAAAA]<br><b>Description</b> High-mobility power DPS for WvW roaming.</div>
-          <div class="df">Updated by @Aria · Jun 9, 2026</div>
-        </div></div>
-      </div>
+    <div class="panel">
+      <span class="br tl"></span><span class="br br2"></span>
+      <div class="ptop"><span class="dot"></span> AXITOOLS · TRANSMISSION <span style="margin-left:auto" class="pcmd">/build guardian</span></div>
+      <div class="ptitle">Power Dragonhunter — Roaming</div>
+      <div class="bar" style="--acc:var(--p-guard)"></div>
+      <div class="rowl"><b>PROFESSION</b>&nbsp;&nbsp;Dragonhunter (Guardian)<br><b>CHAT CODE</b>&nbsp;&nbsp;[&amp;DQEKAwAAAA]<br><b>ROLE</b>&nbsp;&nbsp;High-mobility power DPS · burst &amp; disengage</div>
+      <div class="tagline">// updated by @Aria · themed to your professions</div>
     </div>
   </div>
 </div>
@@ -315,18 +268,13 @@
     </div>
   </div>
   <div class="fmock rv d1">
-    <svg class="doodle" width="240" height="200" viewBox="0 0 240 200" style="bottom:-50px; right:-30px" fill="none" stroke="#c764ff" stroke-width="2"><path d="M20 180 Q 120 20 220 120"/><circle cx="220" cy="120" r="14"/></svg>
-    <div class="mockcard">
-      <div class="pin" style="background:var(--p-mes)"><img src="/assets/prof/Chronomancer.png" alt=""></div>
-      <div class="row">
-        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
-        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#c4b5fd">AxiTools</span><span class="mtag" style="background:#c764ff">✓ APP</span><span class="mtime">Fri at 8:00 PM</span></div>
-        <div class="dembed" style="border-left-color:var(--p-mes)">
-          <div class="dt" style="color:#d6b8ff">WvW Raid — Friday Reset</div>
-          <div class="dd"><b>Firebrand</b> 3/4 · <b>Scourge</b> 4/5 · <b>Chrono</b> 2/2<br><b>Spellbreaker</b> 1/3 · <b>Scrapper</b> 2/2<br><b>Signed up</b> 34 / 50</div>
-          <div class="df">Pick your role from the dropdown below ↓</div>
-        </div></div>
-      </div>
+    <div class="panel">
+      <span class="br tl"></span><span class="br br2"></span>
+      <div class="ptop"><span class="dot"></span> AXITOOLS · TRANSMISSION <span style="margin-left:auto" class="pcmd">/comp schedule</span></div>
+      <div class="ptitle">WvW Raid — Friday Reset</div>
+      <div class="bar" style="--acc:var(--p-mes)"></div>
+      <div class="rowl"><b>FIREBRAND</b>&nbsp;&nbsp;3/4 · <b>SCOURGE</b>&nbsp;&nbsp;4/5 · <b>CHRONO</b>&nbsp;&nbsp;2/2<br><b>SPELLBREAKER</b>&nbsp;&nbsp;1/3 · <b>SCRAPPER</b>&nbsp;&nbsp;2/2<br><b>SIGNED UP</b>&nbsp;&nbsp;34 / 50</div>
+      <div class="tagline">// pick your role from the dropdown below ↓</div>
     </div>
   </div>
 </div>
@@ -344,17 +292,17 @@
     </div>
   </div>
   <div class="fmock rv d1">
-    <svg class="doodle" width="200" height="200" viewBox="0 0 200 200" style="top:-40px; right:-50px" fill="none" stroke="#39ffd0" stroke-width="2"><path d="M100 20 L160 40 V90 C160 130 135 155 100 170 C65 155 40 130 40 90 V40 Z"/></svg>
-    <div class="mockcard">
-      <div class="pin" style="background:#0e6fa3"><img src="/assets/axitools-logo.svg" alt="" style="filter:brightness(0) invert(1)"></div>
-      <div class="row">
-        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
-        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#7fd6ff">AxiTools</span><span class="mtag">✓ APP</span><span class="mtime">Today at 6:00 PM</span></div>
-        <div class="dembed" style="border-left-color:#39ffd0">
-          <div class="dt" style="color:#8ff4dd">This Week's Matchup — NA Tier 2</div>
-          <div class="dd"><b>1st</b> Blackgate — 214k<br><b>2nd</b> Your Link — 198k<br><b>3rd</b> Maguuma — 176k</div>
-          <div class="df">Next reset in 2d 4h · relink alert armed</div>
-        </div></div>
+    <div class="hud">
+      <div class="top"><span class="pulse"></span> <b>/wvw matchup</b> &nbsp;·&nbsp; reset in 2d 04h</div>
+      <div class="mmap">
+        <span class="obj" style="top:30%;left:22%;background:var(--cyan)">BG</span>
+        <span class="obj" style="top:56%;left:60%;background:var(--teal)">YOU</span>
+        <span class="obj" style="top:70%;left:30%;background:var(--mag)">MAG</span>
+      </div>
+      <div class="rank">
+        <div class="rk"><span class="p">1</span><span class="n">Blackgate</span><span class="v">214k</span></div>
+        <div class="rk you"><span class="p">2</span><span class="n">Your Link ▸ Mists Vanguard</span><span class="v">198k</span></div>
+        <div class="rk"><span class="p">3</span><span class="n">Maguuma</span><span class="v">176k</span></div>
       </div>
     </div>
   </div>
@@ -373,18 +321,13 @@
     </div>
   </div>
   <div class="fmock rv d1">
-    <svg class="doodle" width="220" height="180" viewBox="0 0 220 180" style="bottom:-40px; left:-50px" fill="none" stroke="#39ffd0" stroke-width="2"><path d="M20 90 Q 60 30 110 60 T 200 70"/><circle cx="20" cy="90" r="10"/></svg>
-    <div class="mockcard">
-      <div class="pin" style="background:var(--p-necro)"><img src="/assets/prof/Reaper.png" alt=""></div>
-      <div class="row">
-        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
-        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#8ff4dd">AxiTools</span><span class="mtag" style="background:#39ffd0">✓ APP</span><span class="mtime">Today at 9:15 AM</span></div>
-        <div class="dembed" style="border-left-color:#9146ff">
-          <div class="dt" style="color:#c9a6ff">🔴 Aria is live on Twitch</div>
-          <div class="dd"><b>WvW roaming — reset prep</b><br>twitch.tv/aria</div>
-          <div class="df">Auto-posted · role @Streamer pinged</div>
-        </div></div>
-      </div>
+    <div class="panel">
+      <span class="br tl"></span><span class="br br2"></span>
+      <div class="ptop"><span class="dot"></span> AXITOOLS · TRANSMISSION <span style="margin-left:auto" class="pcmd">/stream alert</span></div>
+      <div class="ptitle">Aria is live on Twitch</div>
+      <div class="bar" style="--acc:var(--p-necro)"></div>
+      <div class="rowl"><b>STREAM</b>&nbsp;&nbsp;WvW roaming — reset prep<br><b>CHANNEL</b>&nbsp;&nbsp;twitch.tv/aria<br><b>TRIGGER</b>&nbsp;&nbsp;Auto-posted · role @Streamer pinged</div>
+      <div class="tagline">// patch notes, ArcDPS pings &amp; guild-roles also auto-posted</div>
     </div>
   </div>
 </div>
@@ -409,7 +352,6 @@
 </div>
 
 <div class="closeband">
-  <div class="bgband2"></div>
   <h2 class="rv">Your guild deserves its own colors.</h2>
   <p class="rv d1">Free · multi-guild · two-minute setup</p>
   <a class="pill rv d1" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add AxiTools to Discord</a>
@@ -423,21 +365,6 @@
 </footer>
 <script>
 (() => {
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  const msgs = [...document.querySelectorAll('#feed .msg')];
-  const typing = document.getElementById('typing');
-  function play() {
-    msgs.forEach((m) => m.classList.remove('show'));
-    if (typing) typing.style.display = 'none';
-    if (reduced) { msgs.forEach((m) => m.classList.add('show')); return; }
-    setTimeout(() => msgs[0].classList.add('show'), 700);
-    setTimeout(() => { if (typing) typing.style.display = 'flex'; }, 1600);
-    setTimeout(() => { if (typing) typing.style.display = 'none'; msgs[1].classList.add('show'); }, 3200);
-    setTimeout(play, 9000);
-  }
-  if (msgs.length >= 2) play();
-
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting) { e.target.classList.add('inview'); io.unobserve(e.target); }
   }, { threshold:0.15, rootMargin:'0px 0px -40px 0px' });
