@@ -5,76 +5,117 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AxiTools — Terms of Service</title>
 <meta name="description" content="Terms of Service for the AxiTools Guild Wars 2 Discord bot.">
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="canonical" href="https://tools.axi.link/terms">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#06070f; --ink:#eaf6ff; --muted:#8ea2c4; --line:rgba(120,160,255,.18);
-    --cyan:#46e6ff; --mag:#c764ff; --teal:#39ffd0; --brand:#995d25;
+  :root {
+    --bg:#06070f; --ink:#eaf6ff; --muted:#8ea2c4;
+    --cyan:#46e6ff; --mag:#c764ff; --teal:#39ffd0;
+    --p-guard:#0c8fd6; --p-war:#c7892b; --p-rev:#79236f; --p-eng:#b77c34;
+    --p-ranger:#4b8e4b; --p-thief:#a02e2d; --p-ele:#f68a35; --p-mes:#b46dff; --p-necro:#3a9d23;
+    --font:'Inter',system-ui,sans-serif;
+    --display:'Chakra Petch',var(--font);
+    --wordmark:'Orbitron',var(--display);
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --ease:cubic-bezier(0.22,1,0.36,1);
   }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{color:var(--ink);font-family:'Rajdhani',system-ui,-apple-system,sans-serif;line-height:1.6;
+  * { box-sizing:border-box; margin:0; }
+  html { scroll-behavior:smooth; }
+  body { background:var(--bg); color:var(--ink); font-family:var(--font); line-height:1.65; font-size:16px; overflow-x:hidden; }
+  a { color:inherit; }
+  ::selection { background:rgba(199,100,255,0.35); }
+  .ambient { position:fixed; inset:0; z-index:-5; pointer-events:none;
     background:
-      radial-gradient(900px 600px at 80% -5%, rgba(199,100,255,.16), transparent 55%),
-      radial-gradient(900px 600px at 8% 8%, rgba(70,230,255,.14), transparent 55%),
-      #06070f;min-height:100vh;}
-  .wrap{max-width:820px;margin:0 auto;padding:48px 22px 80px}
-  a{color:var(--cyan)}
-  h1{font-family:'Orbitron',sans-serif;font-size:30px;letter-spacing:.02em;margin-bottom:6px}
-  h2{font-family:'Orbitron',sans-serif;font-size:18px;margin:34px 0 10px;color:var(--cyan)}
-  p,li{color:var(--ink);font-size:16px;margin-bottom:10px}
-  ul{padding-left:22px}
-  .muted{color:var(--muted);font-size:14px}
-  .back{display:inline-block;margin-bottom:26px;color:var(--muted);text-decoration:none}
-  .note{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:22px 0;color:var(--muted);font-size:14px}
-  footer{border-top:1px solid var(--line);margin-top:40px;padding-top:20px}
-  footer a{color:var(--muted);margin-right:16px}
+      radial-gradient(55% 40% at 82% 12%, rgba(70,230,255,0.12), transparent 65%),
+      radial-gradient(50% 45% at 12% 45%, rgba(199,100,255,0.13), transparent 65%),
+      radial-gradient(55% 45% at 85% 82%, rgba(57,255,208,0.10), transparent 65%);
+    filter:blur(0.5px); }
+  header { position:absolute; top:0; left:0; right:0; z-index:30; }
+  header .hwrap { max-width:1360px; margin:0 auto; padding:0 34px; display:flex; align-items:center; justify-content:space-between; height:78px; }
+  .brand { display:flex; align-items:center; gap:11px; text-decoration:none; }
+  .brand .wm { font-family:var(--wordmark); font-weight:800; font-size:20px; letter-spacing:1px; color:#fff; }
+  .navright { display:flex; align-items:center; gap:10px; }
+  .navlink { color:#fff; font-weight:600; font-size:13.5px; font-family:var(--display); text-decoration:none; padding:9px 14px; border-radius:12px; transition:background 0.25s; }
+  .navlink:hover { background:rgba(255,255,255,0.14); }
+  .navright .invite { display:flex; align-items:center; gap:8px; color:#06070f; background:#fff; padding:9px 18px; border-radius:12px;
+    font-weight:600; font-size:13.5px; text-decoration:none; font-family:var(--display); transition:transform 0.25s var(--ease), box-shadow 0.3s; }
+  .navright .invite:hover { transform:translateY(-2px); box-shadow:0 8px 30px rgba(70,230,255,0.35); }
+  footer { padding:30px 0 38px; position:relative; z-index:2; }
+  footer .fwrap { max-width:1360px; margin:0 auto; padding:0 34px; display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--muted); flex-wrap:wrap; gap:12px; }
+  footer a { color:var(--muted); text-decoration:none; transition:color 0.25s; }
+  footer a:hover { color:#fff; }
+
+  .legal { max-width:760px; margin:0 auto; padding:150px 28px 90px; }
+  .legal h1 { font-family:var(--display); font-size:clamp(30px,4vw,46px); font-weight:700; letter-spacing:-0.5px; margin-bottom:8px; }
+  .legal .updated { color:var(--muted); font-size:14px; margin-bottom:36px; }
+  .legal h2 { font-family:var(--display); font-size:22px; font-weight:600; margin:34px 0 12px; }
+  .legal p, .legal li { color:#c3c9dd; font-size:15.5px; margin-bottom:12px; }
+  .legal ul { padding-left:22px; margin-bottom:12px; }
+  .legal a { color:var(--cyan); text-decoration:none; }
+  .legal a:hover { text-decoration:underline; }
+
+  @media (max-width:480px) {
+    header .hwrap { padding:0 18px; }
+    .navright .navlink { display:none; }
+  }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <a class="back" href="/">← AxiTools</a>
-    <h1>Terms of Service</h1>
-    <p class="muted">Last updated: 3 July 2026 · Operator: AxiTools · Contact: <a href="mailto:support@axi.link">support@axi.link</a></p>
-
-    <div class="note">These terms govern your use of the AxiTools Discord bot. They are written to be clear and practical; they are not legal advice and have not been lawyer-reviewed.</div>
-
-    <h2>1. Acceptance</h2>
-    <p>By adding AxiTools to a Discord server or using its commands, you agree to these Terms of Service and to the <a href="privacy">Privacy Policy</a>. If you do not agree, do not use the bot.</p>
-
-    <h2>2. The service</h2>
-    <p>AxiTools is a free, community-run Guild Wars 2 Discord bot providing build management, squad compositions, WvW information, patch-note notifications, and related features. The service is provided at no cost and on a best-effort basis.</p>
-
-    <h2>3. Acceptable use</h2>
-    <ul>
-      <li>Do not use the bot for any unlawful purpose or to harass, abuse, or harm others.</li>
-      <li>Do not attempt to disrupt, overload, reverse-engineer for abuse, or gain unauthorized access to the bot or its infrastructure.</li>
-      <li>You are responsible for the content and configuration you create through the bot.</li>
-    </ul>
-
-    <h2>4. Third-party services</h2>
-    <p>Use of AxiTools also requires compliance with <a href="https://discord.com/terms" target="_blank" rel="noopener">Discord's Terms of Service</a> and ArenaNet's Guild Wars 2 <a href="https://www.guildwars2.com/en/legal/guild-wars-2-user-agreement/" target="_blank" rel="noopener">User Agreement</a>. AxiTools is not affiliated with, endorsed by, or sponsored by Discord or ArenaNet.</p>
-
-    <h2>5. Availability &amp; changes</h2>
-    <p>The bot may be modified, interrupted, or discontinued at any time without notice. We may update these terms; the "last updated" date above will change and continued use constitutes acceptance.</p>
-
-    <h2>6. Disclaimer of warranty</h2>
-    <p>AxiTools is provided "as is" and "as available", without warranties of any kind, express or implied, including fitness for a particular purpose and non-infringement. We do not warrant that the service will be uninterrupted, error-free, or secure.</p>
-
-    <h2>7. Limitation of liability</h2>
-    <p>To the maximum extent permitted by applicable law, the operator of AxiTools shall not be liable for any indirect, incidental, or consequential damages, or any loss of data, arising from your use of or inability to use the bot.</p>
-
-    <h2>8. Contact</h2>
-    <p>Questions about these terms: <a href="mailto:support@axi.link">support@axi.link</a>.</p>
-
-    <footer>
-      <a href="/">Home</a>
-      <a href="privacy">Privacy Policy</a>
-      <a href="mailto:support@axi.link">support@axi.link</a>
-    </footer>
+<div class="ambient"></div>
+<header>
+  <div class="hwrap">
+    <a class="brand" href="/" aria-label="AxiTools home">
+      <img src="/assets/axitools-logo.svg" width="34" height="34" alt="">
+      <span class="wm">AXITOOLS</span>
+    </a>
+    <nav class="navright">
+      <a class="navlink" href="/#commands">Commands</a>
+      <a class="invite" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add to Discord</a>
+    </nav>
   </div>
+</header>
+<main class="legal">
+  <h1>Terms of Service</h1>
+  <p class="updated">Last updated: 3 July 2026 · Operator: AxiTools · Contact: <a href="mailto:support@axi.link">support@axi.link</a></p>
+
+  <p>These terms govern your use of the AxiTools Discord bot. They are written to be clear and practical; they are not legal advice and have not been lawyer-reviewed.</p>
+
+  <h2>1. Acceptance</h2>
+  <p>By adding AxiTools to a Discord server or using its commands, you agree to these Terms of Service and to the <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the bot.</p>
+
+  <h2>2. The service</h2>
+  <p>AxiTools is a free, community-run Guild Wars 2 Discord bot providing build management, squad compositions, WvW information, patch-note notifications, and related features. The service is provided at no cost and on a best-effort basis.</p>
+
+  <h2>3. Acceptable use</h2>
+  <ul>
+    <li>Do not use the bot for any unlawful purpose or to harass, abuse, or harm others.</li>
+    <li>Do not attempt to disrupt, overload, reverse-engineer for abuse, or gain unauthorized access to the bot or its infrastructure.</li>
+    <li>You are responsible for the content and configuration you create through the bot.</li>
+  </ul>
+
+  <h2>4. Third-party services</h2>
+  <p>Use of AxiTools also requires compliance with <a href="https://discord.com/terms" target="_blank" rel="noopener">Discord's Terms of Service</a> and ArenaNet's Guild Wars 2 <a href="https://www.guildwars2.com/en/legal/guild-wars-2-user-agreement/" target="_blank" rel="noopener">User Agreement</a>. AxiTools is not affiliated with, endorsed by, or sponsored by Discord or ArenaNet.</p>
+
+  <h2>5. Availability &amp; changes</h2>
+  <p>The bot may be modified, interrupted, or discontinued at any time without notice. We may update these terms; the "last updated" date above will change and continued use constitutes acceptance.</p>
+
+  <h2>6. Disclaimer of warranty</h2>
+  <p>AxiTools is provided "as is" and "as available", without warranties of any kind, express or implied, including fitness for a particular purpose and non-infringement. We do not warrant that the service will be uninterrupted, error-free, or secure.</p>
+
+  <h2>7. Limitation of liability</h2>
+  <p>To the maximum extent permitted by applicable law, the operator of AxiTools shall not be liable for any indirect, incidental, or consequential damages, or any loss of data, arising from your use of or inability to use the bot.</p>
+
+  <h2>8. Contact</h2>
+  <p>Questions about these terms: <a href="mailto:support@axi.link">support@axi.link</a>.</p>
+</main>
+<footer>
+  <div class="fwrap">
+    <div>© 2026 AxiTools</div>
+    <div><a href="/">Home</a> &nbsp;·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp; <a href="mailto:support@axi.link">support@axi.link</a></div>
+  </div>
+</footer>
 </body>
 </html>

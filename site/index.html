@@ -5,977 +5,444 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AxiTools — Command your Guild Wars 2 guild from inside Discord</title>
 <meta name="description" content="AxiTools is a multi-guild Guild Wars 2 Discord bot: builds, squad comps, WvW matchups, patch notes, streaming alerts and automatic guild-roles — themed in your professions' colors.">
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="canonical" href="https://tools.axi.link/">
+<meta property="og:title" content="AxiTools — Command your Guild Wars 2 guild from inside Discord">
+<meta property="og:description" content="Multi-guild GW2 Discord bot: builds, squad comps, WvW matchups, patch notes, streaming alerts and auto guild-roles — themed in your professions' colors.">
+<meta property="og:url" content="https://tools.axi.link/">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<noscript><style>.rv{opacity:1 !important;transform:none !important;}</style></noscript>
 <style>
-  :root{
-    --bg:#06070f; --ink:#eaf6ff; --muted:#8ea2c4; --line:rgba(120,160,255,.18);
+  :root {
+    --bg:#06070f; --ink:#eaf6ff; --muted:#8ea2c4;
     --cyan:#46e6ff; --mag:#c764ff; --teal:#39ffd0;
-    --brand:#995d25; /* BRAND_COLOUR rgb(153,93,37) from axitools/branding.py */
-    --twitch:#9146ff; --youtube:#ff0000;
-    /* WvW worlds */
-    --red:#ff5a52; --blue:#4a90ff; --green:#4ddb7a;
-    /* profession colors — canonical, from axitools/constants.py */
     --p-guard:#0c8fd6; --p-war:#c7892b; --p-rev:#79236f; --p-eng:#b77c34;
     --p-ranger:#4b8e4b; --p-thief:#a02e2d; --p-ele:#f68a35; --p-mes:#b46dff; --p-necro:#3a9d23;
-    /* per-section accent (overridden inline) */
-    --accent:var(--cyan); --accent2:var(--mag);
+    --font:'Inter',system-ui,sans-serif;
+    --display:'Chakra Petch',var(--font);
+    --wordmark:'Orbitron',var(--display);
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --ease:cubic-bezier(0.22,1,0.36,1);
   }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{
-    color:var(--ink);font-family:'Rajdhani',system-ui,-apple-system,sans-serif;line-height:1.5;
-    background:#06070f;overflow-x:hidden;position:relative;
+  * { box-sizing:border-box; margin:0; }
+  html { scroll-behavior:smooth; }
+  body { background:var(--bg); color:var(--ink); font-family:var(--font); line-height:1.65; font-size:16px; overflow-x:hidden; }
+  a { color:inherit; }
+  ::selection { background:rgba(199,100,255,0.35); }
+  .ambient { position:fixed; inset:0; z-index:-5; pointer-events:none;
+    background:
+      radial-gradient(55% 40% at 82% 12%, rgba(70,230,255,0.12), transparent 65%),
+      radial-gradient(50% 45% at 12% 45%, rgba(199,100,255,0.13), transparent 65%),
+      radial-gradient(55% 45% at 85% 82%, rgba(57,255,208,0.10), transparent 65%);
+    filter:blur(0.5px); }
+  header { position:absolute; top:0; left:0; right:0; z-index:30; }
+  header .hwrap { max-width:1360px; margin:0 auto; padding:0 34px; display:flex; align-items:center; justify-content:space-between; height:78px; }
+  .brand { display:flex; align-items:center; gap:11px; text-decoration:none; }
+  .brand .wm { font-family:var(--wordmark); font-weight:800; font-size:20px; letter-spacing:1px; color:#fff; }
+  .navright { display:flex; align-items:center; gap:10px; }
+  .navlink { color:#fff; font-weight:600; font-size:13.5px; font-family:var(--display); text-decoration:none; padding:9px 14px; border-radius:12px; transition:background 0.25s; }
+  .navlink:hover { background:rgba(255,255,255,0.14); }
+  .navright .invite { display:flex; align-items:center; gap:8px; color:#06070f; background:#fff; padding:9px 18px; border-radius:12px;
+    font-weight:600; font-size:13.5px; text-decoration:none; font-family:var(--display); transition:transform 0.25s var(--ease), box-shadow 0.3s; }
+  .navright .invite:hover { transform:translateY(-2px); box-shadow:0 8px 30px rgba(70,230,255,0.35); }
+  footer { padding:30px 0 38px; position:relative; z-index:2; }
+  footer .fwrap { max-width:1360px; margin:0 auto; padding:0 34px; display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--muted); flex-wrap:wrap; gap:12px; }
+  footer a { color:var(--muted); text-decoration:none; transition:color 0.25s; }
+  footer a:hover { color:#fff; }
+
+  .heroband { position:relative; overflow:hidden; padding:170px 0 90px; }
+  .heroband .bgband { position:absolute; inset:-24% -10% 10% -10%; z-index:-3; transform:skewY(-7deg); transform-origin:top left;
+    background:linear-gradient(115deg,#0b3a63 0%,#0e6fa3 20%,#46e6ff 40%,#c764ff 66%,#39ffd0 100%); opacity:0.9; }
+  .heroband .bgband::after { content:""; position:absolute; inset:0;
+    background:radial-gradient(60% 80% at 68% 25%, rgba(199,100,255,0.4), transparent 60%),
+               radial-gradient(50% 70% at 10% 80%, rgba(57,255,208,0.35), transparent 60%); }
+  .stripes { position:absolute; inset:0; z-index:-2; transform:skewY(-7deg); transform-origin:top left; pointer-events:none; }
+  .stripes .s { position:absolute; height:130px; opacity:0.45; animation:stripeIn 1.4s var(--ease) both; }
+  .stripes .s1 { width:56%; left:0; top:2%; background:linear-gradient(90deg,#46e6ff,rgba(70,230,255,0)); animation-delay:0.2s; }
+  .stripes .s2 { width:36%; left:0; top:20%; background:linear-gradient(90deg,#39ffd0,rgba(57,255,208,0)); animation-delay:0.35s; height:95px; }
+  .stripes .s3 { width:46%; right:0; top:52%; background:linear-gradient(270deg,#c764ff,rgba(199,100,255,0)); animation-delay:0.5s; }
+  .stripes .s4 { width:30%; right:0; top:72%; background:linear-gradient(270deg,#46e6ff,rgba(70,230,255,0)); animation-delay:0.65s; height:85px; opacity:0.3; }
+  @keyframes stripeIn { from { transform:translateX(var(--from,-100%)); opacity:0; } }
+  .stripes .s3, .stripes .s4 { --from:100%; }
+
+  .hero { max-width:1360px; margin:0 auto; padding:0 34px; display:grid; grid-template-columns:0.95fr 1.05fr; gap:40px; align-items:center; }
+  .hero h1 { font-family:var(--display); font-size:clamp(38px,4.6vw,60px); line-height:1.12; font-weight:700; letter-spacing:-0.5px;
+    text-shadow:0 4px 34px rgba(0,0,0,0.35); margin-bottom:16px; }
+  .hero h1 .accent { font-family:var(--wordmark); font-weight:800; letter-spacing:1px;
+    background:linear-gradient(90deg,#fff,#eaf6ff); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .hero .hsub { color:rgba(255,255,255,0.9); font-size:17px; max-width:52ch; margin-bottom:30px; }
+  .hero .ctas { display:flex; gap:14px; flex-wrap:wrap; }
+  .pill { display:inline-flex; align-items:center; gap:9px; padding:13px 26px; border-radius:10px; font-weight:600; font-size:13px;
+    font-family:var(--display); letter-spacing:0.8px; text-transform:uppercase; text-decoration:none;
+    background:#fff; color:#06070f; box-shadow:0 8px 30px rgba(0,0,0,0.3); transition:transform 0.25s var(--ease), box-shadow 0.3s; }
+  .pill:hover { transform:translateY(-2px); box-shadow:0 14px 40px rgba(0,0,0,0.4); }
+  .pill.alt { background:rgba(255,255,255,0.14); color:#fff; backdrop-filter:blur(8px); }
+  .hero h1, .hero .hsub, .hero .ctas { opacity:0; transform:translateY(22px); animation:rise 0.9s var(--ease) forwards; }
+  .hero .hsub { animation-delay:0.1s; } .hero .ctas { animation-delay:0.18s; }
+  @keyframes rise { to { opacity:1; transform:none; } }
+
+  .appwrap { position:relative; opacity:0; transform:translateY(34px); animation:rise 1.1s var(--ease) 0.3s forwards; }
+  .app { border-radius:12px; overflow:hidden; display:grid; grid-template-columns:200px 1fr;
+    background:#313338; color:#dbdee1; font-size:13px; height:470px;
+    box-shadow:0 50px 110px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.09); }
+  .side { background:#2b2d31; display:flex; flex-direction:column; }
+  .side .sname { padding:14px; font-weight:700; color:#f2f3f5; font-size:14px; border-bottom:1px solid #1e1f22; }
+  .chgroup { padding:14px 8px 4px 14px; font-size:10.5px; font-weight:700; letter-spacing:0.4px; color:#80848e; text-transform:uppercase; }
+  .ch { margin:1px 8px; padding:5px 8px; border-radius:6px; color:#80848e; font-weight:500; display:flex; gap:7px; align-items:center; }
+  .ch.active { background:#3f4248; color:#f2f3f5; }
+  .ch .h { font-size:15px; font-weight:400; color:#80848e; }
+  .chat { display:flex; flex-direction:column; min-width:0; }
+  .chat .top { padding:11px 16px; display:flex; align-items:center; gap:8px; font-weight:600; color:#f2f3f5; border-bottom:1px solid #26272b; }
+  .chat .top .h { color:#80848e; font-size:18px; font-weight:400; }
+  .feed { flex:1; overflow:hidden; padding:14px 16px 6px; display:flex; flex-direction:column; gap:14px; justify-content:flex-end; }
+  .msg { display:flex; gap:12px; opacity:0; transform:translateY(10px); transition:opacity 0.45s var(--ease), transform 0.45s var(--ease); }
+  .msg.show { opacity:1; transform:none; }
+  .av { width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:#fff; overflow:hidden; }
+  .av.u1 { background:linear-gradient(135deg,#46e6ff,#4a90ff); }
+  .av.bot { background:#06070f; }
+  .av.bot img { width:24px; height:24px; }
+  .mhead { display:flex; align-items:baseline; gap:8px; }
+  .mname { font-weight:600; color:#f2f3f5; font-size:13px; }
+  .mtag { font-size:9.5px; font-weight:700; padding:1px 5px; border-radius:4px; background:#46e6ff; color:#06070f; }
+  .mtime { color:#80848e; font-size:11px; }
+  .mtext { color:#dbdee1; font-size:13px; }
+  .mtext .cmd { background:rgba(70,230,255,0.14); color:#8fe9ff; border-radius:4px; padding:1px 6px; font-family:var(--mono); font-size:12px; }
+  .dembed { border-left:4px solid var(--p-guard); background:#2b2d31; border-radius:6px; padding:12px 14px; margin-top:7px; max-width:440px; }
+  .dembed .dt { color:#7fd6ff; font-weight:700; font-size:13px; margin-bottom:6px; }
+  .dembed .dd { font-family:var(--mono); font-size:11px; color:#b5bac1; line-height:1.8; }
+  .dembed .dd b { color:#dbdee1; font-weight:600; }
+  .dembed .df { margin-top:8px; font-size:10.5px; color:#80848e; font-style:italic; }
+  .typing { display:flex; align-items:center; gap:8px; color:#80848e; font-size:12px; padding:0 16px 8px 64px; height:20px; }
+  .typing .dots i { display:inline-block; width:5px; height:5px; border-radius:50%; background:#80848e; margin-right:3px; animation:blink 1.2s infinite; }
+  .typing .dots i:nth-child(2){ animation-delay:0.2s; } .typing .dots i:nth-child(3){ animation-delay:0.4s; }
+  @keyframes blink { 0%,60%,100% { opacity:0.25; } 30% { opacity:1; } }
+  .inputbar { margin:0 14px 16px; background:#383a40; border-radius:8px; padding:10px 14px; color:#6d6f78; font-size:13px; }
+
+  @media (max-width:960px) {
+    .hero { grid-template-columns:1fr; }
+    .side { display:none; }
+    .app { grid-template-columns:1fr; height:440px; }
   }
-  /* fixed atmospheric layers */
-  .bg-aura{position:fixed;inset:0;z-index:-3;pointer-events:none;
-    background:
-      radial-gradient(900px 600px at 80% -5%, rgba(199,100,255,.16), transparent 55%),
-      radial-gradient(900px 600px at 8% 8%, rgba(70,230,255,.14), transparent 55%),
-      radial-gradient(700px 700px at 50% 110%, rgba(57,255,208,.10), transparent 60%),
-      #06070f;}
-  .bg-grid{position:fixed;left:-20%;right:-20%;bottom:-28%;height:72%;z-index:-2;pointer-events:none;opacity:.45;
-    background:
-      repeating-linear-gradient(90deg, rgba(70,230,255,.16) 0 1px, transparent 1px 64px),
-      repeating-linear-gradient(0deg, rgba(70,230,255,.16) 0 1px, transparent 1px 64px);
-    transform:perspective(420px) rotateX(64deg);transform-origin:bottom;
-    -webkit-mask:linear-gradient(transparent, #000 70%);mask:linear-gradient(transparent, #000 70%);}
-  .bg-scan{position:fixed;inset:0;z-index:-1;pointer-events:none;
-    background:repeating-linear-gradient(0deg, rgba(255,255,255,.022) 0 1px, transparent 1px 3px);}
-  /* slow scanning sweep */
-  .bg-sweep{position:fixed;left:0;right:0;height:140px;z-index:-1;pointer-events:none;
-    background:linear-gradient(180deg, transparent, rgba(70,230,255,.06), transparent);
-    animation:sweep 9s linear infinite;}
-  @keyframes sweep{0%{top:-140px}100%{top:100%}}
-  @media (prefers-reduced-motion:reduce){.bg-sweep{display:none}.holo-in::before{animation:none}}
+  .statstrip { background:rgba(6,7,15,0.85); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.05); position:relative; z-index:3; }
+  .statstrip .swrap { max-width:1360px; margin:0 auto; padding:22px 34px; display:flex; align-items:center; justify-content:space-between; gap:24px; flex-wrap:wrap; }
+  .sitem .lbl { font-size:14px; color:var(--muted); font-weight:500; display:block; line-height:1.3; }
+  .sitem .val { font-family:var(--display); font-weight:700; font-size:20px; color:#fff; }
+  .statstrip .note { font-size:13px; color:#fff; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.1); padding:9px 14px; border-radius:12px; white-space:nowrap; }
 
-  .wrap{max-width:1120px;margin:0 auto;padding-left:28px;padding-right:28px}
-  a{color:inherit;text-decoration:none}
+  .feature { max-width:1360px; margin:0 auto; padding:150px 34px 0; display:grid; grid-template-columns:1fr 1fr; gap:80px; align-items:center; }
+  .feature.flip .ftext { order:2; } .feature.flip .fmock { order:1; }
+  .ftext .eyebrow { font-family:var(--mono); font-size:12px; color:var(--cyan); letter-spacing:1px; margin-bottom:12px; }
+  .ftext h2 { font-family:var(--display); font-size:clamp(30px,4vw,50px); font-weight:700; letter-spacing:-0.5px; line-height:1.1; margin-bottom:18px; }
+  .ftext p { color:var(--muted); font-size:16px; max-width:48ch; margin-bottom:22px; }
+  .ftext p b { color:var(--ink); }
+  .tags { display:flex; flex-wrap:wrap; gap:10px; max-width:440px; }
+  .tag { font-size:13px; font-weight:600; padding:6px 16px; border-radius:99px; color:#06070f; background:var(--tagc,#7dd3fc); }
+  .fmock { position:relative; }
+  .fmock .doodle { position:absolute; z-index:-1; opacity:0.12; }
+  .mockcard { background:#16181d; border-radius:14px; padding:22px 24px; max-width:520px; margin:0 auto;
+    box-shadow:0 40px 90px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06); position:relative; }
+  .mockcard .row { display:flex; gap:12px; margin-bottom:14px; }
+  .mockcard .row:last-child { margin-bottom:0; }
+  .mockcard .dembed { max-width:none; }
+  .pin { position:absolute; top:-24px; right:-14px; width:52px; height:52px; border-radius:50% 50% 50% 4px;
+    display:flex; align-items:center; justify-content:center; color:#fff; box-shadow:0 12px 30px rgba(0,0,0,0.4); }
+  .pin img { width:28px; height:28px; }
+  .rv { opacity:0; transform:translateY(30px); transition:opacity 0.9s var(--ease), transform 0.9s var(--ease); }
+  .rv.inview { opacity:1; transform:translateY(0); }
+  .rv.d1 { transition-delay:0.12s; }
 
-  /* ---------- nav ---------- */
-  header{position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);
-    background:linear-gradient(180deg, rgba(6,7,15,.85), rgba(6,7,15,.35));border-bottom:1px solid var(--line)}
-  nav{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;max-width:1120px;margin:0 auto}
-  .brand{display:flex;align-items:center;gap:12px}
-  .core{width:42px;height:42px;border-radius:12px;position:relative;display:grid;place-items:center;
-    background:radial-gradient(circle at 40% 32%, rgba(30,42,74,.95), rgba(8,11,26,.95));
-    border:1px solid rgba(70,230,255,.45);box-shadow:0 0 24px rgba(70,230,255,.4), inset 0 0 14px rgba(0,0,0,.5)}
-  .core img{width:28px;height:28px;filter:drop-shadow(0 0 6px rgba(70,230,255,.6))}
-  .bname{font-family:'Orbitron',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;
-    background:linear-gradient(90deg,var(--cyan),#fff,var(--mag));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .bname small{display:block;font-family:'Rajdhani';font-size:9px;letter-spacing:4px;color:var(--muted);-webkit-text-fill-color:var(--muted);font-weight:600}
-  .navlinks{display:flex;gap:26px;font-size:13px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}
-  .navlinks a:hover{color:var(--cyan);text-shadow:0 0 12px var(--cyan)}
-  @media(max-width:860px){.navlinks{display:none}}
-  .btn{position:relative;border:1px solid rgba(70,230,255,.5);background:rgba(70,230,255,.10);color:var(--cyan);
-    padding:10px 18px;border-radius:8px;font-family:inherit;font-weight:700;font-size:12.5px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;
-    box-shadow:0 0 22px rgba(70,230,255,.22),inset 0 0 16px rgba(70,230,255,.10);backdrop-filter:blur(4px);transition:.2s}
-  .btn:hover{box-shadow:0 0 30px rgba(70,230,255,.4),inset 0 0 18px rgba(70,230,255,.18);transform:translateY(-1px)}
-  .btn.solid{background:linear-gradient(120deg,var(--cyan),var(--mag));color:#05060f;border:none;
-    box-shadow:0 0 26px rgba(199,100,255,.45)}
+  .gridsection { max-width:1200px; margin:0 auto; padding:150px 34px 0; }
+  .gridsection h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; text-align:center; margin-bottom:8px; }
+  .gridsection .lead { color:var(--muted); text-align:center; max-width:60ch; margin:0 auto 44px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .gcard { background:#16181d; border-radius:14px; padding:22px 24px; box-shadow:0 20px 50px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06); }
+  .gcard h3 { font-family:var(--display); font-size:17px; font-weight:600; margin-bottom:8px; }
+  .gcard p { color:#c3c9dd; font-size:14.5px; }
+  @media (max-width:860px) { .grid3 { grid-template-columns:1fr; } }
 
-  /* ---------- generic section ---------- */
-  section{padding:84px 0;position:relative;scroll-margin-top:72px}
-  .sechead{text-align:center;max-width:680px;margin:0 auto 54px}
-  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:700;letter-spacing:4px;text-transform:uppercase;
-    color:var(--accent);text-shadow:0 0 14px var(--accent)}
-  .eyebrow::before{content:"◈"}
-  h2{font-family:'Orbitron',sans-serif;font-size:34px;font-weight:700;letter-spacing:1px;margin:14px 0 12px;text-transform:uppercase}
-  h2 .grad{background:linear-gradient(110deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .lead{color:var(--muted);font-size:17px}
+  .setuplead { text-align:center; max-width:720px; margin:0 auto; padding:150px 28px 0; }
+  .setuplead h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; margin-bottom:14px; }
+  .setuplead p { color:var(--muted); }
+  .cmd { margin:36px auto 0; text-align:center; }
+  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:14px; padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
+  .cmd .line .prompt { color:var(--cyan); }
+  .cmd .line .okt { color:var(--teal); }
+  .cmd small { display:block; margin-top:14px; color:var(--muted); font-size:13px; }
 
-  .feature{display:grid;grid-template-columns:1fr 1fr;gap:54px;align-items:center}
-  /* rows with several stacked embeds: pin the text so it tracks the scroll instead of stranding blank space */
-  .feature.tall{align-items:start}
-  .feature.tall .ftext{align-self:start;position:sticky;top:96px}
-  .feature.flip .ftext{order:2}
-  @media(max-width:860px){.feature,.feature.flip .ftext{grid-template-columns:1fr;order:0}.feature.tall .ftext{position:static;top:auto}}
-  .ftext h3{font-family:'Orbitron';font-size:24px;font-weight:700;letter-spacing:.5px;margin-bottom:12px}
-  .ftext .cmd{display:inline-block;font-family:Consolas,monospace;font-size:13px;color:var(--accent);
-    background:rgba(70,230,255,.08);border:1px solid var(--line);border-radius:6px;padding:3px 10px;margin-bottom:14px}
-  .ftext p{color:var(--muted);font-size:16px;margin-bottom:14px}
-  .ftext ul{list-style:none;display:grid;gap:9px}
-  .ftext li{display:flex;gap:10px;color:#c6d4ec;font-size:15px}
-  .ftext li::before{content:"▸";color:var(--accent);font-weight:700}
+  .closeband { position:relative; overflow:hidden; margin-top:150px; padding:150px 0 170px; text-align:center; }
+  .closeband .bgband2 { position:absolute; inset:14% -10% -24% -10%; z-index:-2; transform:skewY(-7deg); transform-origin:bottom right;
+    background:linear-gradient(115deg,#0e6fa3 0%,#46e6ff 30%,#c764ff 66%,#39ffd0 100%); opacity:0.9; }
+  .closeband .bgband2::after { content:""; position:absolute; inset:0; background:radial-gradient(50% 70% at 50% 45%, rgba(199,100,255,0.3), transparent 65%); }
+  .closeband h2 { font-family:var(--display); font-size:clamp(30px,4vw,48px); font-weight:700; letter-spacing:-0.5px; margin-bottom:12px; text-shadow:0 4px 30px rgba(0,0,0,0.3); }
+  .closeband p { color:rgba(255,255,255,0.9); margin-bottom:36px; font-weight:500; }
 
-  /* ---------- holo panel ---------- */
-  .holo{position:relative;border-radius:16px;padding:1.4px;
-    background:conic-gradient(from 120deg,var(--accent),var(--accent2),var(--teal),var(--accent));
-    box-shadow:0 0 60px rgba(120,160,255,.25)}
-  .holo-in{border-radius:15px;padding:16px;background:linear-gradient(180deg,rgba(16,22,42,.86),rgba(8,11,24,.92));
-    backdrop-filter:blur(14px);position:relative;overflow:hidden}
-  .holo-in::before{content:"";position:absolute;top:0;left:-60%;width:50%;height:100%;
-    background:linear-gradient(105deg,transparent,rgba(255,255,255,.08),transparent);transform:skewX(-18deg);
-    animation:glint 6s ease-in-out infinite}
-  @keyframes glint{0%,60%{left:-60%}80%,100%{left:160%}}
-  .holo-label{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;
-    font-size:10.5px;letter-spacing:3px;text-transform:uppercase;color:var(--accent)}
-  .holo-label .dots span{display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:5px;background:var(--teal);box-shadow:0 0 8px var(--teal)}
-  .holo-label .dots span:nth-child(2){background:var(--accent);box-shadow:0 0 8px var(--accent)}
-  .holo-label .dots span:nth-child(3){background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+  @media (max-width:960px) {
+    .feature, .feature.flip { grid-template-columns:1fr; gap:44px; padding-top:100px; }
+    .feature.flip .ftext { order:1; } .feature.flip .fmock { order:2; }
+  }
 
-  /* ---------- discord embed ---------- */
-  .discord{background:rgba(40,44,58,.72);border:1px solid rgba(120,160,255,.16);border-radius:10px;padding:14px;
-    font-family:'gg sans','Segoe UI',Rajdhani,sans-serif;box-shadow:inset 0 0 30px rgba(70,230,255,.04)}
-  .msgrow{display:flex;gap:12px}
-  .avatar{width:38px;height:38px;border-radius:50%;flex:none;display:grid;place-items:center;overflow:hidden;
-    background:radial-gradient(circle at 40% 32%, rgba(30,42,74,.95), rgba(8,11,26,.95));border:1px solid rgba(70,230,255,.4);box-shadow:0 0 16px rgba(70,230,255,.4)}
-  .avatar img{width:26px;height:26px;filter:drop-shadow(0 0 4px rgba(70,230,255,.5))}
-  /* full-colour GW2 class icon, used directly as an image (high-res wiki set) */
-  .picon{display:inline-block;object-fit:contain;vertical-align:middle}
-  .picon.inl{width:19px;height:19px;vertical-align:-4px;margin-right:6px}
-  .mbody{flex:1;min-width:0}
-  .uname{color:#fff;font-weight:600;font-size:15px}
-  .bot{background:linear-gradient(120deg,var(--cyan),var(--mag));color:#06070f;font-size:10px;font-weight:800;padding:1px 6px;border-radius:4px;margin-left:7px;letter-spacing:.5px;vertical-align:middle}
-  .stamp{color:#9fb2cc;font-size:12px;margin-left:8px}
-  .embed{margin-top:9px;background:rgba(24,28,42,.72);border-radius:5px;border-left:3px solid var(--ebar,var(--accent));
-    padding:12px 15px;box-shadow:-1px 0 14px color-mix(in srgb, var(--ebar,var(--accent)) 45%, transparent)}
-  .eauthor{color:#a9c0e0;font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px}
-  .etitle{color:var(--ebar,var(--accent));font-weight:700;font-size:16px;margin:3px 0 6px;text-shadow:0 0 14px color-mix(in srgb,var(--ebar,var(--accent)) 50%, transparent)}
-  .edesc{color:#d6e3f5;font-size:13.5px}
-  .ehead{color:#fff;font-weight:700;font-size:19px;margin-bottom:8px;line-height:1.2} /* Discord '# ' H1 */
-  .ping{display:inline-block;margin:8px 0 0;background:rgba(88,101,242,.18);color:#c3cafe;font-weight:600;font-size:13.5px;padding:1px 5px;border-radius:4px}
-  .msgtext{color:#dbdee1;font-size:13.5px;margin-top:6px}
-  .efields{display:flex;flex-wrap:wrap;gap:10px 30px;margin-top:11px}
-  .efield{min-width:120px}
-  .efield.full{flex-basis:100%}
-  .efield .k{color:#fff;font-weight:700;font-size:12.5px}
-  .efield .v{color:#aebfd8;font-size:13px;margin-top:2px}
-  .ecode{margin-top:11px;background:rgba(8,11,24,.85);border:1px solid rgba(70,230,255,.22);border-radius:4px;
-    padding:7px 11px;font-family:Consolas,monospace;font-size:12px;color:var(--teal);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .ethumb{width:46px;height:46px;border-radius:8px;float:right;margin-left:12px;display:grid;place-items:center;font-size:22px;
-    background:rgba(70,230,255,.10);border:1px solid var(--line)}
-  .ethumb .picon{width:34px;height:34px}
-  .ethumb img{width:30px;height:30px;object-fit:contain}
-  .ethumb.mapthumb{padding:0;overflow:hidden;background:rgba(70,230,255,.06)}
-  .ethumb.mapthumb img{width:100%;height:100%;object-fit:cover}
-  .codeblk{display:inline-block;background:rgba(8,11,24,.85);border:1px solid rgba(120,160,255,.18);border-radius:4px;
-    padding:2px 8px;font-family:Consolas,monospace;font-size:12.5px;color:#c4f0ff;margin-top:2px}
-  .efield .v a{text-decoration:none}
-  /* audit query export: file card + monospace result table */
-  .filebar{display:inline-flex;align-items:center;gap:8px;margin-top:9px;background:rgba(8,11,24,.85);
-    border:1px solid rgba(120,160,255,.2);border-radius:8px;padding:8px 12px;color:#c6d4ec;font-size:13px}
-  .filebar small{color:#8ea2c4}
-  .codetable{margin:9px 0 0;background:rgba(8,11,24,.92);border:1px solid rgba(120,160,255,.18);border-radius:6px;
-    padding:11px 13px;font-family:Consolas,monospace;font-size:11px;line-height:1.55;color:#a9c0e0;overflow-x:auto;white-space:pre}
-  .codetable .hl{color:#5fa8d3}
-  .efoot{color:#8ea2c4;font-size:11.5px;margin-top:11px;display:flex;align-items:center;gap:6px}
-  /* discord interactive bits */
-  .ddrop{margin-top:10px;background:rgba(30,33,46,.9);border:1px solid rgba(120,160,255,.2);border-radius:5px;
-    padding:9px 12px;display:flex;align-items:center;justify-content:space-between;color:#c6d4ec;font-size:13px}
-  .ddrop .chev{color:var(--muted)}
-  .dbtns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-  .dbtn{font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:4px;border:none;color:#fff;
-    background:#4f545c;font-family:inherit}
-  .dbtn.primary{background:#5865f2}
-  .dbtn.success{background:#248046}
-  .dbtn.danger{background:#da373c}
-  .react{display:inline-flex;align-items:center;gap:5px;background:rgba(88,101,242,.12);border:1px solid rgba(88,101,242,.4);
-    border-radius:8px;padding:2px 8px;font-size:12.5px;color:#c6d4ec;margin-right:6px;margin-top:8px}
-  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.5px;padding:3px 9px;border-radius:999px;margin-left:8px;
-    background:color-mix(in srgb,var(--accent) 18%, transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 40%, transparent)}
+  @media (max-width:480px) {
+    header .hwrap { padding:0 18px; }
+    .navright .navlink { display:none; }
+  }
 
-  /* ---------- profession rail ---------- */
-  .profs{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-  .swatch{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
-    background:radial-gradient(circle at 42% 34%, rgba(26,36,64,.9), rgba(8,11,26,.95));
-    border:1px solid rgba(120,160,255,.22);box-shadow:0 0 14px rgba(70,230,255,.12);transition:.2s}
-  .swatch:hover{transform:translateY(-2px);box-shadow:0 0 18px color-mix(in srgb, currentColor 55%, transparent)}
-  .swatch .picon{width:26px;height:26px}
-
-  /* ---------- hero ---------- */
-  .hero{padding:56px 0 30px}
-  .hero .feature{align-items:center}
-  .hkicker{display:inline-flex;align-items:center;gap:10px;font-size:12px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--teal);text-shadow:0 0 14px rgba(57,255,208,.6)}
-  .hkicker::before{content:"◈"}
-  h1{font-family:'Orbitron',sans-serif;font-size:50px;line-height:1.05;font-weight:800;letter-spacing:.5px;margin:18px 0 16px;text-transform:uppercase}
-  h1 .grad{background:linear-gradient(110deg,var(--cyan),var(--mag));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 22px rgba(199,100,255,.4))}
-  .hsub{color:var(--muted);font-size:18px;max-width:480px;font-weight:500}
-  .cta{display:flex;gap:13px;margin-top:26px;flex-wrap:wrap}
-  .btn.lg{padding:14px 26px;font-size:13.5px}
-  .hstats{display:flex;gap:30px;margin-top:34px}
-  .hstat b{font-family:'Orbitron';display:block;font-size:22px;font-weight:700;color:var(--cyan);text-shadow:0 0 16px rgba(70,230,255,.4)}
-  .hstat span{color:var(--muted);font-size:12px;letter-spacing:.5px}
-  @media(max-width:560px){h1{font-size:38px}}
-
-  /* ---------- feature strip / cards ---------- */
-  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-  @media(max-width:860px){.cards{grid-template-columns:1fr}}
-  .card{display:block;border-radius:14px;padding:1px;background:linear-gradient(160deg,var(--line),transparent);cursor:pointer}
-  .card-in{display:flex;gap:15px;align-items:flex-start;background:rgba(14,19,36,.7);border-radius:13px;padding:18px;height:100%;backdrop-filter:blur(6px);transition:.2s}
-  .card:hover{background:linear-gradient(160deg,var(--cyan),var(--mag))}
-  .card:hover .card-in{background:rgba(20,28,52,.85);transform:translateY(-3px)}
-  .card .ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;flex:none;color:var(--cyan);
-    background:rgba(70,230,255,.08);border:1px solid var(--line)}
-  .card .ic svg{width:22px;height:22px}
-  .card .ctext{min-width:0}
-  .card h4{font-family:'Orbitron';font-size:15px;letter-spacing:.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
-  .card:hover h4{color:var(--cyan)}
-  .card p{color:var(--muted);font-size:13.5px;line-height:1.45}
-
-  /* ---------- command index ---------- */
-  .cmdtable{border-radius:16px;padding:1.4px;background:conic-gradient(from 120deg,var(--cyan),var(--mag),var(--teal),var(--cyan))}
-  .cmdtable-in{background:linear-gradient(180deg,rgba(16,22,42,.9),rgba(8,11,24,.94));border-radius:15px;overflow:hidden}
-  .crow{display:grid;grid-template-columns:230px 1fr;gap:16px;padding:14px 22px;border-bottom:1px solid rgba(120,160,255,.1)}
-  .crow:last-child{border-bottom:none}
-  .crow.head{background:rgba(70,230,255,.06);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--cyan);font-weight:700}
-  .crow code{font-family:Consolas,monospace;font-size:13.5px;color:var(--teal)}
-  .crow .desc{color:var(--muted);font-size:14px}
-  @media(max-width:560px){.crow{grid-template-columns:1fr;gap:4px}}
-
-  /* ---------- footer ---------- */
-  .ftcta{text-align:center;border-radius:20px;padding:1.4px;margin:20px 0 50px;
-    background:conic-gradient(from 120deg,var(--cyan),var(--mag),var(--teal),var(--cyan));box-shadow:0 0 70px rgba(120,160,255,.3)}
-  .ftcta-in{border-radius:19px;padding:56px 24px;background:linear-gradient(180deg,rgba(16,22,42,.92),rgba(8,11,24,.95))}
-  .ftcta h2{margin-bottom:10px}
-  .ftcta p{color:var(--muted);font-size:17px;margin-bottom:26px}
-  footer{border-top:1px solid var(--line);padding:30px 0 50px;color:var(--muted);font-size:13.5px}
-  .frow{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
-  .flinks{display:flex;gap:22px}
-  .flinks a:hover{color:var(--cyan)}
+  @media (prefers-reduced-motion:reduce) {
+    *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+    .hero h1, .hero .hsub, .hero .ctas, .appwrap { opacity:1 !important; transform:none !important; }
+    .msg { opacity:1 !important; transform:none !important; }
+    .rv { opacity:1 !important; transform:none !important; }
+  }
 </style>
 </head>
 <body>
-  <div class="bg-aura"></div><div class="bg-grid"></div><div class="bg-scan"></div><div class="bg-sweep"></div>
-
-  <!-- ============ NAV ============ -->
-  <header>
-    <nav>
-      <a class="brand" href="#top">
-        <div class="core"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-        <div><div class="bname">AXITOOLS</div><small>MISTS · SYNCED</small></div>
-      </a>
-      <div class="navlinks">
-        <a href="#builds">Builds</a>
-        <a href="#comps">Comps</a>
-        <a href="#wvw">WvW</a>
-        <a href="#alerts">Alerts</a>
-        <a href="#server">Server</a>
-        <a href="#commands">Commands</a>
-      </div>
-      <div style="display:flex;gap:10px">
-        <a class="btn" href="#commands">Commands</a>
-        <a class="btn solid" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot" target="_blank" rel="noopener">＋ Add to Discord</a>
-      </div>
+<div class="ambient"></div>
+<header>
+  <div class="hwrap">
+    <a class="brand" href="/" aria-label="AxiTools home">
+      <img src="/assets/axitools-logo.svg" width="34" height="34" alt="">
+      <span class="wm">AXITOOLS</span>
+    </a>
+    <nav class="navright">
+      <a class="navlink" href="/#commands">Commands</a>
+      <a class="invite" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add to Discord</a>
     </nav>
-  </header>
-
-  <a id="top"></a>
-
-  <!-- ============ HERO ============ -->
-  <section class="hero wrap">
-    <div class="feature">
-      <div class="ftext">
-        <span class="hkicker">Guild Wars 2 Command Interface</span>
-        <h1>Project your guild<br>into the <span class="grad">Mists.</span></h1>
-        <p class="hsub">One multi-guild Discord bot for builds, squad comps, WvW matchups, patch notes, streaming alerts and automatic guild-roles — synced and beamed straight to your server, lit up in your professions' colors.</p>
-        <div class="cta">
-          <a class="btn solid lg" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot" target="_blank" rel="noopener">＋ Add to Discord</a>
-          <a class="btn lg" href="#commands">Scan commands →</a>
-        </div>
-        <div class="hstats">
-          <div class="hstat"><b>9</b><span>professions themed</span></div>
-          <div class="hstat"><b>11</b><span>command groups</span></div>
-          <div class="hstat"><b>∞</b><span>guilds, isolated</span></div>
-        </div>
-        <div class="profs" style="margin-top:30px">
-          <div class="swatch" style="color:var(--p-guard)" title="Guardian"><img class="picon" src="assets/prof/Guardian.png" alt="Guardian"></div>
-          <div class="swatch" style="color:var(--p-war)" title="Warrior"><img class="picon" src="assets/prof/Warrior.png" alt="Warrior"></div>
-          <div class="swatch" style="color:var(--p-rev)" title="Revenant"><img class="picon" src="assets/prof/Revenant.png" alt="Revenant"></div>
-          <div class="swatch" style="color:var(--p-eng)" title="Engineer"><img class="picon" src="assets/prof/Engineer.png" alt="Engineer"></div>
-          <div class="swatch" style="color:var(--p-ranger)" title="Ranger"><img class="picon" src="assets/prof/Ranger.png" alt="Ranger"></div>
-          <div class="swatch" style="color:var(--p-thief)" title="Thief"><img class="picon" src="assets/prof/Thief.png" alt="Thief"></div>
-          <div class="swatch" style="color:var(--p-ele)" title="Elementalist"><img class="picon" src="assets/prof/Elementalist.png" alt="Elementalist"></div>
-          <div class="swatch" style="color:var(--p-mes)" title="Mesmer"><img class="picon" src="assets/prof/Mesmer.png" alt="Mesmer"></div>
-          <div class="swatch" style="color:var(--p-necro)" title="Necromancer"><img class="picon" src="assets/prof/Necromancer.png" alt="Necromancer"></div>
-        </div>
+  </div>
+</header>
+<main>
+<div class="heroband">
+  <div class="bgband"></div>
+  <div class="stripes"><div class="s s1"></div><div class="s s2"></div><div class="s s3"></div><div class="s s4"></div></div>
+  <div class="hero">
+    <div>
+      <h1>Project your guild into the <span class="accent">Mists.</span></h1>
+      <p class="hsub">One multi-guild Guild Wars 2 Discord bot — builds, squad comps, WvW matchups, patch notes, streaming alerts and automatic guild-roles, all lit up in your professions' colors.</p>
+      <div class="ctas">
+        <a class="pill" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add to Discord</a>
+        <a class="pill alt" href="#features">→ See what it does</a>
       </div>
-      <div class="holo">
-        <div class="holo-in">
-          <div class="holo-label"><span>◈ PROJECTION · #builds</span><span class="dots"><span></span><span></span><span></span></span></div>
-          <div class="discord">
-            <div class="msgrow">
-              <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-              <div class="mbody">
-                <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 7:42 PM</span>
-                <div class="embed" style="--ebar:var(--p-guard)">
-                  <div class="ethumb"><img class="picon" src="assets/prof/Dragonhunter.png" alt="Dragonhunter"></div>
-                  <div class="eauthor"><img class="picon inl" src="assets/prof/Dragonhunter.png" alt="Dragonhunter">Dragonhunter (Guardian)</div>
-                  <div class="etitle">Power Dragonhunter — Roaming</div>
-                  <div class="edesc"><a style="color:#5fa8d3">gw2skills.net - Power Dragonhunter — Roaming</a></div>
-                  <div class="efields">
-                    <div class="efield full"><div class="k">Chat Code</div><div class="v"><span class="codeblk">[&amp;DQEKAwAAAA]</span></div></div>
-                    <div class="efield full"><div class="k">Description</div><div class="v">High-mobility power DPS for WvW roaming. Strong burst, great disengage.</div></div>
-                    <div class="efield"><div class="k">Updated By</div><div class="v">@Aria</div></div>
-                    <div class="efield"><div class="k">Updated On</div><div class="v">Jun 9, 2026</div></div>
+    </div>
+    <div class="appwrap">
+      <div class="app" aria-label="Discord showing AxiTools posting a themed build">
+        <div class="side">
+          <div class="sname">Mists Vanguard [MV]</div>
+          <div class="chgroup">Text channels</div>
+          <div class="ch"><span class="h">#</span>general</div>
+          <div class="ch active"><span class="h">#</span>builds</div>
+          <div class="ch"><span class="h">#</span>wvw</div>
+          <div class="ch"><span class="h">#</span>comps</div>
+        </div>
+        <div class="chat">
+          <div class="top"><span class="h">#</span>builds</div>
+          <div class="feed" id="feed">
+            <div class="msg">
+              <div class="av u1">A</div>
+              <div><div class="mhead"><span class="mname">Aria</span><span class="mtime">Today at 7:42 PM</span></div>
+              <div class="mtext"><span class="cmd">/build guardian dragonhunter</span></div></div>
+            </div>
+            <div class="msg">
+              <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
+              <div>
+                <div class="mhead"><span class="mname">AxiTools</span> <span class="mtag">✓ APP</span><span class="mtime">Today at 7:42 PM</span></div>
+                <div class="dembed">
+                  <div class="dt">Power Dragonhunter — Roaming</div>
+                  <div class="dd">
+                    <b>Profession</b> Dragonhunter (Guardian)<br>
+                    <b>Chat code</b> [&amp;DQEKAwAAAA]<br>
+                    <b>Description</b> High-mobility power DPS for WvW roaming. Strong burst, great disengage.
                   </div>
-                  <div class="efoot">Today at 7:42 PM</div>
+                  <div class="df">Updated by @Aria · Jun 9, 2026 — themed to your professions</div>
                 </div>
               </div>
             </div>
           </div>
+          <div class="typing" id="typing" style="display:none"><span class="dots"><i></i><i></i><i></i></span> AxiTools is thinking…</div>
+          <div class="inputbar">Message #builds</div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</div>
+<div class="statstrip">
+  <div class="swrap">
+    <div class="sitem"><span class="val">9 professions</span><span class="lbl">individually themed</span></div>
+    <div class="sitem"><span class="val">Multi-guild</span><span class="lbl">every server fully isolated</span></div>
+    <div class="sitem"><span class="val">Encrypted</span><span class="lbl">API-key vault, at rest</span></div>
+    <div class="sitem"><span class="val">One command</span><span class="lbl">setup, role-gated</span></div>
+    <div class="note">Your guild's colors, everywhere.</div>
+  </div>
+</div>
+<div class="feature" id="features">
+  <div class="ftext rv">
+    <div class="eyebrow">/builds add · edit · delete</div>
+    <h2>Builds, themed to the profession</h2>
+    <p>Every build stores its <b>profession or elite spec</b>, build-site link, chat code, description and an audit trail of who changed it last. Posts <b>adopt the profession's color and icon</b> automatically — and when the target channel is a forum, AxiTools creates or updates the thread.</p>
+    <div class="tags" style="--tagc:#7fd6ff">
+      <span class="tag">Profession color + icon</span>
+      <span class="tag">Copyable chat code</span>
+      <span class="tag">Forum threads</span>
+      <span class="tag">Audit metadata</span>
+    </div>
+  </div>
+  <div class="fmock rv d1">
+    <svg class="doodle" width="220" height="220" viewBox="0 0 200 200" style="top:-60px; left:-40px" fill="none" stroke="#46e6ff" stroke-width="2"><circle cx="100" cy="100" r="60"/><circle cx="100" cy="100" r="90"/></svg>
+    <div class="mockcard">
+      <div class="pin" style="background:var(--p-guard)"><img src="/assets/prof/Dragonhunter.png" alt=""></div>
+      <div class="row">
+        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
+        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#7fd6ff">AxiTools</span><span class="mtag">✓ APP</span><span class="mtime">Today at 7:42 PM</span></div>
+        <div class="dembed">
+          <div class="dt">Power Dragonhunter — Roaming</div>
+          <div class="dd"><b>Profession</b> Dragonhunter (Guardian)<br><b>Chat code</b> [&amp;DQEKAwAAAA]<br><b>Description</b> High-mobility power DPS for WvW roaming.</div>
+          <div class="df">Updated by @Aria · Jun 9, 2026</div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</div>
 
-  <!-- ============ FEATURE CARDS ============ -->
-  <section class="wrap" style="padding-top:30px">
-    <div class="sechead">
-      <span class="eyebrow">Everything your guild runs on</span>
-      <h2>One bot, <span class="grad">eleven systems</span></h2>
-      <p class="lead">Each feature posts a rich, profession-themed embed straight to Discord. Every server's data stays fully isolated.</p>
+<div class="feature flip">
+  <div class="ftext rv">
+    <div class="eyebrow">/comp schedule</div>
+    <h2>Squad comps that fill themselves</h2>
+    <p>Schedule recurring squad signups with <b>live dropdown rosters</b> and <b>per-profession headcounts</b>. Members pick their role; the embed updates in place so you always know what the squad still needs.</p>
+    <div class="tags" style="--tagc:#c4b5fd">
+      <span class="tag">Recurring signups</span>
+      <span class="tag">Live rosters</span>
+      <span class="tag">Per-profession counts</span>
+      <span class="tag">Role dropdowns</span>
     </div>
-    <div class="cards">
-      <a class="card" href="#builds"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /></svg></div><div class="ctext"><h4>Builds</h4><p>Store and share GW2 builds with profession colors, icons, chat codes and forum threads.</p></div></div></a>
-      <a class="card" href="#comps"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M16 14v2.2l1.6 1" /><path d="M16 2v4" /><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" /><path d="M3 10h5" /><path d="M8 2v4" /><circle cx="16" cy="16" r="6" /></svg></div><div class="ctext"><h4>Compositions</h4><p>Schedule recurring squad signups with live dropdown rosters and per-profession headcounts.</p></div></div></a>
-      <a class="card" href="#wvw"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" /><line x1="13" x2="19" y1="19" y2="13" /><line x1="16" x2="20" y1="16" y2="20" /><line x1="19" x2="21" y1="21" y2="19" /><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5" /><line x1="5" x2="9" y1="14" y2="18" /><line x1="7" x2="4" y1="17" y2="20" /><line x1="3" x2="5" y1="19" y2="21" /></svg></div><div class="ctext"><h4>WvW Alliance</h4><p>Track your guild's matchup and get pinged when your server relinks.</p></div></div></a>
-      <a class="card" href="#wvw"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M5 22h14" /><path d="M5 2h14" /><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" /><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" /></svg></div><div class="ctext"><h4>WvW Reset</h4><p>Always know exactly when the next weekly WvW reset hits.</p></div></div></a>
-      <a class="card" href="#roles"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" /><path d="m9 12 2 2 4-4" /></svg></div><div class="ctext"><h4>Guild Roles</h4><p>Auto-assign Discord roles from real GW2 in-game guild membership via API keys.</p></div></div></a>
-      <a class="card" href="#alerts"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M15 18h-5" /><path d="M18 14h-8" /><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0v-9a2 2 0 0 1 2-2h2" /><rect width="8" height="4" x="10" y="6" rx="1" /></svg></div><div class="ctext"><h4>Update Notes & RSS</h4><p>Patch notes and any RSS/Atom feed posted automatically as they drop.</p></div></div></a>
-      <a class="card" href="#alerts"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="m17 2-5 5-5-5" /><rect width="20" height="15" x="2" y="7" rx="2" /></svg></div><div class="ctext"><h4>Streaming Alerts</h4><p>Go-live notifications for your guild's YouTube and Twitch creators.</p></div></div></a>
-      <a class="card" href="#accounts"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" /><circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></svg></div><div class="ctext"><h4>Accounts & API Keys</h4><p>Members securely link GW2 API keys; guild lookups by name in seconds.</p></div></div></a>
-      <a class="card" href="#server"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></svg></div><div class="ctext"><h4>Audit Logging</h4><p>Log joins, leaves, kicks, bans, edits and role/channel changes to a channel you choose.</p></div></div></a>
-      <a class="card" href="#alerts"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /></svg></div><div class="ctext"><h4>ArcDPS Updates</h4><p>Auto-post when a new ArcDPS build drops, with release time and a download link.</p></div></div></a>
-      <a class="card" href="#accounts"><div class="card-in"><div class="ic"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /><circle cx="12" cy="12" r="3" /></svg></div><div class="ctext"><h4>Per-guild Config</h4><p>One setup flow, role-gated, with every server's settings stored separately.</p></div></div></a>
+  </div>
+  <div class="fmock rv d1">
+    <svg class="doodle" width="240" height="200" viewBox="0 0 240 200" style="bottom:-50px; right:-30px" fill="none" stroke="#c764ff" stroke-width="2"><path d="M20 180 Q 120 20 220 120"/><circle cx="220" cy="120" r="14"/></svg>
+    <div class="mockcard">
+      <div class="pin" style="background:var(--p-mes)"><img src="/assets/prof/Chronomancer.png" alt=""></div>
+      <div class="row">
+        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
+        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#c4b5fd">AxiTools</span><span class="mtag" style="background:#c764ff">✓ APP</span><span class="mtime">Fri at 8:00 PM</span></div>
+        <div class="dembed" style="border-left-color:var(--p-mes)">
+          <div class="dt" style="color:#d6b8ff">WvW Raid — Friday Reset</div>
+          <div class="dd"><b>Firebrand</b> 3/4 · <b>Scourge</b> 4/5 · <b>Chrono</b> 2/2<br><b>Spellbreaker</b> 1/3 · <b>Scrapper</b> 2/2<br><b>Signed up</b> 34 / 50</div>
+          <div class="df">Pick your role from the dropdown below ↓</div>
+        </div></div>
+      </div>
     </div>
-  </section>
+  </div>
+</div>
 
-  <!-- ============ BUILDS ============ -->
-  <section id="builds" class="wrap" style="--accent:var(--p-guard);--accent2:var(--cyan)">
-    <div class="feature">
-      <div class="ftext">
-        <span class="cmd">/builds add · edit · delete</span>
-        <h3>Builds, themed to the<br>profession</h3>
-        <p>Every build is stored with its profession or elite spec, build-site links, chat code, description and audit trail of who changed it last. Posts adopt the profession's color and icon automatically.</p>
-        <ul>
-          <li>Profession & elite-spec color + icon out of the box</li>
-          <li>One-click <strong>chat code</strong> in a copyable code block</li>
-          <li>When the target channel is a forum, AxiTools creates or updates the thread</li>
-          <li>Audit metadata: who last edited, and when</li>
-        </ul>
-      </div>
-      <div class="holo">
-        <div class="holo-in">
-          <div class="holo-label"><span>◈ #builds · forum thread</span><span class="dots"><span></span><span></span><span></span></span></div>
-          <div class="discord">
-            <div class="msgrow">
-              <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-              <div class="mbody">
-                <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 7:42 PM</span>
-                <div class="embed" style="--ebar:var(--p-mes)">
-                  <div class="ethumb"><img class="picon" src="assets/prof/Virtuoso.png" alt="Virtuoso"></div>
-                  <div class="eauthor"><img class="picon inl" src="assets/prof/Virtuoso.png" alt="Virtuoso">Virtuoso (Mesmer)</div>
-                  <div class="etitle">Power Virtuoso — Raid DPS</div>
-                  <div class="edesc"><a style="color:#5fa8d3">snowcrows.com - Power Virtuoso — Raid DPS</a></div>
-                  <div class="efields">
-                    <div class="efield full"><div class="k">Chat Code</div><div class="v"><span class="codeblk">[&amp;DQIBLSkqIzaNAY0BowGjAdABQwHQAdQB0gFTAVMB27gAAAAAAAA=]</span></div></div>
-                    <div class="efield full"><div class="k">Description</div><div class="v">Top-tier ranged power DPS with strong burst phases and an easy rotation.</div></div>
-                    <div class="efield"><div class="k">Updated By</div><div class="v">@Kael</div></div>
-                    <div class="efield"><div class="k">Updated On</div><div class="v">Jun 8, 2026</div></div>
-                  </div>
-                  <div class="efoot">Today at 7:42 PM</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+<div class="feature">
+  <div class="ftext rv">
+    <div class="eyebrow">/wvw matchup · reset</div>
+    <h2>Own the WvW week</h2>
+    <p>Track your guild's <b>matchup and rosters</b>, get <b>pinged when your server relinks</b>, and always know exactly when the next <b>weekly reset</b> hits — posted straight to the channel your commanders watch.</p>
+    <div class="tags" style="--tagc:#f9a8d4">
+      <span class="tag">Live matchup</span>
+      <span class="tag">Relink alerts</span>
+      <span class="tag">Reset countdown</span>
+      <span class="tag">Server rosters</span>
+    </div>
+  </div>
+  <div class="fmock rv d1">
+    <svg class="doodle" width="200" height="200" viewBox="0 0 200 200" style="top:-40px; right:-50px" fill="none" stroke="#39ffd0" stroke-width="2"><path d="M100 20 L160 40 V90 C160 130 135 155 100 170 C65 155 40 130 40 90 V40 Z"/></svg>
+    <div class="mockcard">
+      <div class="pin" style="background:#0e6fa3"><img src="/assets/axitools-logo.svg" alt="" style="filter:brightness(0) invert(1)"></div>
+      <div class="row">
+        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
+        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#7fd6ff">AxiTools</span><span class="mtag">✓ APP</span><span class="mtime">Today at 6:00 PM</span></div>
+        <div class="dembed" style="border-left-color:#39ffd0">
+          <div class="dt" style="color:#8ff4dd">This Week's Matchup — NA Tier 2</div>
+          <div class="dd"><b>1st</b> Blackgate — 214k<br><b>2nd</b> Your Link — 198k<br><b>3rd</b> Maguuma — 176k</div>
+          <div class="df">Next reset in 2d 4h · relink alert armed</div>
+        </div></div>
       </div>
     </div>
-  </section>
+  </div>
+</div>
 
-  <!-- ============ COMPS ============ -->
-  <section id="comps" class="wrap" style="--accent:var(--teal);--accent2:var(--cyan)">
-    <div class="feature tall flip">
-      <div class="ftext">
-        <span class="cmd">/comp manage · /comp schedule</span>
-        <h3>Squad comps that fill<br>themselves</h3>
-        <p>Set a roster of classes, save reusable presets, then attach them to recurring post times in any timezone. When a schedule fires, AxiTools posts the signup and members pick a class from the dropdown — no extra permissions needed.</p>
-        <ul>
-          <li><code>/comp manage</code> — channel, ping role, classes &amp; presets</li>
-          <li><code>/comp schedule</code> — recurring days/times per preset</li>
-          <li>Live dropdown signups with per-profession headcounts</li>
-          <li>IANA timezones (<code>America/Los_Angeles</code>) or shorthand (<code>PST</code>)</li>
-        </ul>
-      </div>
-      <div style="display:grid;gap:30px">
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ /comp manage · ephemeral</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                  <div class="msgtext">Use the controls below to manage the roster and presets. To manage scheduled posts, run <span class="codeblk">/comp schedule manage</span>.</div>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="etitle" style="color:#e8ecf4">Guild Composition</div>
-                    <div class="efields">
-                      <div class="efield full"><div class="k">Posting</div><div class="v">Channel: #raid-signups<br>Ping: @Raiders</div></div>
-                      <div class="efield full"><div class="k">Presets</div><div class="v">Active: <strong>Weekly Raid</strong><br>Available: Weekly Raid, Strike Static, WvW Squad</div></div>
-                      <div class="efield full"><div class="k">Overview</div><div class="v">Tank: Firebrand · Heal: Druid · DPS: flex</div></div>
-                      <div class="efield full"><div class="k">Classes</div><div class="v">• Tank (1)<br>• Healer (2)<br>• Power DPS (5)<br>• Condi DPS (2)</div></div>
-                    </div>
-                  </div>
-                  <div class="ddrop"><span>Saved compositions</span><span class="chev">▾</span></div>
-                  <div class="dbtns">
-                    <button class="dbtn">Save as preset</button>
-                    <button class="dbtn primary">Load preset</button>
-                    <button class="dbtn danger">Delete preset</button>
-                  </div>
-                  <div class="ddrop"><span>Select the channel for scheduled compositions</span><span class="chev">▾</span></div>
-                  <div class="ddrop"><span>Select a role to ping with composition posts</span><span class="chev">▾</span></div>
-                  <div class="dbtns">
-                    <button class="dbtn">Edit classes</button>
-                    <button class="dbtn">Edit overview</button>
-                    <button class="dbtn success">Post now</button>
-                    <button class="dbtn">Close</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ /comp schedule list · ephemeral</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="etitle" style="color:#e8ecf4">Scheduled Composition Posts</div>
-                    <div class="edesc">• <strong>Raid Night</strong> — Weekly Raid — Wed at 20:00 America/Los_Angeles.<br>• <strong>Strike Static</strong> — Strike Static — Mon,Thu at 19:30 America/Los_Angeles.<br>• <strong>WvW Squad</strong> — WvW Squad — Fri at 19:00 America/Los_Angeles.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ #raid-signups · auto-posted</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 6:00 PM</span>
-                  <div class="ping">@Raiders</div>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="etitle" style="color:#e8ecf4">Guild Composition Signup</div>
-                    <div class="edesc">Scheduled for <strong>Wednesday</strong> at <strong>8:00 PM</strong> America/Los_Angeles.<br>Select your class using the dropdown below.</div>
-                    <div class="efields">
-                      <div class="efield full"><div class="k">Composition Overview</div><div class="v">2 tanks · 2 heals · 6 DPS — Wing 1–4 clear</div></div>
-                      <div class="efield"><div class="k">🛡️ Tank (1/1)</div><div class="v">@Aria</div></div>
-                      <div class="efield"><div class="k">💚 Healer (1/2)</div><div class="v">@Bren</div></div>
-                      <div class="efield"><div class="k">⚔️ Power DPS (2/5)</div><div class="v">@Kael<br>@Sol</div></div>
-                      <div class="efield"><div class="k">🔥 Condi DPS (0/2)</div><div class="v">—</div></div>
-                      <div class="efield"><div class="k">❌ Absent (0)</div><div class="v">—</div></div>
-                    </div>
-                    <div class="ddrop"><span>Select a class to sign up (select again to remove)</span><span class="chev">▾</span></div>
-                    <div class="efoot">Select the dropdown again to remove yourself from a class.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+<div class="feature flip">
+  <div class="ftext rv">
+    <div class="eyebrow">set it and forget it</div>
+    <h2>Runs itself</h2>
+    <p>AxiTools posts on its own: <b>GW2 patch notes and any RSS/Atom feed</b> as they drop, <b>go-live alerts</b> for your guild's Twitch and YouTube creators, <b>ArcDPS update</b> pings, and <b>automatic Discord roles</b> synced from real in-game guild membership.</p>
+    <div class="tags" style="--tagc:#86efac">
+      <span class="tag">Patch notes &amp; RSS</span>
+      <span class="tag">Twitch / YouTube go-live</span>
+      <span class="tag">ArcDPS updates</span>
+      <span class="tag">Auto guild-roles</span>
+    </div>
+  </div>
+  <div class="fmock rv d1">
+    <svg class="doodle" width="220" height="180" viewBox="0 0 220 180" style="bottom:-40px; left:-50px" fill="none" stroke="#39ffd0" stroke-width="2"><path d="M20 90 Q 60 30 110 60 T 200 70"/><circle cx="20" cy="90" r="10"/></svg>
+    <div class="mockcard">
+      <div class="pin" style="background:var(--p-necro)"><img src="/assets/prof/Reaper.png" alt=""></div>
+      <div class="row">
+        <div class="av bot"><img src="/assets/axitools-logo.svg" alt=""></div>
+        <div style="flex:1"><div class="mhead"><span class="mname" style="color:#8ff4dd">AxiTools</span><span class="mtag" style="background:#39ffd0">✓ APP</span><span class="mtime">Today at 9:15 AM</span></div>
+        <div class="dembed" style="border-left-color:#9146ff">
+          <div class="dt" style="color:#c9a6ff">🔴 Aria is live on Twitch</div>
+          <div class="dd"><b>WvW roaming — reset prep</b><br>twitch.tv/aria</div>
+          <div class="df">Auto-posted · role @Streamer pinged</div>
+        </div></div>
       </div>
     </div>
-  </section>
+  </div>
+</div>
 
-  <!-- ============ WVW ============ -->
-  <section id="wvw" class="wrap" style="--accent:var(--red);--accent2:var(--blue)">
-    <div class="sechead">
-      <span class="eyebrow">World vs World</span>
-      <h2>Own the <span class="grad">matchup</span></h2>
-      <p class="lead">Track your guild's WvW world, see the full matchup roster, and never miss a relink or a reset.</p>
-    </div>
-    <div class="feature tall">
-      <div class="ftext">
-        <span class="cmd">/alliance setup · /alliance status</span>
-        <h3>Live matchup &amp; rosters</h3>
-        <p>Point AxiTools at the alliance guild you want to follow and a channel to post in. It posts the current matchup — your home world, team color, tier and the GREEN / BLUE / RED rosters — and announces when your server's links change.</p>
-        <ul>
-          <li>GREEN / BLUE / RED teams with full alliance rosters</li>
-          <li><span class="cmd" style="margin:0">/alliance relink enable</span> pings you when your server relinks</li>
-          <li><span class="cmd" style="margin:0">/reset</span> counts down to the next matchup (weekly WvW reset)</li>
-        </ul>
-      </div>
-      <div style="display:grid;gap:30px">
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ #wvw · matchup</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 12:00 PM</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="ehead">Current WvW Matchup</div>
-                    <div class="efields">
-                      <div class="efield"><div class="k">Home world</div><div class="v">Maguuma</div></div>
-                      <div class="efield"><div class="k">Your team color</div><div class="v">🟢 Green</div></div>
-                      <div class="efield"><div class="k">Tier</div><div class="v">Tier 2</div></div>
-                      <div class="efield full" style="height:1px;margin:2px 0 0"></div>
-                      <div class="efield" style="flex:1 1 45%"><div class="k">🔵 Blue — Yak's Bend</div><div class="v"><a style="color:#5fa8d3">source</a><br>Eternal Vanguard<br>[GANK] Ganksquad<br>+2 guilds</div></div>
-                      <div class="efield" style="flex:1 1 45%"><div class="k">🔴 Red — Sea of Sorrows</div><div class="v"><a style="color:#5fa8d3">source</a><br>Sentinels of Orr<br>[RUIN] Ruin<br>+3 guilds</div></div>
-                    </div>
-                    <div class="efoot">Prediction confidence — Home: 92% | Blue: 64% | Red: 58%</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ #wvw · relink</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Friday at 6:00 PM</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="ehead">🔗 New Server Link Announced</div>
-                    <div class="edesc" style="margin-top:-2px"><a style="color:#5fa8d3">📊 Maguuma sheet</a></div>
-                    <div class="efields">
-                      <div class="efield full"><div class="k">Server</div><div class="v"><strong>Maguuma</strong></div></div>
-                      <div class="efield" style="flex:1 1 44%"><div class="k">Roster</div><div class="v"><strong>Eternal Vanguard</strong><br>• [AXI] Axiom<br>• [BL] Blacklist<br><br><strong>Mist Wardens</strong><br>• [MIST] Mistwalkers<br>• [WARD] Wardens</div></div>
-                      <div class="efield" style="flex:1 1 44%"><div class="k">​</div><div class="v"><strong>Storm Pact</strong><br>• [VOID] Voidwalkers<br>• [KISS] Knights<br><br><strong>Solo Guilds</strong><br>• [RUIN] Ruin<br>• [WAR] Warband</div></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ /reset · ephemeral</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="ethumb" style="color:var(--cyan)"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style="width:28px;height:28px"><circle cx="12" cy="12" r="10" /><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /><path d="M2 12h20" /></svg></div>
-                    <div class="etitle" style="color:#e8ecf4">WvW Weekly Reset</div>
-                    <div class="efields">
-                      <div class="efield full"><div class="k">Next Reset (NA)</div><div class="v">Friday, June 12, 2026 7:00 PM<br>7:00 PM — in 3 days</div></div>
-                    </div>
-                    <div class="efoot">Guild Wars 2 Tools</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+<div class="gridsection" id="commands">
+  <h2 class="rv">Everything else your guild runs on</h2>
+  <p class="lead rv">Eleven systems, one bot — every server's data fully isolated. A few more you get out of the box:</p>
+  <div class="grid3">
+    <div class="gcard rv"><h3>Accounts &amp; API keys</h3><p>Members securely link their GW2 API keys; guild lookups by name resolve in seconds.</p></div>
+    <div class="gcard rv d1"><h3>Per-guild config</h3><p>One role-gated setup flow, with every server's settings and data stored separately.</p></div>
+    <div class="gcard rv d1"><h3>Audit logging</h3><p>Log joins, leaves, kicks, bans, edits and role/channel changes to a channel you choose.</p></div>
+  </div>
+</div>
 
-  <!-- ============ ALERTS (RSS + UPDATE NOTES + STREAMING) ============ -->
-  <section id="alerts" class="wrap" style="--accent:var(--p-ele);--accent2:var(--p-war)">
-    <div class="sechead">
-      <span class="eyebrow">Never miss a beat</span>
-      <h2>Automatic <span class="grad">alerts</span></h2>
-      <p class="lead">Patch notes, feeds and go-lives land in the right channel the moment they happen.</p>
-    </div>
-    <div class="feature tall">
-      <div class="ftext">
-        <span class="cmd">/rss set · list · delete</span>
-        <h3>Patch notes, feeds &amp; tools</h3>
-        <p>Subscribe a channel to the official Guild Wars 2 wiki game-updates page, any RSS or Atom feed, and the ArcDPS build watcher. AxiTools polls each on its own schedule and posts new entries the moment they drop — never reposting old ones.</p>
-        <ul>
-          <li>Game update notes straight from the official GW2 Wiki</li>
-          <li>Any RSS/Atom feed: news sites, blogs, creators</li>
-          <li>ArcDPS build updates, posted automatically</li>
-          <li>Per-guild isolation — feeds never leak between servers</li>
-        </ul>
-      </div>
-      <div style="display:grid;gap:30px">
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ #patch-notes · game updates</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 10:01 AM</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="etitle">Game update notes - June 5, 2026</div>
-                    <div class="edesc">Balance<br>• <strong>Guardian:</strong> Dragonhunter — reduced the cooldown of Dragon's Maw.<br>• <strong>Necromancer:</strong> Reaper — increased Shroud damage in PvE only.<br><br>World vs World<br>• Added a new Gift of Battle reward track.<br><br>Fractals, Strikes, and Raids<br>• Fixed an issue where a Strike CM reward could be claimed twice.</div>
-                    <div class="efoot">Guild Wars 2 Wiki – Game Updates</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ #news-feed · rss</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 9:30 AM</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="eauthor">GuildMag</div>
-                    <div class="etitle"><a style="color:#5fa8d3">World Restructuring: Beta 7 Recap</a></div>
-                    <div class="edesc">Our breakdown of the latest WvW alliances beta — what changed, what worked, and what's coming next.</div>
-                    <div class="efields">
-                      <div class="efield full"><div class="k">Details</div><div class="v"><strong>Published:</strong> Mon, 08 Jun 2026 14:00 GMT<br><strong>Author:</strong> Elara Brightwind<br><strong>Tags:</strong> WvW, Alliances, Beta</div></div>
-                    </div>
-                    <div class="efoot">RSS feed: GuildMag</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ #arcdps-updates</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 1:04 PM</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="ethumb" style="background:rgba(70,230,255,.08)"><img src="assets/arcdps.png" alt="ArcDPS"></div>
-                    <div class="etitle">ArcDPS Update</div>
-                    <div class="edesc"><strong>Changes for June 4, 2026</strong><br>• fixed a rare crash on map load<br>• added a new boon-uptime table column</div>
-                    <div class="efields">
-                      <div class="efield"><div class="k">Updated</div><div class="v">2 hours ago</div></div>
-                      <div class="efield"><div class="k">Release time</div><div class="v">Thursday, June 4, 2026 1:00 PM</div></div>
-                      <div class="efield full"><div class="k">Download</div><div class="v"><a style="color:#5fa8d3">Get the latest build</a></div></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+<div class="setuplead">
+  <h2 class="rv">Set up before your coffee cools</h2>
+  <p class="rv">One command. Every server gets its own config, roles, and isolated data.</p>
+</div>
+<div class="cmd rv">
+  <div class="line"><span class="prompt">/setup</span> modlog:#audit-log <span class="okt">✓ done</span></div>
+  <small>Creates roles, wires alerts, and stores this server's settings separately from every other guild.</small>
+</div>
 
-    <div class="feature flip" style="--accent:#9146ff;--accent2:var(--mag);margin-top:72px">
-      <div class="ftext">
-        <span class="cmd">/streaming add · list · remove</span>
-        <h3>Go-live notifications</h3>
-        <p>Subscribe to your guild's YouTube channels and Twitch streamers. When they go live, AxiTools drops an alert with the title and a ping for the role you choose.</p>
-        <ul>
-          <li>YouTube and Twitch, side by side</li>
-          <li>Per-subscription channel and ping role</li>
-          <li>Update destinations any time without re-adding</li>
-        </ul>
-      </div>
-      <div class="holo">
-        <div class="holo-in">
-          <div class="holo-label"><span>◈ #go-live</span><span class="dots"><span></span><span></span><span></span></span></div>
-          <div class="discord">
-            <div class="msgrow">
-              <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-              <div class="mbody">
-                <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 8:30 PM</span>
-                <div class="ping">@Stream-pings</div>
-                <div class="embed" style="--ebar:var(--twitch)">
-                  <div class="ethumb" style="background:rgba(145,70,255,.15)"><img src="assets/twitch.png" alt="Twitch"></div>
-                  <div class="etitle">🔴 AriaPlaysGW2 is live on Twitch!</div>
-                  <div class="edesc">Dragonhunter duels + guild raid at 9 — come hang!</div>
-                  <div class="efields">
-                    <div class="efield"><div class="k">Game</div><div class="v">Guild Wars 2</div></div>
-                    <div class="efield"><div class="k">Viewers</div><div class="v">142</div></div>
-                  </div>
-                  <div class="efoot"><img src="assets/twitch.png" alt="" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px">Twitch</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+<div class="closeband">
+  <div class="bgband2"></div>
+  <h2 class="rv">Your guild deserves its own colors.</h2>
+  <p class="rv d1">Free · multi-guild · two-minute setup</p>
+  <a class="pill rv d1" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add AxiTools to Discord</a>
+</div>
+</main>
+<footer>
+  <div class="fwrap">
+    <div>© 2026 AxiTools</div>
+    <div><a href="/#commands">Commands</a> &nbsp;·&nbsp; <a href="/privacy">Privacy</a> &nbsp;·&nbsp; <a href="/terms">Terms</a> &nbsp;·&nbsp; <a href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">Add to Discord</a></div>
+  </div>
+</footer>
+<script>
+(() => {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  <!-- ============ GUILD ROLES ============ -->
-  <section id="roles" class="wrap" style="--accent:var(--p-mes);--accent2:var(--mag)">
-    <div class="feature flip">
-      <div class="ftext">
-        <span class="cmd">/guildroles set · list · remove</span>
-        <h3>Roles that match the<br>in-game roster</h3>
-        <p>Map a Guild Wars 2 guild ID to a Discord role. When members link their API key, AxiTools grants the role to verified guild members — and keeps it accurate as people join or leave.</p>
-        <ul>
-          <li>Real in-game membership via the GW2 API</li>
-          <li>Alliance subgroups for multi-guild communities</li>
-          <li>Allowlist control over who can self-assign</li>
-        </ul>
-      </div>
-      <div class="holo">
-        <div class="holo-in">
-          <div class="holo-label"><span>◈ /guildroles list · ephemeral</span><span class="dots"><span></span><span></span><span></span></span></div>
-          <div class="discord">
-            <div class="msgrow">
-              <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-              <div class="mbody">
-                <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                <div class="embed" style="--ebar:var(--brand)">
-                  <div class="etitle" style="color:#e8ecf4">Guild role mappings</div>
-                  <div class="edesc">Configured Guild Wars 2 guild to Discord role assignments.</div>
-                  <div class="efields">
-                    <div class="efield full"><div class="k">1. [AXI] Axiom</div><div class="v">Guild ID:<br><span class="codeblk">14762F76-7B92-E711-80D5-3863BB36D232</span><br>Discord role: @Axiom Member</div></div>
-                    <div class="efield full"><div class="k">2. [VOID] Voidwalkers</div><div class="v">Guild ID:<br><span class="codeblk">8A1C3F09-2D44-E811-81A8-1402EC0327F1</span><br>Discord role: @Allied</div></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+  const msgs = [...document.querySelectorAll('#feed .msg')];
+  const typing = document.getElementById('typing');
+  function play() {
+    msgs.forEach((m) => m.classList.remove('show'));
+    if (typing) typing.style.display = 'none';
+    if (reduced) { msgs.forEach((m) => m.classList.add('show')); return; }
+    setTimeout(() => msgs[0].classList.add('show'), 700);
+    setTimeout(() => { if (typing) typing.style.display = 'flex'; }, 1600);
+    setTimeout(() => { if (typing) typing.style.display = 'none'; msgs[1].classList.add('show'); }, 3200);
+    setTimeout(play, 9000);
+  }
+  if (msgs.length >= 2) play();
 
-  <!-- ============ ACCOUNTS + CONFIG ============ -->
-  <section id="accounts" class="wrap" style="--accent:var(--p-necro);--accent2:var(--teal)">
-    <div class="feature tall">
-      <div class="ftext">
-        <span class="cmd">/apikey add · list · remove · role</span>
-        <h3>API key management</h3>
-        <p>Members add their own GW2 API keys through a guided, step-by-step verification — AxiTools checks each permission, looks up the account, guilds and characters, saves the key, then keeps Discord roles in sync automatically every week.</p>
-        <ul>
-          <li>Live verification checklist on <code>/apikey add</code></li>
-          <li>Self-service <code>list</code> / <code>remove</code>, plus <code>/apikey help</code></li>
-          <li>Pick a preferred guild role with <code>/apikey role</code></li>
-          <li>Guild ID lookup by name via <code>/gw2guild search</code></li>
-        </ul>
-      </div>
-      <div style="display:grid;gap:30px">
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ /apikey add · verifying</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="etitle" style="color:#e8ecf4">API key verification</div>
-                    <div class="edesc">Key validated. Checking permissions…</div>
-                    <div class="efields">
-                      <div class="efield full"><div class="k">Verification steps</div><div class="v">✅ Success — Key validation<br>✅ Success — Permission: account<br>✅ Success — Permission: characters<br>✅ Success — Permission: guilds<br>✅ Success — Permission: wvw<br>✅ Success — Account lookup<br>⏳ Pending — Guild lookup<br>⏳ Pending — Character lookup<br>⏳ Pending — Save key<br>⏳ Pending — Role sync</div></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="holo">
-          <div class="holo-in">
-            <div class="holo-label"><span>◈ /apikey list · ephemeral</span><span class="dots"><span></span><span></span><span></span></span></div>
-            <div class="discord">
-              <div class="msgrow">
-                <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-                <div class="mbody">
-                  <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                  <div class="embed" style="--ebar:var(--brand)">
-                    <div class="etitle" style="color:#e8ecf4">Main</div>
-                    <div class="edesc">Saved Guild Wars 2 API key details.</div>
-                    <div class="efields">
-                      <div class="efield"><div class="k">Account</div><div class="v">Account name: Aria.1234<br>Key name: <span class="codeblk">Main</span></div></div>
-                      <div class="efield"><div class="k">Permissions</div><div class="v">account, guilds, characters</div></div>
-                      <div class="efield full"><div class="k">Guilds</div><div class="v">[AXI] Axiom, [VOID] Voidwalkers</div></div>
-                      <div class="efield full"><div class="k">API key</div><div class="v"><span class="codeblk">B7E1F0C2-3A4D-5E6F-8091-A2B3C4D5E6F7-A1B2C3D4-E5F6-7A8B-9C0D-E1F2A3B4C5D6</span></div></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="feature flip" style="--accent:var(--cyan);--accent2:var(--mag);margin-top:72px">
-      <div class="ftext">
-        <span class="cmd">/config setup · /config status</span>
-        <h3>One setup, fully isolated</h3>
-        <p>Admins open a single settings view to choose which roles can use the bot and which channel or forum receives posts. Delivered as a DM or an ephemeral popup, and stored separately for every guild.</p>
-        <ul>
-          <li>Role-gated access control</li>
-          <li>Pick channels/forums per feature</li>
-          <li>Each server's data under its own isolated store</li>
-        </ul>
-      </div>
-      <div class="holo">
-        <div class="holo-in">
-          <div class="holo-label"><span>◈ /config setup · ephemeral</span><span class="dots"><span></span><span></span><span></span></span></div>
-          <div class="discord">
-            <div class="msgrow">
-              <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-              <div class="mbody">
-                <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                <div class="msgtext">⚙️ <strong>AxiTools settings</strong> — choose the roles and channels for this server. Changes save automatically.</div>
-                <div class="ddrop"><span>Moderator roles · @Officer, @Commander</span><span class="chev">▾</span></div>
-                <div class="ddrop"><span>Build posting channel · #builds</span><span class="chev">▾</span></div>
-                <div class="ddrop"><span>ArcDPS log channel · #arcdps-logs</span><span class="chev">▾</span></div>
-                <div class="ddrop"><span>Update notes channel · #patch-notes</span><span class="chev">▾</span></div>
-                <div class="dbtns">
-                  <button class="dbtn danger">Reset moderator roles</button>
-                  <button class="dbtn">Close</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ SERVER MANAGEMENT ============ -->
-  <section id="server" class="wrap" style="--accent:var(--p-eng);--accent2:var(--p-war)">
-    <div class="sechead">
-      <span class="eyebrow">Server management &amp; automation</span>
-      <h2>Run the <span class="grad">server</span>, not just the game</h2>
-      <p class="lead">Beyond Guild Wars 2, AxiTools keeps a tamper-proof record of what happens in your Discord and watches your tools for you.</p>
-    </div>
-
-    <div class="feature">
-      <div class="ftext">
-        <span class="cmd">/audit setup · query · apikey · blacklist</span>
-        <h3>Audit logging</h3>
-        <p>Log the events that matter — joins, leaves, kicks, bans, message edits and deletes, role and channel changes — to a channel you choose, each as a clean embed with who did what to whom.</p>
-        <ul>
-          <li>Member, message, role and channel events</li>
-          <li>Exclude noisy channels with <code>/audit blacklist</code></li>
-          <li>Query history and back-fill with <code>/audit query</code></li>
-        </ul>
-      </div>
-      <div class="holo">
-        <div class="holo-in">
-          <div class="holo-label"><span>◈ #audit-log</span><span class="dots"><span></span><span></span><span></span></span></div>
-          <div class="discord">
-            <div class="msgrow">
-              <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-              <div class="mbody">
-                <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">Today at 3:18 PM</span>
-                <div class="embed" style="--ebar:var(--brand)">
-                  <div class="eauthor">Bren</div>
-                  <div class="etitle" style="color:#e8ecf4">Message deleted</div>
-                  <div class="efields">
-                    <div class="efield"><div class="k">Actor</div><div class="v">@Bren (Moderator)</div></div>
-                    <div class="efield"><div class="k">Target</div><div class="v">@Aria</div></div>
-                    <div class="efield full"><div class="k">Channel</div><div class="v">#general</div></div>
-                    <div class="efield full"><div class="k">Content</div><div class="v">gg everyone, great run tonight!</div></div>
-                  </div>
-                  <div class="efoot">Guild Wars 2 Tools</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="feature flip" style="margin-top:72px">
-      <div class="ftext">
-        <span class="cmd">/audit query discord · historical</span>
-        <h3>Query the audit database</h3>
-        <p>Pull a member's entire footprint on demand. AxiTools searches its audit store — Discord events and Guild&nbsp;Wars&nbsp;2 activity from their linked API keys — and exports one merged, timestamped table.</p>
-        <ul>
-          <li>Search by live user or a departed <code>historical</code> username</li>
-          <li>Combined Discord + GW2 events in one result</li>
-          <li>Delivered as a clean <code>.txt</code> table, only you can see it</li>
-        </ul>
-      </div>
-      <div class="holo">
-        <div class="holo-in">
-          <div class="holo-label"><span>◈ /audit query · ephemeral</span><span class="dots"><span></span><span></span><span></span></span></div>
-          <div class="discord">
-            <div class="msgrow">
-              <div class="avatar"><img src="assets/axitools-logo.svg" alt="AxiTools"></div>
-              <div class="mbody">
-                <span class="uname">AxiTools</span><span class="bot">APP</span><span class="stamp">only you can see this</span>
-                <div class="filebar">📄 <span>audit_results.txt</span> <small>· 4 entries</small></div>
-<pre class="codetable"><span class="hl">Audit results (Discord + Guild Wars 2)</span>
-
-Timestamp         | Source  | Event           | Actor/User | Target | Details
-------------------+---------+-----------------+------------+--------+------------------
-2026-06-09 15:18  | Discord | Message deleted | @Bren      | @Aria  | #general
-2026-06-08 22:03  | Discord | Member kicked   | @Officer   | @Troll | Reason: spam
-2026-06-07 19:40  | GW2     | Guild join      | Aria.1234  | -      | [AXI] Axiom
-2026-06-05 11:02  | GW2     | Rank change     | Aria.1234  | -      | Member -&gt; Officer</pre>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-  </section>
-
-  <!-- ============ COMMAND INDEX ============ -->
-  <section id="commands" class="wrap">
-    <div class="sechead">
-      <span class="eyebrow">Quick reference</span>
-      <h2>The <span class="grad">command</span> deck</h2>
-      <p class="lead">Slash commands are grouped by system. Most are role-gated; a few are public.</p>
-    </div>
-    <div class="cmdtable">
-      <div class="cmdtable-in">
-        <div class="crow head"><div>Command</div><div class="desc">What it does</div></div>
-        <div class="crow"><div><code>/builds add · edit · delete</code></div><div class="desc">Manage profession-themed build posts with chat codes and forum threads.</div></div>
-        <div class="crow"><div><code>/comp manage · schedule</code></div><div class="desc">Configure rosters/presets and schedule recurring squad signups.</div></div>
-        <div class="crow"><div><code>/alliance setup · status · relink</code></div><div class="desc">Track WvW matchup scores and announce server relinks.</div></div>
-        <div class="crow"><div><code>/reset</code></div><div class="desc">Show the next WvW weekly reset time. <span class="tag" style="--accent:var(--teal)">public</span></div></div>
-        <div class="crow"><div><code>/guildroles set · list · remove</code></div><div class="desc">Map GW2 guild membership to Discord roles via API keys.</div></div>
-        <div class="crow"><div><code>/rss set · list · delete</code></div><div class="desc">Subscribe channels to patch notes and RSS/Atom feeds.</div></div>
-        <div class="crow"><div><code>/streaming add · list · remove · update</code></div><div class="desc">YouTube/Twitch go-live alerts with custom pings.</div></div>
-        <div class="crow"><div><code>/apikey add · list · remove · role</code></div><div class="desc">Link GW2 API keys and set your preferred guild role. <span class="tag" style="--accent:var(--teal)">public</span></div></div>
-        <div class="crow"><div><code>/gw2guild search</code></div><div class="desc">Look up a Guild Wars 2 guild ID by name. <span class="tag" style="--accent:var(--teal)">public</span></div></div>
-        <div class="crow"><div><code>/audit setup · query · apikey · blacklist</code></div><div class="desc">Configure and query Discord audit logging for this server.</div></div>
-        <div class="crow"><div><code>/config setup · status</code></div><div class="desc">Per-guild roles, channels and settings — isolated storage.</div></div>
-        <div class="crow"><div><code>/help</code></div><div class="desc">List available AxiTools commands. <span class="tag" style="--accent:var(--teal)">public</span></div></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ FOOTER CTA ============ -->
-  <section id="add" class="wrap">
-    <div class="ftcta">
-      <div class="ftcta-in">
-        <span class="eyebrow">Ready when you are</span>
-        <h2>Bring AxiTools to <span class="grad">your guild</span></h2>
-        <p>Add the bot, run <code>/config setup</code>, and you're posting in minutes.</p>
-        <div class="cta" style="justify-content:center">
-          <a class="btn solid lg" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot" target="_blank" rel="noopener">＋ Add to Discord</a>
-          <a class="btn lg" href="https://github.com/darkharasho/axitools">View on GitHub →</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <footer class="wrap">
-    <div class="frow">
-      <div class="brand">
-        <div class="core" style="width:32px;height:32px"><img src="assets/axitools-logo.svg" alt="AxiTools" style="width:22px;height:22px"></div>
-        <div><div class="bname" style="font-size:15px">AXITOOLS</div></div>
-      </div>
-      <div class="flinks">
-        <a href="#builds">Builds</a>
-        <a href="#comps">Comps</a>
-        <a href="#wvw">WvW</a>
-        <a href="#commands">Commands</a>
-        <a href="https://github.com/darkharasho/axitools">GitHub</a>
-        <a href="privacy">Privacy</a>
-        <a href="terms">Terms</a>
-      </div>
-      <div>Not affiliated with ArenaNet. Guild Wars 2 © ArenaNet, LLC.</div>
-    </div>
-  </footer>
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('inview'); io.unobserve(e.target); }
+  }, { threshold:0.15, rootMargin:'0px 0px -40px 0px' });
+  document.querySelectorAll('.rv').forEach((el) => io.observe(el));
+})();
+</script>
 </body>
 </html>
