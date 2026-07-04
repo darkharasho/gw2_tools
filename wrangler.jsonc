@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "axitools",
+  "compatibility_date": "2026-07-03",
+  // Pure static multi-page marketing site (no Worker script): serve ./site as-is.
+  // Static-asset serving on Workers is free + unlimited.
+  "assets": { "directory": "./site" },
+  // Custom domain — axi.link DNS is already on Cloudflare, so the first deploy
+  // provisions tools.axi.link + its DNS record.
+  "routes": [{ "pattern": "tools.axi.link", "custom_domain": true }]
+}

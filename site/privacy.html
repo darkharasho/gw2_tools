@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AxiTools — Privacy Policy</title>
+<meta name="description" content="How the AxiTools Guild Wars 2 Discord bot collects, stores, and handles data.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#06070f; --ink:#eaf6ff; --muted:#8ea2c4; --line:rgba(120,160,255,.18);
+    --cyan:#46e6ff; --mag:#c764ff; --teal:#39ffd0; --brand:#995d25;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{color:var(--ink);font-family:'Rajdhani',system-ui,-apple-system,sans-serif;line-height:1.6;
+    background:
+      radial-gradient(900px 600px at 80% -5%, rgba(199,100,255,.16), transparent 55%),
+      radial-gradient(900px 600px at 8% 8%, rgba(70,230,255,.14), transparent 55%),
+      #06070f;min-height:100vh;}
+  .wrap{max-width:820px;margin:0 auto;padding:48px 22px 80px}
+  a{color:var(--cyan)}
+  h1{font-family:'Orbitron',sans-serif;font-size:30px;letter-spacing:.02em;margin-bottom:6px}
+  h2{font-family:'Orbitron',sans-serif;font-size:18px;margin:34px 0 10px;color:var(--cyan)}
+  p,li{color:var(--ink);font-size:16px;margin-bottom:10px}
+  ul{padding-left:22px}
+  .muted{color:var(--muted);font-size:14px}
+  .back{display:inline-block;margin-bottom:26px;color:var(--muted);text-decoration:none}
+  .note{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:22px 0;color:var(--muted);font-size:14px}
+  footer{border-top:1px solid var(--line);margin-top:40px;padding-top:20px}
+  footer a{color:var(--muted);margin-right:16px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">← AxiTools</a>
+    <h1>Privacy Policy</h1>
+    <p class="muted">Last updated: 3 July 2026 · Operator: AxiTools · Contact: <a href="mailto:support@axi.link">support@axi.link</a></p>
+
+    <div class="note">AxiTools is a free, community Guild Wars 2 Discord bot. This policy explains what data the bot stores and why. It is written to be honest and practical; it is not legal advice and has not been lawyer-reviewed.</div>
+
+    <h2>What we collect and why</h2>
+    <ul>
+      <li><strong>Discord identifiers &amp; configuration</strong> — guild (server) IDs, user IDs, and the roles/channels an admin configures, so the bot can operate per-server with isolated settings.</li>
+      <li><strong>Guild Wars 2 API keys &amp; account data</strong> — when a user adds a GW2 API key, we store the key plus the linked account name, character names, granted permissions, and associated GW2 guild IDs, to power roster, verification, and build features.</li>
+      <li><strong>Cached GW2 guild details</strong> — guild names and tags fetched from the official GW2 API for display labels.</li>
+      <li><strong>Build records</strong> — professions, URLs, chat codes, descriptions, and edit metadata for builds you save.</li>
+      <li><strong>Subscriptions</strong> — RSS feeds and game-update-notes channels you configure.</li>
+      <li><strong>Audit events</strong> — records of Discord actions and GW2 guild-log entries, for server audit features.</li>
+      <li><strong>AxiVale desktop keys</strong> — we store only a SHA-256 <em>hash</em> of each desktop key; the raw key is never stored.</li>
+    </ul>
+
+    <h2>How your data is stored</h2>
+    <p>Data is stored in SQLite databases that are <strong>encrypted at rest with SQLCipher</strong>, and is isolated per Discord server. We do not sell or share your data. Guild Wars 2 data is retrieved from ArenaNet's official GW2 API using the API key you provide.</p>
+
+    <h2>Third parties</h2>
+    <p>The bot interacts with <a href="https://discord.com/privacy" target="_blank" rel="noopener">Discord</a> and the ArenaNet Guild Wars 2 API. Your use of Discord is governed by Discord's own policies.</p>
+
+    <h2>Data retention &amp; deletion</h2>
+    <p>Data is removed when a server administrator deletes it, revokes keys, or removes the bot from the server. You may request deletion of your data at any time by emailing <a href="mailto:support@axi.link">support@axi.link</a>.</p>
+
+    <h2>Children</h2>
+    <p>AxiTools is used through Discord and is not intended for anyone under the minimum age permitted by Discord's Terms of Service (13+, or higher where required).</p>
+
+    <h2>Changes to this policy</h2>
+    <p>We may update this policy; the "last updated" date above will change accordingly. Continued use of the bot after an update constitutes acceptance of the revised policy.</p>
+
+    <footer>
+      <a href="/">Home</a>
+      <a href="terms">Terms of Service</a>
+      <a href="mailto:support@axi.link">support@axi.link</a>
+    </footer>
+  </div>
+</body>
+</html>
