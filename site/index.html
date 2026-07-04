@@ -82,8 +82,9 @@
   .meta .d { font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:2px; }
   .opt .go { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--cyan); }
   .hero-ctas { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
-  .pill { display:inline-flex; align-items:center; gap:9px; padding:13px 26px; border-radius:10px; font-weight:600; font-size:13px;
+  .pill { display:inline-flex; align-items:center; gap:9px; padding:13px 26px; font-weight:600; font-size:13px;
     font-family:var(--display); letter-spacing:0.8px; text-transform:uppercase; text-decoration:none;
+    clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
     background:#fff; color:#06070f; box-shadow:0 8px 30px rgba(0,0,0,0.3); transition:transform 0.25s var(--ease), box-shadow 0.3s; }
   .pill:hover { transform:translateY(-2px); box-shadow:0 14px 40px rgba(0,0,0,0.4); }
   .pill.alt { background:rgba(255,255,255,0.14); color:#fff; backdrop-filter:blur(8px); }
@@ -136,7 +137,9 @@
   .gridsection h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; text-align:center; margin-bottom:8px; }
   .gridsection .lead { color:var(--muted); text-align:center; max-width:60ch; margin:0 auto 44px; }
   .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
-  .gcard { background:#16181d; border-radius:14px; padding:22px 24px; box-shadow:0 20px 50px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06); }
+  .gcard { background:linear-gradient(160deg,rgba(18,22,36,.92),rgba(10,13,22,.95)); padding:22px 24px;
+    clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%);
+    border:1px solid rgba(70,230,255,.12); box-shadow:0 20px 50px rgba(0,0,0,0.45),inset 0 0 40px rgba(70,230,255,.03); }
   .gcard h3 { font-family:var(--display); font-size:17px; font-weight:600; margin-bottom:8px; }
   .gcard p { color:#c3c9dd; font-size:14.5px; }
   @media (max-width:860px) { .grid3 { grid-template-columns:1fr; } }
@@ -145,15 +148,14 @@
   .setuplead h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; margin-bottom:14px; }
   .setuplead p { color:var(--muted); }
   .cmd { margin:36px auto 0; text-align:center; }
-  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:14px; padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
+  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(70,230,255,.18); border-radius:14px; padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
   .cmd .line .prompt { color:var(--cyan); }
   .cmd .line .okt { color:var(--teal); }
   .cmd small { display:block; margin-top:14px; color:var(--muted); font-size:13px; }
 
-  .closeband { position:relative; overflow:hidden; margin-top:150px; padding:150px 0 170px; text-align:center; }
-  .closeband .bgband2 { position:absolute; inset:14% -10% -24% -10%; z-index:-2; transform:skewY(-7deg); transform-origin:bottom right;
-    background:linear-gradient(115deg,#0e6fa3 0%,#46e6ff 30%,#c764ff 66%,#39ffd0 100%); opacity:0.9; }
-  .closeband .bgband2::after { content:""; position:absolute; inset:0; background:radial-gradient(50% 70% at 50% 45%, rgba(199,100,255,0.3), transparent 65%); }
+  .closeband { position:relative; margin-top:150px; padding:150px 0 170px; text-align:center;
+    background:linear-gradient(180deg,rgba(70,230,255,.06),rgba(199,100,255,.06));
+    border-top:1px solid rgba(70,230,255,.15); border-bottom:1px solid rgba(70,230,255,.15); }
   .closeband h2 { font-family:var(--display); font-size:clamp(30px,4vw,48px); font-weight:700; letter-spacing:-0.5px; margin-bottom:12px; text-shadow:0 4px 30px rgba(0,0,0,0.3); }
   .closeband p { color:rgba(255,255,255,0.9); margin-bottom:36px; font-weight:500; }
 
@@ -350,7 +352,6 @@
 </div>
 
 <div class="closeband">
-  <div class="bgband2"></div>
   <h2 class="rv">Your guild deserves its own colors.</h2>
   <p class="rv d1">Free · multi-guild · two-minute setup</p>
   <a class="pill rv d1" href="https://discord.com/oauth2/authorize?client_id=1433732142629912626&permissions=8&integration_type=0&scope=bot">＋ Add AxiTools to Discord</a>
