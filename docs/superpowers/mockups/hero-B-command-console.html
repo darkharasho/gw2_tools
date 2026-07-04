@@ -1,0 +1,53 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#070810;--ink:#eaf6ff;--muted:#8ea2c4;--cyan:#46e6ff;--mag:#c764ff;--teal:#39ffd0;--guard:#0c8fd6;--font:'Inter',sans-serif;--display:'Chakra Petch',sans-serif;--wm:'Orbitron',sans-serif;--mono:'JetBrains Mono',monospace;}
+*{margin:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);overflow:hidden}
+.bgwash{position:fixed;inset:0;z-index:-2;background:radial-gradient(90% 60% at 50% 40%,rgba(70,230,255,.08),transparent 60%),radial-gradient(60% 50% at 80% 90%,rgba(199,100,255,.10),transparent 60%)}
+.scan{position:fixed;inset:0;z-index:-1;opacity:.5;background:repeating-linear-gradient(0deg,rgba(255,255,255,.015) 0 2px,transparent 2px 4px);pointer-events:none}
+header{display:flex;align-items:center;justify-content:space-between;padding:26px 54px}
+.brand{display:flex;gap:11px;align-items:center}.brand .wm{font-family:var(--wm);font-weight:800;font-size:20px;letter-spacing:1px}
+.nav{display:flex;gap:16px;align-items:center;font-family:var(--display);font-size:13.5px;font-weight:600}.nav a{color:var(--ink);opacity:.85;text-decoration:none}
+.cta{background:var(--ink);color:#070810;padding:9px 18px;border-radius:8px}
+.wrap{max-width:900px;margin:44px auto 0;padding:0 40px;text-align:center}
+.kick{font-family:var(--mono);font-size:12px;letter-spacing:3px;color:var(--cyan);text-transform:uppercase;margin-bottom:20px}
+h1{font-family:var(--display);font-size:60px;line-height:1.06;font-weight:700;letter-spacing:-1px}
+h1 .g{font-family:var(--wm);font-weight:800;background:linear-gradient(90deg,var(--cyan),var(--mag));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--muted);font-size:17px;max-width:56ch;margin:20px auto 30px;line-height:1.6}
+.palette{max-width:680px;margin:0 auto;background:rgba(14,17,28,.92);border:1px solid rgba(255,255,255,.09);border-radius:16px;box-shadow:0 40px 100px rgba(0,0,0,.6);text-align:left;overflow:hidden}
+.pin{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.07)}
+.pin .slash{font-family:var(--mono);color:var(--cyan);font-size:16px}
+.pin .txt{font-family:var(--mono);font-size:15px;color:#dbeaff}
+.pin .caret{width:9px;height:18px;background:var(--cyan);margin-left:2px;animation:bl 1s steps(1) infinite;opacity:.9}
+@keyframes bl{50%{opacity:0}}
+.pin .kbd{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted);border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:3px 8px}
+.result{padding:8px 12px}
+.opt{display:flex;align-items:center;gap:14px;padding:13px 14px;border-radius:10px}
+.opt.sel{background:linear-gradient(90deg,rgba(70,230,255,.12),transparent)}
+.ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:13px;color:#fff}
+.meta .t{font-family:var(--display);font-weight:600;font-size:15px;color:#eaf6ff}
+.meta .d{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px}
+.opt .go{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--cyan)}
+</style></head>
+<body>
+<div class="bgwash"></div><div class="scan"></div>
+<header>
+ <div class="brand"><svg width="32" height="32" viewBox="0 0 32 32"><path d="M16 2 L28 8 V18 C28 25 22 29 16 31 C10 29 4 25 4 18 V8 Z" fill="none" stroke="#46e6ff" stroke-width="2.4"/></svg><span class="wm">AXITOOLS</span></div>
+ <nav class="nav"><a>Features</a><a>Commands</a><span class="cta">＋ Add to Discord</span></nav>
+</header>
+<div class="wrap">
+ <div class="kick">One bot · Eleven systems · Your professions' colors</div>
+ <h1>Your whole guild,<br>one <span class="g">slash</span> away.</h1>
+ <p class="sub">Builds, squad comps, WvW matchups, patch feeds and auto guild-roles — every AxiTools command answers with a rich, profession-themed embed in Discord.</p>
+ <div class="palette">
+  <div class="pin"><span class="slash">/</span><span class="txt">build guardian</span><span class="caret"></span><span class="kbd">↵ run</span></div>
+  <div class="result">
+   <div class="opt sel"><div class="ic" style="background:linear-gradient(135deg,#0c8fd6,#46e6ff)">DH</div><div class="meta"><div class="t">Power Dragonhunter — Roaming</div><div class="d">Guardian · [&amp;DQEKAwAAAA] · burst &amp; disengage</div></div><span class="go">open ↵</span></div>
+   <div class="opt"><div class="ic" style="background:linear-gradient(135deg,#3a9d23,#39ffd0)">SC</div><div class="meta"><div class="t">Condi Scourge — Zerg</div><div class="d">Necromancer · corruption &amp; barrier</div></div><span class="go">↑↓</span></div>
+   <div class="opt"><div class="ic" style="background:linear-gradient(135deg,#b46dff,#c764ff)">CH</div><div class="meta"><div class="t">Support Chronomancer</div><div class="d">Mesmer · quickness &amp; alacrity</div></div><span class="go">↑↓</span></div>
+  </div>
+ </div>
+</div>
+</body></html>
