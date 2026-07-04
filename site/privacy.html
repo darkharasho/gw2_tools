@@ -35,7 +35,7 @@
   .aurora::after{content:"";position:absolute;inset:0;opacity:.5;
    background:linear-gradient(transparent 0%, var(--bg) 92%);}
   /* faint hex/topo grid */
-  .grid{position:fixed;inset:0;z-index:-2;opacity:.06;
+  .hex-grid{position:fixed;inset:0;z-index:-2;opacity:.06;
    background-image:linear-gradient(var(--cyan) 1px,transparent 1px),linear-gradient(90deg,var(--cyan) 1px,transparent 1px);
    background-size:64px 64px;mask-image:radial-gradient(120% 80% at 50% 0%,#000,transparent 70%);}
   header { position:absolute; top:0; left:0; right:0; z-index:30; }
@@ -70,7 +70,7 @@
 </style>
 </head>
 <body>
-<div class="aurora"></div><div class="grid"></div>
+<div class="aurora"></div><div class="hex-grid"></div>
 <header>
   <div class="hwrap">
     <a class="brand" href="/" aria-label="AxiTools home">

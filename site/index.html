@@ -39,7 +39,7 @@
   .aurora::after{content:"";position:absolute;inset:0;opacity:.5;
    background:linear-gradient(transparent 0%, var(--bg) 92%);}
   /* faint hex/topo grid */
-  .grid{position:fixed;inset:0;z-index:-2;opacity:.06;
+  .hex-grid{position:fixed;inset:0;z-index:-2;opacity:.06;
    background-image:linear-gradient(var(--cyan) 1px,transparent 1px),linear-gradient(90deg,var(--cyan) 1px,transparent 1px);
    background-size:64px 64px;mask-image:radial-gradient(120% 80% at 50% 0%,#000,transparent 70%);}
   header { position:absolute; top:0; left:0; right:0; z-index:30; }
@@ -148,7 +148,7 @@
   .setuplead h2 { font-family:var(--display); font-size:clamp(28px,3.4vw,42px); font-weight:700; letter-spacing:-0.5px; margin-bottom:14px; }
   .setuplead p { color:var(--muted); }
   .cmd { margin:36px auto 0; text-align:center; }
-  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(70,230,255,.18); border-radius:14px; padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
+  .cmd .line { font-family:var(--mono); font-size:15px; background:rgba(255,255,255,0.04); border:1px solid rgba(70,230,255,.18); clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px); padding:18px 26px; display:inline-flex; align-items:center; gap:14px; }
   .cmd .line .prompt { color:var(--cyan); }
   .cmd .line .okt { color:var(--teal); }
   .cmd small { display:block; margin-top:14px; color:var(--muted); font-size:13px; }
@@ -177,7 +177,7 @@
 </style>
 </head>
 <body>
-<div class="aurora"></div><div class="grid"></div>
+<div class="aurora"></div><div class="hex-grid"></div>
 <header>
   <div class="hwrap">
     <a class="brand" href="/" aria-label="AxiTools home">
