@@ -1016,6 +1016,17 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
                 LOGGER.warning("No matchup found for world %s", world_id)
                 return False
             teams = self._extract_match_teams(match)
+            if not any(world_id in team.world_ids for team in teams):
+                # Around WvW reset the GW2 endpoints are briefly inconsistent, so
+                # the fetched match can exclude the resolved home world. Skip the
+                # post (and don't stamp the timestamp) so the loop retries once
+                # the API settles, rather than posting a homeless embed.
+                LOGGER.warning(
+                    "Home world %s absent from fetched match teams %s; skipping post (will retry)",
+                    world_id,
+                    [team.world_ids for team in teams],
+                )
+                return False
             tier = match.get("tier", 0)
             title = "Current WvW Matchup"
             confidence = None

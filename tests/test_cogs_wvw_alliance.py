@@ -96,6 +96,45 @@ async def test_post_matchup_refreshes_world_before_posting(mock_bot_alliance):
 
 
 @pytest.mark.asyncio
+async def test_post_matchup_skips_when_home_world_absent_from_match(mock_bot_alliance):
+    # Regression: around WvW reset the fetched match's teams can transiently
+    # disagree with the resolved home world. The current-matchup path must not
+    # post a "homeless" embed (3 opponents, no home team) and must not stamp the
+    # last-posted timestamp, so the 5-minute loop retries once the API settles.
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_id = "abcdef"
+    config.alliance_server_id = 1001
+
+    guild = MagicMock()
+    guild.id = 123
+    channel = MagicMock()
+    channel.send = AsyncMock()
+
+    # Home world resolves to 2002, but none of the three fetched teams contain it.
+    teams = [
+        MatchTeam(color="red", world_ids=[3003], victory_points=10),
+        MatchTeam(color="blue", world_ids=[4004], victory_points=8),
+        MatchTeam(color="green", world_ids=[5005], victory_points=6),
+    ]
+
+    cog._refresh_guild_world = AsyncMock(return_value=2002)
+    cog._fetch_matches = AsyncMock(return_value=[])
+    cog._fetch_match_for_world = AsyncMock(return_value={"tier": 1})
+    cog._extract_match_teams = MagicMock(return_value=teams)
+    cog._resolve_team_alliances = AsyncMock(return_value=AllianceRoster(alliances=[], solo_guilds=[]))
+    cog._build_embed = MagicMock(return_value=object())
+
+    posted = await cog._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
+
+    assert posted is False
+    channel.send.assert_not_awaited()
+    assert config.alliance_last_actual_at is None
+
+
+@pytest.mark.asyncio
 async def test_post_matchup_prediction_uses_sheet_world_when_available(mock_bot_alliance):
     cog = AllianceMatchupCog(mock_bot_alliance)
     cog._poster_loop.cancel()
