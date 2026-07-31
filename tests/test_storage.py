@@ -210,6 +210,52 @@ def test_audit_channel_blacklist_defaults_empty(tmp_path):
     assert loaded.audit_channel_blacklist == []
 
 
+def test_lockout_config_defaults(tmp_path):
+    from axitools.storage import StorageManager
+
+    storage = StorageManager(tmp_path)
+    config = storage.get_config(424242)
+    assert config.wvw_lockout_enabled is False
+    assert config.wvw_lockout_channel_id is None
+    assert config.wvw_lockout_lead_minutes == 1440
+    assert config.wvw_lockout_region is None
+    assert config.wvw_lockout_last_fired_for is None
+
+
+def test_lockout_config_normalizes(tmp_path):
+    from axitools.storage import StorageManager, GuildConfig
+
+    storage = StorageManager(tmp_path)
+    guild_id = 424242
+    config = GuildConfig.default()
+    config.wvw_lockout_enabled = True
+    config.wvw_lockout_channel_id = 555
+    config.wvw_lockout_lead_minutes = 2  # below the 5-minute minimum
+    config.wvw_lockout_region = "NA"  # wrong case
+    config.wvw_lockout_last_fired_for = "2025-03-04T07:59:00Z"
+    storage.save_config(guild_id, config)
+
+    reloaded = storage.get_config(guild_id)
+    assert reloaded.wvw_lockout_enabled is True
+    assert reloaded.wvw_lockout_channel_id == 555
+    assert reloaded.wvw_lockout_lead_minutes == 5  # clamped up
+    assert reloaded.wvw_lockout_region == "na"  # lowercased
+    assert reloaded.wvw_lockout_last_fired_for == "2025-03-04T07:59:00Z"
+
+
+def test_lockout_config_rejects_bad_region(tmp_path):
+    from axitools.storage import StorageManager, GuildConfig
+
+    storage = StorageManager(tmp_path)
+    guild_id = 424242
+    config = GuildConfig.default()
+    config.wvw_lockout_region = "asia"
+    storage.save_config(guild_id, config)
+
+    reloaded = storage.get_config(guild_id)
+    assert reloaded.wvw_lockout_region is None
+
+
 def test_discord_audit_structured_fields_round_trip(tmp_path):
     from axitools.storage import StorageManager
 

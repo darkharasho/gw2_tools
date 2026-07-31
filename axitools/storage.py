@@ -300,6 +300,11 @@ class GuildConfig:
     alliance_current_day: Optional[int] = None
     alliance_relink_enabled: bool = False
     alliance_relink_last_server: Optional[str] = None
+    wvw_lockout_enabled: bool = False
+    wvw_lockout_channel_id: Optional[int] = None
+    wvw_lockout_lead_minutes: int = 1440
+    wvw_lockout_region: Optional[str] = None
+    wvw_lockout_last_fired_for: Optional[str] = None
     comp: CompConfig = field(default_factory=CompConfig)
     comp_active_preset: Optional[str] = None
     comp_schedules: List[CompSchedule] = field(default_factory=list)
@@ -1966,6 +1971,42 @@ class StorageManager:
             payload["alliance_relink_last_server"] = relink_last_server.strip() or None
         else:
             payload["alliance_relink_last_server"] = None
+        lockout_enabled = payload.get("wvw_lockout_enabled")
+        payload["wvw_lockout_enabled"] = (
+            bool(lockout_enabled) if isinstance(lockout_enabled, bool) else False
+        )
+        lockout_channel_id = payload.get("wvw_lockout_channel_id")
+        if isinstance(lockout_channel_id, int):
+            payload["wvw_lockout_channel_id"] = lockout_channel_id
+        elif isinstance(lockout_channel_id, str):
+            try:
+                payload["wvw_lockout_channel_id"] = int(lockout_channel_id)
+            except ValueError:
+                payload["wvw_lockout_channel_id"] = None
+        else:
+            payload["wvw_lockout_channel_id"] = None
+        lockout_lead = payload.get("wvw_lockout_lead_minutes")
+        if isinstance(lockout_lead, bool):
+            lockout_lead = None
+        elif isinstance(lockout_lead, str):
+            try:
+                lockout_lead = int(lockout_lead)
+            except ValueError:
+                lockout_lead = None
+        if isinstance(lockout_lead, int):
+            payload["wvw_lockout_lead_minutes"] = max(5, lockout_lead)
+        else:
+            payload["wvw_lockout_lead_minutes"] = 1440
+        lockout_region = payload.get("wvw_lockout_region")
+        if isinstance(lockout_region, str) and lockout_region.strip().lower() in ("na", "eu"):
+            payload["wvw_lockout_region"] = lockout_region.strip().lower()
+        else:
+            payload["wvw_lockout_region"] = None
+        lockout_last = payload.get("wvw_lockout_last_fired_for")
+        if isinstance(lockout_last, str) and lockout_last.strip():
+            payload["wvw_lockout_last_fired_for"] = lockout_last.strip()
+        else:
+            payload["wvw_lockout_last_fired_for"] = None
         config = GuildConfig(**payload)
         if migrated_schedules:
             logger.info(
