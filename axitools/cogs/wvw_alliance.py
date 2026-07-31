@@ -32,6 +32,7 @@ GW2_GUILD_WVW_URLS = (
     "https://api.guildwars2.com/v2/wvw/guilds/eu",
 )
 GW2_MATCHES_URL = "https://api.guildwars2.com/v2/wvw/matches"
+GW2_WVW_LOCKOUT_URL = "https://api.guildwars2.com/v2/wvw/timers/lockout"
 SHEET_ID = "1Txjpcet-9FDVek6uJ0N3OciwgbpE0cfWozUK7ATfWx4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq"
 SHEET_EDIT_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
@@ -472,6 +473,20 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             match["tier"] = self._resolve_tier(match)
             matches.append(match)
         return matches
+
+    async def _fetch_lockout(self) -> Optional[Dict[str, str]]:
+        try:
+            payload = await self._fetch_json(GW2_WVW_LOCKOUT_URL)
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        result: Dict[str, str] = {}
+        for region in ("na", "eu"):
+            value = payload.get(region)
+            if isinstance(value, str) and value.strip():
+                result[region] = value.strip()
+        return result or None
 
     async def _fetch_match_for_world(self, world_id: int) -> Optional[dict]:
         payload = await self._fetch_json(GW2_MATCHES_URL, params={"world": str(world_id)})

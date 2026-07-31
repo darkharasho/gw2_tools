@@ -602,3 +602,30 @@ async def test_status_shows_relink_state(mock_bot_alliance):
     relink_field = next(f for f in embed.fields if f.name == "Relink Announcements")
     assert "Enabled" in relink_field.value
     assert "HoJ" in relink_field.value
+
+
+@pytest.mark.asyncio
+async def test_fetch_lockout_parses_payload(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    cog._fetch_json = AsyncMock(
+        return_value={"na": "2025-03-04T07:59:00Z", "eu": "2025-03-04T07:59:00Z"}
+    )
+    result = await cog._fetch_lockout()
+    assert result == {"na": "2025-03-04T07:59:00Z", "eu": "2025-03-04T07:59:00Z"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_lockout_drops_invalid_and_returns_none(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    cog._fetch_json = AsyncMock(return_value={"na": "", "eu": None})
+    assert await cog._fetch_lockout() is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_lockout_handles_fetch_error(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    cog._fetch_json = AsyncMock(side_effect=ValueError("boom"))
+    assert await cog._fetch_lockout() is None
