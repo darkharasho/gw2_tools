@@ -9,7 +9,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -32,6 +32,7 @@ GW2_GUILD_WVW_URLS = (
     "https://api.guildwars2.com/v2/wvw/guilds/eu",
 )
 GW2_MATCHES_URL = "https://api.guildwars2.com/v2/wvw/matches"
+GW2_WVW_LOCKOUT_URL = "https://api.guildwars2.com/v2/wvw/timers/lockout"
 SHEET_ID = "1Txjpcet-9FDVek6uJ0N3OciwgbpE0cfWozUK7ATfWx4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq"
 SHEET_EDIT_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
@@ -282,6 +283,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
 
     setup_group = app_commands.Group(name="setup", description="Configure alliance matchup posts.")
     relink_group = app_commands.Group(name="relink", description="Configure server link announcements.")
+    lockout_group = app_commands.Group(name="lockout", description="Configure WvW team-lockout reminders.")
 
     def __init__(self, bot: AxiToolsBot) -> None:
         self.bot = bot
@@ -472,6 +474,20 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             match["tier"] = self._resolve_tier(match)
             matches.append(match)
         return matches
+
+    async def _fetch_lockout(self) -> Optional[Dict[str, str]]:
+        try:
+            payload = await self._fetch_json(GW2_WVW_LOCKOUT_URL)
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        result: Dict[str, str] = {}
+        for region in ("na", "eu"):
+            value = payload.get(region)
+            if isinstance(value, str) and value.strip():
+                result[region] = value.strip()
+        return result or None
 
     async def _fetch_match_for_world(self, world_id: int) -> Optional[dict]:
         payload = await self._fetch_json(GW2_MATCHES_URL, params={"world": str(world_id)})
@@ -1061,11 +1077,71 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
         self.bot.save_config(guild.id, config)
         return True
 
+    async def _post_lockout(
+        self,
+        *,
+        channel: discord.TextChannel,
+        region: str,
+        target_iso: str,
+    ) -> bool:  # pragma: no cover - requires Discord
+        target = self._parse_timestamp(target_iso)
+        if not target:
+            return False
+        unix = int(target.timestamp())
+        embed = discord.Embed(
+            title="⚔️ WvW Team Lockout Incoming",
+            description=(
+                f"WvW team assignments lock **<t:{unix}:R>** (<t:{unix}:F>).\n"
+                "Roster and server transfer changes are locked at that time."
+            ),
+            colour=BRAND_COLOUR,
+        )
+        embed.add_field(name="Region", value=region.upper(), inline=True)
+        await channel.send(embed=embed)
+        return True
+
     def _already_posted(self, timestamp: Optional[str], now: datetime) -> bool:
         last_post = self._parse_timestamp(timestamp)
         if not last_post:
             return False
         return last_post.astimezone(PST).date() == now.date()
+
+    @staticmethod
+    def _derive_lockout_region(world_id: Optional[int]) -> Optional[str]:
+        if not isinstance(world_id, int):
+            return None
+        bucket = world_id // 1000
+        if bucket == 11:
+            return "na"
+        if bucket == 12:
+            return "eu"
+        return None
+
+    def _lockout_fire_target(
+        self,
+        config: GuildConfig,
+        lockout: Dict[str, str],
+        now: datetime,
+        home_world_id: Optional[int],
+    ) -> Optional[Tuple[str, str]]:
+        if not config.wvw_lockout_enabled or not config.wvw_lockout_channel_id:
+            return None
+        region = config.wvw_lockout_region or self._derive_lockout_region(home_world_id)
+        if region not in ("na", "eu"):
+            return None
+        target_iso = lockout.get(region)
+        if not target_iso:
+            return None
+        target = self._parse_timestamp(target_iso)
+        if not target:
+            return None
+        if config.wvw_lockout_last_fired_for == target_iso:
+            return None
+        lead = timedelta(minutes=config.wvw_lockout_lead_minutes)
+        now_utc = now.astimezone(timezone.utc)
+        if target - lead <= now_utc < target:
+            return region, target_iso
+        return None
 
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poster_loop(self) -> None:  # pragma: no cover - requires Discord
@@ -1073,28 +1149,44 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             return
         now = datetime.now(PST)
         now_time = now.time().replace(second=0, microsecond=0)
+        lockout = await self._fetch_lockout()
         for guild in self.bot.guilds:
             config = self.bot.get_config(guild.id)
-            if not config.alliance_channel_id or not config.alliance_guild_id:
-                continue
-            channel = await self._resolve_channel(guild, config.alliance_channel_id)
-            if not channel:
-                continue
-            prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
-            current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
-            prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
-            current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
-            if now.weekday() == prediction_day:
-                if now_time >= prediction_time:
-                    if not self._already_posted(config.alliance_last_prediction_at, now):
-                        LOGGER.info("Posting alliance prediction matchup for guild %s", guild.id)
-                        await self._post_matchup(guild=guild, channel=channel, config=config, prediction=True)
-            if now.weekday() == current_day and now_time >= current_time:
-                if not self._already_posted(config.alliance_last_actual_at, now):
-                    LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
-                    await self._post_matchup(guild=guild, channel=channel, config=config, prediction=False)
-            if config.alliance_relink_enabled:
-                await self._check_relink(guild, channel, config)
+            if config.alliance_channel_id and config.alliance_guild_id:
+                channel = await self._resolve_channel(guild, config.alliance_channel_id)
+                if channel:
+                    prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
+                    current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
+                    prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
+                    current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
+                    if now.weekday() == prediction_day:
+                        if now_time >= prediction_time:
+                            if not self._already_posted(config.alliance_last_prediction_at, now):
+                                LOGGER.info("Posting alliance prediction matchup for guild %s", guild.id)
+                                await self._post_matchup(
+                                    guild=guild, channel=channel, config=config, prediction=True
+                                )
+                    if now.weekday() == current_day and now_time >= current_time:
+                        if not self._already_posted(config.alliance_last_actual_at, now):
+                            LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
+                            await self._post_matchup(
+                                guild=guild, channel=channel, config=config, prediction=False
+                            )
+                    if config.alliance_relink_enabled:
+                        await self._check_relink(guild, channel, config)
+            if lockout:
+                fire = self._lockout_fire_target(config, lockout, now, config.alliance_server_id)
+                if fire:
+                    region, target_iso = fire
+                    lockout_channel = await self._resolve_channel(guild, config.wvw_lockout_channel_id)
+                    if lockout_channel:
+                        LOGGER.info("Posting WvW lockout reminder for guild %s", guild.id)
+                        posted = await self._post_lockout(
+                            channel=lockout_channel, region=region, target_iso=target_iso
+                        )
+                        if posted:
+                            config.wvw_lockout_last_fired_for = target_iso
+                            self.bot.save_config(guild.id, config)
 
     @_poster_loop.before_loop
     async def _before_loop(self) -> None:  # pragma: no cover - discord.py lifecycle
@@ -1205,6 +1297,25 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             value=f"{relink_status} — last server: **{relink_server}**",
             inline=False,
         )
+        lockout_state = "on" if config.wvw_lockout_enabled else "off"
+        lockout_channel = (
+            interaction.guild.get_channel(config.wvw_lockout_channel_id)
+            if config.wvw_lockout_channel_id
+            else None
+        )
+        lockout_channel_label = lockout_channel.mention if lockout_channel else "Not set"
+        lockout_region_label = (config.wvw_lockout_region or "auto").upper()
+        lockout_lead_label = f"{config.wvw_lockout_lead_minutes / 60:g}h"
+        embed.add_field(
+            name="Lockout reminder",
+            value=(
+                f"State: **{lockout_state}**\n"
+                f"Channel: {lockout_channel_label}\n"
+                f"Region: {lockout_region_label}\n"
+                f"Lead: {lockout_lead_label}"
+            ),
+            inline=False,
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
@@ -1304,6 +1415,83 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
         self.bot.save_config(interaction.guild.id, config)
         await interaction.response.send_message("Relink announcements disabled.", ephemeral=True)
 
+    @lockout_group.command(name="channel", description="Set the channel for WvW lockout reminders.")
+    async def lockout_channel(self, interaction: discord.Interaction, channel: discord.TextChannel) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        config.wvw_lockout_channel_id = channel.id
+        self.bot.save_config(interaction.guild.id, config)
+        await interaction.response.send_message(
+            f"WvW lockout reminders will be sent to {channel.mention}.", ephemeral=True
+        )
+
+    @lockout_group.command(name="enable", description="Enable WvW lockout reminders.")
+    async def lockout_enable(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        if not config.wvw_lockout_channel_id:
+            await interaction.response.send_message(
+                "Set the lockout channel first with `/alliance lockout channel`.", ephemeral=True
+            )
+            return
+        config.wvw_lockout_enabled = True
+        self.bot.save_config(interaction.guild.id, config)
+        hours = config.wvw_lockout_lead_minutes / 60
+        await interaction.response.send_message(
+            f"WvW lockout reminders enabled ({hours:g}h before lockout).", ephemeral=True
+        )
+
+    @lockout_group.command(name="disable", description="Disable WvW lockout reminders.")
+    async def lockout_disable(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        config.wvw_lockout_enabled = False
+        self.bot.save_config(interaction.guild.id, config)
+        await interaction.response.send_message("WvW lockout reminders disabled.", ephemeral=True)
+
+    @lockout_group.command(name="lead", description="Set how many hours before the lockout to remind.")
+    async def lockout_lead(self, interaction: discord.Interaction, hours: float) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        if hours <= 0:
+            await interaction.response.send_message("Hours must be greater than 0.", ephemeral=True)
+            return
+        config = self.bot.get_config(interaction.guild.id)
+        config.wvw_lockout_lead_minutes = max(5, round(hours * 60))
+        self.bot.save_config(interaction.guild.id, config)
+        applied = config.wvw_lockout_lead_minutes / 60
+        await interaction.response.send_message(
+            f"WvW lockout reminders will fire {applied:g}h before lockout.", ephemeral=True
+        )
+
+    @lockout_group.command(name="region", description="Set the WvW region for lockout reminders.")
+    @app_commands.choices(
+        region=[
+            app_commands.Choice(name="Auto (from home world)", value="auto"),
+            app_commands.Choice(name="North America", value="na"),
+            app_commands.Choice(name="Europe", value="eu"),
+        ]
+    )
+    async def lockout_region(
+        self, interaction: discord.Interaction, region: app_commands.Choice[str]
+    ) -> None:
+        if not await self.bot.ensure_authorised(interaction):
+            return
+        assert interaction.guild is not None
+        config = self.bot.get_config(interaction.guild.id)
+        config.wvw_lockout_region = None if region.value == "auto" else region.value
+        self.bot.save_config(interaction.guild.id, config)
+        label = "auto (from home world)" if region.value == "auto" else region.value.upper()
+        await interaction.response.send_message(
+            f"WvW lockout region set to **{label}**.", ephemeral=True
+        )
 
 
 async def setup(bot: AxiToolsBot) -> None:

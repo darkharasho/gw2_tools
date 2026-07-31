@@ -1236,6 +1236,10 @@ def _alliance_to_json(config) -> dict:
         "current_day": config.alliance_current_day,
         "current_time": config.alliance_current_time,
         "relink_enabled": config.alliance_relink_enabled,
+        "lockout_enabled": config.wvw_lockout_enabled,
+        "lockout_channel_id": _sid(config.wvw_lockout_channel_id),
+        "lockout_lead_minutes": config.wvw_lockout_lead_minutes,
+        "lockout_region": config.wvw_lockout_region,
     }
 
 
@@ -1320,6 +1324,41 @@ async def _handle_alliance_put(request: web.Request) -> web.Response:
                 {"error": "relink_enabled must be a boolean"}, status=400
             )
         updates["alliance_relink_enabled"] = body["relink_enabled"]
+
+    if "lockout_enabled" in body:
+        if not isinstance(body["lockout_enabled"], bool):
+            return web.json_response(
+                {"error": "lockout_enabled must be a boolean"}, status=400
+            )
+        updates["wvw_lockout_enabled"] = body["lockout_enabled"]
+
+    if "lockout_channel_id" in body:
+        if body["lockout_channel_id"] is None:
+            updates["wvw_lockout_channel_id"] = None
+        else:
+            channel_id, channel_err = _channel_in_guild(guild, body["lockout_channel_id"])
+            if channel_err is not None:
+                return channel_err
+            updates["wvw_lockout_channel_id"] = channel_id
+
+    if "lockout_lead_minutes" in body:
+        raw = body["lockout_lead_minutes"]
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            return web.json_response(
+                {"error": "lockout_lead_minutes must be an integer"}, status=400
+            )
+        updates["wvw_lockout_lead_minutes"] = max(5, raw)
+
+    if "lockout_region" in body:
+        raw = body["lockout_region"]
+        if raw is None:
+            updates["wvw_lockout_region"] = None
+        elif isinstance(raw, str) and raw.strip().lower() in ("na", "eu"):
+            updates["wvw_lockout_region"] = raw.strip().lower()
+        else:
+            return web.json_response(
+                {"error": "lockout_region must be 'na', 'eu', or null"}, status=400
+            )
 
     result: list = []
 

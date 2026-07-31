@@ -37,6 +37,11 @@ async def test_alliance_command_surface(mock_bot_alliance):
         "alliance refresh",
         "alliance relink enable",
         "alliance relink disable",
+        "alliance lockout enable",
+        "alliance lockout disable",
+        "alliance lockout channel",
+        "alliance lockout lead",
+        "alliance lockout region",
     }
     assert expected <= qualified_names
 
@@ -602,3 +607,109 @@ async def test_status_shows_relink_state(mock_bot_alliance):
     relink_field = next(f for f in embed.fields if f.name == "Relink Announcements")
     assert "Enabled" in relink_field.value
     assert "HoJ" in relink_field.value
+
+
+@pytest.mark.asyncio
+async def test_fetch_lockout_parses_payload(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    cog._fetch_json = AsyncMock(
+        return_value={"na": "2025-03-04T07:59:00Z", "eu": "2025-03-04T07:59:00Z"}
+    )
+    result = await cog._fetch_lockout()
+    assert result == {"na": "2025-03-04T07:59:00Z", "eu": "2025-03-04T07:59:00Z"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_lockout_drops_invalid_and_returns_none(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    cog._fetch_json = AsyncMock(return_value={"na": "", "eu": None})
+    assert await cog._fetch_lockout() is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_lockout_handles_fetch_error(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    cog._fetch_json = AsyncMock(side_effect=ValueError("boom"))
+    assert await cog._fetch_lockout() is None
+
+
+def _lockout_config(**overrides):
+    base = dict(
+        moderator_role_ids=[],
+        wvw_lockout_enabled=True,
+        wvw_lockout_channel_id=555,
+        wvw_lockout_lead_minutes=60,
+        wvw_lockout_region=None,
+        wvw_lockout_last_fired_for=None,
+    )
+    base.update(overrides)
+    return GuildConfig(**base)
+
+
+LOCKOUT = {"na": "2025-03-04T08:00:00Z", "eu": "2025-03-04T09:00:00Z"}
+
+
+def _at(iso):
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+
+
+@pytest.mark.asyncio
+async def test_derive_lockout_region(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    assert cog._derive_lockout_region(11005) == "na"
+    assert cog._derive_lockout_region(12003) == "eu"
+    assert cog._derive_lockout_region(9999) is None
+    assert cog._derive_lockout_region(None) is None
+
+
+@pytest.mark.asyncio
+async def test_lockout_fires_at_lead_boundary(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    config = _lockout_config()  # region auto, home world drives it
+    # Before window: 06:59Z, lead 60m, target 08:00Z -> no fire
+    assert cog._lockout_fire_target(config, LOCKOUT, _at("2025-03-04T06:59:00Z"), 11005) is None
+    # Exactly at target - lead (07:00Z) -> fire NA
+    assert cog._lockout_fire_target(config, LOCKOUT, _at("2025-03-04T07:00:00Z"), 11005) == ("na", "2025-03-04T08:00:00Z")
+    # Inside window (07:30Z) -> fire NA
+    assert cog._lockout_fire_target(config, LOCKOUT, _at("2025-03-04T07:30:00Z"), 11005) == ("na", "2025-03-04T08:00:00Z")
+    # After target (08:01Z) -> no fire
+    assert cog._lockout_fire_target(config, LOCKOUT, _at("2025-03-04T08:01:00Z"), 11005) is None
+
+
+@pytest.mark.asyncio
+async def test_lockout_region_override_wins(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    config = _lockout_config(wvw_lockout_region="eu")  # explicit EU despite NA home world
+    # EU target 09:00Z, lead 60m -> fires at 08:00Z; NA home world ignored
+    assert cog._lockout_fire_target(config, LOCKOUT, _at("2025-03-04T08:00:00Z"), 11005) == ("eu", "2025-03-04T09:00:00Z")
+
+
+@pytest.mark.asyncio
+async def test_lockout_dedupe(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    config = _lockout_config(wvw_lockout_last_fired_for="2025-03-04T08:00:00Z")
+    # Same target already fired -> no fire
+    assert cog._lockout_fire_target(config, LOCKOUT, _at("2025-03-04T07:30:00Z"), 11005) is None
+    # A new lockout timestamp fires again
+    new_lockout = {"na": "2025-03-11T08:00:00Z", "eu": "2025-03-11T09:00:00Z"}
+    assert cog._lockout_fire_target(config, new_lockout, _at("2025-03-11T07:30:00Z"), 11005) == ("na", "2025-03-11T08:00:00Z")
+
+
+@pytest.mark.asyncio
+async def test_lockout_skips(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    now = _at("2025-03-04T07:30:00Z")
+    # disabled
+    assert cog._lockout_fire_target(_lockout_config(wvw_lockout_enabled=False), LOCKOUT, now, 11005) is None
+    # no channel
+    assert cog._lockout_fire_target(_lockout_config(wvw_lockout_channel_id=None), LOCKOUT, now, 11005) is None
+    # region unresolvable (auto + no derivable home world)
+    assert cog._lockout_fire_target(_lockout_config(), LOCKOUT, now, None) is None

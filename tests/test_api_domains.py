@@ -534,6 +534,10 @@ async def test_alliance_get_defaults(api_client):
         "current_day": None,
         "current_time": None,
         "relink_enabled": False,
+        "lockout_enabled": False,
+        "lockout_channel_id": None,
+        "lockout_lead_minutes": 1440,
+        "lockout_region": None,
     }
 
 
@@ -589,6 +593,43 @@ async def test_alliance_put_validation_400(api_client):
         {"current_time": "19h30"},         # bad format
         {"relink_enabled": "yes"},         # not a bool
         {"guild_id": "!!!"},               # no hex chars at all
+    ]
+    for body in cases:
+        resp = await api_client.put(
+            f"/guilds/{GID}/alliance", json=body, headers=_auth()
+        )
+        assert resp.status == 400, body
+
+
+@pytest.mark.asyncio
+async def test_alliance_put_sets_lockout_fields(api_client, bot):
+    resp = await api_client.put(
+        f"/guilds/{GID}/alliance",
+        json={
+            "lockout_enabled": True,
+            "lockout_lead_minutes": 720,
+            "lockout_region": "eu",
+        },
+        headers=_auth(),
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["lockout_enabled"] is True
+    assert body["lockout_lead_minutes"] == 720
+    assert body["lockout_region"] == "eu"
+
+    config = bot.storage.get_config(GID)
+    assert config.wvw_lockout_enabled is True
+    assert config.wvw_lockout_lead_minutes == 720
+    assert config.wvw_lockout_region == "eu"
+
+
+@pytest.mark.asyncio
+async def test_alliance_put_rejects_bad_lockout_fields(api_client):
+    cases = [
+        {"lockout_region": "asia"},        # not na/eu/null
+        {"lockout_lead_minutes": "soon"},  # not an int
+        {"lockout_enabled": "yes"},        # not a bool
     ]
     for body in cases:
         resp = await api_client.put(
