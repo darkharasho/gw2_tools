@@ -37,6 +37,11 @@ async def test_alliance_command_surface(mock_bot_alliance):
         "alliance refresh",
         "alliance relink enable",
         "alliance relink disable",
+        "alliance lockout enable",
+        "alliance lockout disable",
+        "alliance lockout channel",
+        "alliance lockout lead",
+        "alliance lockout region",
     }
     assert expected <= qualified_names
 
