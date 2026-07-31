@@ -9,7 +9,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -1081,6 +1081,43 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
         if not last_post:
             return False
         return last_post.astimezone(PST).date() == now.date()
+
+    @staticmethod
+    def _derive_lockout_region(world_id: Optional[int]) -> Optional[str]:
+        if not isinstance(world_id, int):
+            return None
+        bucket = world_id // 1000
+        if bucket == 11:
+            return "na"
+        if bucket == 12:
+            return "eu"
+        return None
+
+    def _lockout_fire_target(
+        self,
+        config: GuildConfig,
+        lockout: Dict[str, str],
+        now: datetime,
+        home_world_id: Optional[int],
+    ) -> Optional[Tuple[str, str]]:
+        if not config.wvw_lockout_enabled or not config.wvw_lockout_channel_id:
+            return None
+        region = config.wvw_lockout_region or self._derive_lockout_region(home_world_id)
+        if region not in ("na", "eu"):
+            return None
+        target_iso = lockout.get(region)
+        if not target_iso:
+            return None
+        target = self._parse_timestamp(target_iso)
+        if not target:
+            return None
+        if config.wvw_lockout_last_fired_for == target_iso:
+            return None
+        lead = timedelta(minutes=config.wvw_lockout_lead_minutes)
+        now_utc = now.astimezone(timezone.utc)
+        if target - lead <= now_utc < target:
+            return region, target_iso
+        return None
 
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
     async def _poster_loop(self) -> None:  # pragma: no cover - requires Discord
