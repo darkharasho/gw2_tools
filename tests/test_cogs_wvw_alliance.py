@@ -636,6 +636,116 @@ async def test_fetch_lockout_handles_fetch_error(mock_bot_alliance):
     assert await cog._fetch_lockout() is None
 
 
+@pytest.mark.asyncio
+async def test_poster_loop_survives_lockout_fetch_error(mock_bot_alliance):
+    """An unexpected error fetching lockout must not propagate: discord.py stops a
+    tasks.loop permanently on an unhandled exception, which would silently disable
+    every alliance/reset post until the process restarts."""
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    guild = MagicMock()
+    guild.id = 1
+    mock_bot_alliance.guilds = [guild]
+    mock_bot_alliance.get_config = MagicMock(
+        return_value=GuildConfig(moderator_role_ids=[], alliance_channel_id=None, alliance_guild_id=None)
+    )
+    cog._fetch_lockout = AsyncMock(side_effect=RuntimeError("boom"))
+
+    await cog._poster_loop.coro(cog)
+
+
+@pytest.mark.asyncio
+async def test_poster_loop_survives_per_guild_error(mock_bot_alliance):
+    """One broken guild must not stop the remaining guilds from being processed."""
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    bad, good = MagicMock(), MagicMock()
+    bad.id, good.id = 1, 2
+    mock_bot_alliance.guilds = [bad, good]
+    seen = []
+
+    def _get_config(guild_id):
+        seen.append(guild_id)
+        if guild_id == 1:
+            raise RuntimeError("boom")
+        return GuildConfig(moderator_role_ids=[], alliance_channel_id=None, alliance_guild_id=None)
+
+    mock_bot_alliance.get_config = MagicMock(side_effect=_get_config)
+    cog._fetch_lockout = AsyncMock(return_value=None)
+
+    await cog._poster_loop.coro(cog)
+
+    assert seen == [1, 2]
+
+
+class _FakeResponse:
+    def __init__(self, status: int, payload: object) -> None:
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    def raise_for_status(self):
+        return None
+
+    async def json(self, content_type=None):
+        return self._payload
+
+
+class _FakeSession:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        return self._responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_fetch_json_retries_after_rate_limit(monkeypatch, mock_bot_alliance):
+    """A 429 must back off and retry, not blow up the caller (and the poster loop)."""
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    session = _FakeSession(
+        [_FakeResponse(429, None), _FakeResponse(200, {"na": "2026-08-15T01:59:00Z"})]
+    )
+    cog._get_session = AsyncMock(return_value=session)
+    slept = []
+
+    async def _fake_sleep(delay):
+        slept.append(delay)
+
+    monkeypatch.setattr("axitools.cogs.wvw_alliance.asyncio.sleep", _fake_sleep)
+
+    result = await cog._fetch_json("https://example.invalid/lockout")
+
+    assert result == {"na": "2026-08-15T01:59:00Z"}
+    assert slept == [2]
+    assert session.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_lockout_survives_rate_limit(monkeypatch, mock_bot_alliance):
+    """The lockout fetch is the first thing the poster loop does; a 429 there must
+    not escape and kill the loop for every guild."""
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    session = _FakeSession([_FakeResponse(429, None) for _ in range(3)])
+    cog._get_session = AsyncMock(return_value=session)
+
+    async def _fake_sleep(delay):
+        return None
+
+    monkeypatch.setattr("axitools.cogs.wvw_alliance.asyncio.sleep", _fake_sleep)
+
+    assert await cog._fetch_lockout() is None
+
+
 def _lockout_config(**overrides):
     base = dict(
         moderator_role_ids=[],

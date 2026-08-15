@@ -1,6 +1,7 @@
 """Alliance guild WvW matchup reporting."""
 from __future__ import annotations
 
+import asyncio
 import calendar
 import csv
 import io
@@ -1149,44 +1150,63 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             return
         now = datetime.now(PST)
         now_time = now.time().replace(second=0, microsecond=0)
-        lockout = await self._fetch_lockout()
+        # discord.py stops a tasks.loop permanently on an unhandled exception, so a
+        # single transient failure here would silently disable every alliance and
+        # reset post until the process restarts. Contain failures per tick/guild.
+        try:
+            lockout = await self._fetch_lockout()
+        except Exception:
+            LOGGER.exception("Failed to fetch WvW lockout timers")
+            lockout = None
         for guild in self.bot.guilds:
-            config = self.bot.get_config(guild.id)
-            if config.alliance_channel_id and config.alliance_guild_id:
-                channel = await self._resolve_channel(guild, config.alliance_channel_id)
-                if channel:
-                    prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
-                    current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
-                    prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
-                    current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
-                    if now.weekday() == prediction_day:
-                        if now_time >= prediction_time:
-                            if not self._already_posted(config.alliance_last_prediction_at, now):
-                                LOGGER.info("Posting alliance prediction matchup for guild %s", guild.id)
-                                await self._post_matchup(
-                                    guild=guild, channel=channel, config=config, prediction=True
-                                )
-                    if now.weekday() == current_day and now_time >= current_time:
-                        if not self._already_posted(config.alliance_last_actual_at, now):
-                            LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
+            try:
+                await self._poster_tick_for_guild(guild, now, now_time, lockout)
+            except Exception:
+                LOGGER.exception("Alliance poster loop failed for guild %s", guild.id)
+
+    async def _poster_tick_for_guild(
+        self,
+        guild: discord.Guild,
+        now: datetime,
+        now_time: time,
+        lockout: Optional[Dict[str, str]],
+    ) -> None:  # pragma: no cover - requires Discord
+        config = self.bot.get_config(guild.id)
+        if config.alliance_channel_id and config.alliance_guild_id:
+            channel = await self._resolve_channel(guild, config.alliance_channel_id)
+            if channel:
+                prediction_time = self._resolve_post_time(config.alliance_prediction_time, PREDICTION_TIME)
+                current_time = self._resolve_post_time(config.alliance_current_time, RESET_TIME)
+                prediction_day = self._resolve_post_day(config.alliance_prediction_day, DEFAULT_POST_DAY)
+                current_day = self._resolve_post_day(config.alliance_current_day, DEFAULT_POST_DAY)
+                if now.weekday() == prediction_day:
+                    if now_time >= prediction_time:
+                        if not self._already_posted(config.alliance_last_prediction_at, now):
+                            LOGGER.info("Posting alliance prediction matchup for guild %s", guild.id)
                             await self._post_matchup(
-                                guild=guild, channel=channel, config=config, prediction=False
+                                guild=guild, channel=channel, config=config, prediction=True
                             )
-                    if config.alliance_relink_enabled:
-                        await self._check_relink(guild, channel, config)
-            if lockout:
-                fire = self._lockout_fire_target(config, lockout, now, config.alliance_server_id)
-                if fire:
-                    region, target_iso = fire
-                    lockout_channel = await self._resolve_channel(guild, config.wvw_lockout_channel_id)
-                    if lockout_channel:
-                        LOGGER.info("Posting WvW lockout reminder for guild %s", guild.id)
-                        posted = await self._post_lockout(
-                            channel=lockout_channel, region=region, target_iso=target_iso
+                if now.weekday() == current_day and now_time >= current_time:
+                    if not self._already_posted(config.alliance_last_actual_at, now):
+                        LOGGER.info("Posting alliance current matchup for guild %s", guild.id)
+                        await self._post_matchup(
+                            guild=guild, channel=channel, config=config, prediction=False
                         )
-                        if posted:
-                            config.wvw_lockout_last_fired_for = target_iso
-                            self.bot.save_config(guild.id, config)
+                if config.alliance_relink_enabled:
+                    await self._check_relink(guild, channel, config)
+        if lockout:
+            fire = self._lockout_fire_target(config, lockout, now, config.alliance_server_id)
+            if fire:
+                region, target_iso = fire
+                lockout_channel = await self._resolve_channel(guild, config.wvw_lockout_channel_id)
+                if lockout_channel:
+                    LOGGER.info("Posting WvW lockout reminder for guild %s", guild.id)
+                    posted = await self._post_lockout(
+                        channel=lockout_channel, region=region, target_iso=target_iso
+                    )
+                    if posted:
+                        config.wvw_lockout_last_fired_for = target_iso
+                        self.bot.save_config(guild.id, config)
 
     @_poster_loop.before_loop
     async def _before_loop(self) -> None:  # pragma: no cover - discord.py lifecycle
