@@ -6,6 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 import discord
@@ -24,6 +25,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 GAME_UPDATE_NOTES_PAGE_URL = "https://wiki.guildwars2.com/wiki/Game_updates"
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+EMBED_LOGO_ASSET = "gw2_logo.png"
+# Current expansion art. Swap the file (not the name) when a new one ships.
+EMBED_THUMBNAIL_ASSET = "gw2_expansion_logo.png"
+EMBED_AUTHOR_NAME = "Guild Wars 2 · Game Update Notes"
 EMBED_THUMBNAIL_URL = (
     "https://wiki.guildwars2.com/images/thumb/c/cd/"
     "Visions_of_Eternity_logo.png/244px-Visions_of_Eternity_logo.png"
@@ -139,7 +145,7 @@ class UpdateNotesCog(commands.Cog):
                 embeds = self._build_embeds(entry, body)
                 try:
                     for embed in embeds:
-                        await channel.send(embed=embed)
+                        await self._send_embed(channel, embed)
                 except (discord.Forbidden, discord.HTTPException):
                     LOGGER.warning(
                         "Failed to post game update notes in channel %s for guild %s",
@@ -332,13 +338,46 @@ class UpdateNotesCog(commands.Cog):
         )
         if parsed_timestamp:
             embed.timestamp = parsed_timestamp
-        embed.set_thumbnail(url=EMBED_THUMBNAIL_URL)
-        if truncated_description != description:
-            embed.set_footer(text="Guild Wars 2 Wiki – Game Updates (truncated)")
+        # Both images ride along as attachments rather than as wiki URLs: an
+        # external URL has to survive Discord's image proxy, which silently
+        # dropped the thumbnail even though the wiki served it fine.
+        if self._asset_path(EMBED_THUMBNAIL_ASSET).exists():
+            embed.set_thumbnail(url=f"attachment://{EMBED_THUMBNAIL_ASSET}")
         else:
-            embed.set_footer(text="Guild Wars 2 Wiki – Game Updates")
+            embed.set_thumbnail(url=EMBED_THUMBNAIL_URL)
+        # The Game Updates wiki page is generic-looking on its own, so brand the
+        # embed with the GW2 logo up top.
+        author_kwargs = {"name": EMBED_AUTHOR_NAME, "url": GAME_UPDATE_NOTES_PAGE_URL}
+        if self._asset_path(EMBED_LOGO_ASSET).exists():
+            author_kwargs["icon_url"] = f"attachment://{EMBED_LOGO_ASSET}"
+        embed.set_author(**author_kwargs)
+        footer_text = "Guild Wars 2 Wiki – Game Updates"
+        if truncated_description != description:
+            footer_text += " (truncated)"
+        embed.set_footer(text=footer_text)
         embeds.append(embed)
         return embeds
+
+    def _asset_path(self, filename: str) -> Path:
+        return ASSETS_DIR / filename
+
+    def _build_attachments(self) -> List[discord.File]:
+        """Fresh ``discord.File`` objects per send — a File cannot be reused."""
+        files: List[discord.File] = []
+        for filename in (EMBED_LOGO_ASSET, EMBED_THUMBNAIL_ASSET):
+            path = self._asset_path(filename)
+            if path.exists():
+                files.append(discord.File(str(path), filename=filename))
+        return files
+
+    async def _send_embed(
+        self, channel: discord.abc.Messageable, embed: discord.Embed
+    ) -> None:
+        files = self._build_attachments()
+        if files:
+            await channel.send(embed=embed, files=files)
+        else:
+            await channel.send(embed=embed)
 
     def _parse_timestamp(self, value: Optional[str]) -> Optional[datetime]:
         if not value:
@@ -431,7 +470,7 @@ class UpdateNotesCog(commands.Cog):
         body = entry.content or entry.summary
         embeds = self._build_embeds(entry, body)
         for embed in embeds:
-            await channel.send(embed=embed)
+            await self._send_embed(channel, embed)
         status = self.bot.storage.get_update_notes_status(interaction.guild.id) or UpdateNotesStatus()
         status.last_entry_id = entry.entry_id
         status.last_entry_published_at = entry.published_at

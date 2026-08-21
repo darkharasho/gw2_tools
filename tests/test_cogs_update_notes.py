@@ -136,3 +136,40 @@ async def test_poll_posts_only_new_when_boundary_on_page():
     assert channel.send.await_count == 2
     saved = bot.storage.save_update_notes_status.call_args[0][1]
     assert saved.last_entry_id == "Update_-_June_3,_2026"
+
+
+def test_build_embeds_brands_with_gw2_logo():
+    """The embed must read as GW2 news, not a generic wiki post."""
+    cog = _cog()
+    embed = cog._build_embeds(PAGE_ENTRIES[0], "Bug Fix")[0]
+    assert embed.author.name == "Guild Wars 2 · Game Update Notes"
+    assert embed.author.icon_url == "attachment://gw2_logo.png"
+    assert embed.footer.text == "Guild Wars 2 Wiki – Game Updates"
+
+
+def test_build_embeds_thumbnail_is_attached_not_hotlinked():
+    """Wiki-hosted images can die in Discord's image proxy; attach instead."""
+    cog = _cog()
+    embed = cog._build_embeds(PAGE_ENTRIES[0], "Bug Fix")[0]
+    assert embed.thumbnail.url == "attachment://gw2_expansion_logo.png"
+
+
+@pytest.mark.asyncio
+async def test_send_embed_attaches_a_fresh_logo_each_time():
+    """discord.File objects are single-use, so each send needs its own."""
+    cog = _cog()
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    embed = cog._build_embeds(PAGE_ENTRIES[0], "Bug Fix")[0]
+
+    await cog._send_embed(channel, embed)
+    await cog._send_embed(channel, embed)
+
+    sends = [call.kwargs["files"] for call in channel.send.call_args_list]
+    assert len(sends) == 2
+    assert [f.filename for f in sends[0]] == [
+        "gw2_logo.png",
+        "gw2_expansion_logo.png",
+    ]
+    # Second send must get its own File objects, not the already-consumed ones.
+    assert not set(map(id, sends[0])) & set(map(id, sends[1]))
