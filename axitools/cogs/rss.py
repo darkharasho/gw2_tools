@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from urllib.parse import quote
 
 import aiohttp
@@ -60,6 +60,21 @@ def _github_tag_from_entry(entry: feedparser.FeedParserDict) -> Optional[str]:
         if candidate:
             return candidate
     return None
+
+
+class _ReleaseNotFound:
+    """Sentinel: the feed entry is a bare tag with no GitHub Release behind it.
+
+    ``releases.atom`` lists plain tags alongside real releases, so a 404 from
+    the releases API is an expected, permanent answer rather than a transient
+    failure. Callers must finalize such entries instead of retrying them, or
+    every poll re-requests a tag that will never exist.
+    """
+
+    __slots__ = ()
+
+
+RELEASE_NOT_FOUND = _ReleaseNotFound()
 
 
 def _release_is_complete(release: "feedparser.FeedParserDict") -> bool:
@@ -242,7 +257,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
 
     async def _fetch_github_release(
         self, owner: str, repo: str, tag: str
-    ) -> Optional[dict]:
+    ) -> Union[dict, _ReleaseNotFound, None]:
         session = await self._get_session()
         url = f"{self.GITHUB_API_BASE}/repos/{owner}/{repo}/releases/tags/{quote(tag, safe='')}"
         headers = {"Accept": "application/vnd.github+json"}
@@ -253,6 +268,11 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             async with session.get(
                 url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
             ) as response:
+                if response.status == 404:
+                    # A tag with no release attached. Permanent, and common
+                    # enough in releases.atom that it is not worth a warning.
+                    LOGGER.debug("No GitHub release for %s/%s@%s", owner, repo, tag)
+                    return RELEASE_NOT_FOUND
                 response.raise_for_status()
                 return await response.json()
         except (aiohttp.ClientError, ValueError):
@@ -558,6 +578,11 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
                 if not tag:
                     continue
                 release = await self._fetch_github_release(owner, repo, tag)
+                if isinstance(release, _ReleaseNotFound):
+                    # The release was deleted after we posted it; stop editing.
+                    tracked[entry_id] = replace(existing, finalized=True)
+                    changed = True
+                    continue
                 if not release or not _release_is_complete(release):
                     continue
                 new_hash = _release_content_hash(release)
@@ -588,6 +613,10 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
                 if not tag:
                     continue
                 release = await self._fetch_github_release(owner, repo, tag)
+                if isinstance(release, _ReleaseNotFound):
+                    tracked[entry_id] = replace(existing, finalized=True)
+                    changed = True
+                    continue
                 if not release or not _release_is_complete(release):
                     continue
                 embed = self._build_github_release_embed(feed_config, release)
@@ -615,6 +644,19 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
             if not tag:
                 continue
             release = await self._fetch_github_release(owner, repo, tag)
+            if isinstance(release, _ReleaseNotFound):
+                # A bare tag, not a release. Record it as seen and finalized so
+                # the feed's tag entries are not re-requested on every poll.
+                tracked[entry_id] = TrackedRelease(
+                    entry_id=entry_id,
+                    message_id=None,
+                    content_hash=None,
+                    first_posted_at=now.isoformat(),
+                    finalized=True,
+                )
+                seen = _append_seen_id(seen, entry_id)
+                changed = True
+                continue
             if not release:
                 continue  # transient fetch failure — retry next poll, record nothing
             if not _release_is_complete(release):

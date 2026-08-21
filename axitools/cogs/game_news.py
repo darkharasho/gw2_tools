@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
-from urllib.parse import urljoin
 
 import discord
 import feedparser
@@ -29,7 +28,10 @@ from .rss import (
 LOGGER = logging.getLogger(__name__)
 
 GW2_FEED_URL = "https://www.guildwars2.com/en/feed/"
-GW3_NEWS_PAGE_URL = "https://www.guildwars3.com/en/news/"
+# There is no standalone news index: /en/news/ is a 404 and the article list
+# lives in the "#news" section of the landing page. Individual articles still
+# resolve at /en/news/<slug>.
+GW3_NEWS_PAGE_URL = "https://www.guildwars3.com/en/"
 GW3_BASE_URL = "https://www.guildwars3.com"
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
@@ -180,10 +182,10 @@ class GameNewsCog(commands.Cog):
         if not title:
             return None
 
-        if href:
-            url = urljoin(GW3_NEWS_PAGE_URL, href)
-        else:
-            url = f"{GW3_BASE_URL}/en/news/{slug}"
+        # Built from the slug rather than by joining the href: the landing page
+        # writes hrefs relative to the site root ("./en/news/<slug>"), which
+        # would resolve to /en/en/news/<slug> against the page's own URL.
+        url = f"{GW3_BASE_URL}/en/news/{slug}"
 
         image = card.find("img")
         image_url = image.get("src") if image and image.get("src") else None
@@ -292,7 +294,12 @@ class GameNewsCog(commands.Cog):
             try:
                 response = await asyncio.to_thread(self._session.get, url, timeout=30)
                 response.raise_for_status()
-                response.encoding = response.encoding or "utf-8"
+                if "charset" not in (response.headers.get("Content-Type") or "").lower():
+                    # requests falls back to ISO-8859-1 for text/* when the
+                    # header omits a charset (RFC 2616), which turns UTF-8
+                    # punctuation into mojibake ("Guild\xc2\xa0Wars"). That
+                    # default is truthy, so trust the document instead.
+                    response.encoding = response.apparent_encoding or "utf-8"
                 return response.text
             except requests.RequestException as error:
                 last_error = error

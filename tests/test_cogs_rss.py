@@ -163,6 +163,9 @@ async def test_fetch_github_release_returns_json(mock_bot_rss, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fetch_github_release_handles_404(mock_bot_rss):
+    """A 404 is a permanent 'no release for this tag', not a fetch failure."""
+    from axitools.cogs.rss import RELEASE_NOT_FOUND
+
     cog = RssFeedsCog(mock_bot_rss)
     cog._feed_poll.cancel()
 
@@ -170,7 +173,7 @@ async def test_fetch_github_release_handles_404(mock_bot_rss):
     session.get = MagicMock(return_value=_FakeResp(404, {}))
     cog._get_session = AsyncMock(return_value=session)
 
-    assert await cog._fetch_github_release("o", "r", "v9") is None
+    assert await cog._fetch_github_release("o", "r", "v9") is RELEASE_NOT_FOUND
 
 
 @pytest.mark.asyncio
@@ -265,6 +268,40 @@ async def test_github_feed_skips_incomplete_release(mock_bot_rss):
     entry_id = _atom_entry("v1")["id"]
     assert result.tracked_releases[entry_id].message_id is None
     assert result.tracked_releases[entry_id].finalized is False
+
+
+@pytest.mark.asyncio
+async def test_github_feed_finalizes_tag_without_release(mock_bot_rss):
+    """releases.atom lists bare tags; those 404 forever, so stop re-fetching.
+
+    Without finalizing, every poll re-requested a tag that will never have a
+    release and logged a warning + traceback each time.
+    """
+    from axitools.cogs.rss import RELEASE_NOT_FOUND
+
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    channel = MagicMock()
+    channel.send = AsyncMock(return_value=MagicMock(id=777))
+    cog._resolve_channel = AsyncMock(return_value=channel)
+    cog._fetch_github_release = AsyncMock(return_value=RELEASE_NOT_FOUND)
+
+    feed = RssFeedConfig(name="r", url="https://github.com/o/r/releases.atom", channel_id=1,
+                         seen_entry_ids=["primed-sentinel"])
+    parsed = types.SimpleNamespace(entries=[_atom_entry("v2.5.1.1")], feed={})
+
+    result = await cog._process_github_feed(MagicMock(), feed, parsed, "o", "r")
+    channel.send.assert_not_called()
+    assert result is not None
+    entry_id = _atom_entry("v2.5.1.1")["id"]
+    assert result.tracked_releases[entry_id].finalized is True
+    assert entry_id in result.seen_entry_ids
+
+    # Second poll must not hit the API again.
+    cog._fetch_github_release.reset_mock()
+    result2 = await cog._process_github_feed(MagicMock(), result, parsed, "o", "r")
+    cog._fetch_github_release.assert_not_called()
+    assert result2 is None  # nothing changed
 
 
 @pytest.mark.asyncio

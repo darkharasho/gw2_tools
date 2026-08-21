@@ -134,6 +134,28 @@ def test_parse_gw3_ignores_svelte_hash():
     assert e.image_url == "https://cdn/x.jpg"
 
 
+def test_parse_gw3_url_ignores_root_relative_href():
+    """The landing page writes hrefs relative to the site root.
+
+    Joining "./en/news/<slug>" against the page's own /en/ URL would yield
+    /en/en/news/<slug>, so the article URL is built from the slug instead.
+    """
+    cog = _cog()
+    html = (
+        '<a href="./en/news/playable-species-spotlight-kodan">'
+        '<article class="news-article svelte-xvh6k6" '
+        'id="article-playable-species-spotlight-kodan">'
+        '<img src="https://cdn/k.png"/>'
+        '<h2 class="title">Playable Species Spotlight: Kodan</h2>'
+        "</article></a>"
+    )
+    entries = cog._parse_gw3_html(html)
+    assert len(entries) == 1
+    assert entries[0].url == (
+        "https://www.guildwars3.com/en/news/playable-species-spotlight-kodan"
+    )
+
+
 def test_parse_gw3_skips_cards_without_slug_or_title():
     cog = _cog()
     html = (
@@ -387,3 +409,53 @@ def test_get_config_status_configured():
     status = cog.get_config_status(42)
     assert status.fields[0].state == "ok"
     assert "555" in status.fields[0].value
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_decodes_utf8_when_header_omits_charset():
+    """guildwars3.com serves "text/html" with no charset.
+
+    requests then defaults text/* to ISO-8859-1 (RFC 2616), which mangles
+    UTF-8 punctuation in article titles.
+    """
+    from unittest.mock import MagicMock
+
+    cog = _cog()
+    body = "<h2>Guild Wars 3</h2>".encode("utf-8")
+
+    response = MagicMock()
+    response.headers = {"Content-Type": "text/html"}
+    response.content = body
+    response.raise_for_status = MagicMock()
+    # Mimic requests: encoding defaults to latin-1, .text honours whatever
+    # encoding is set at access time.
+    response.encoding = "ISO-8859-1"
+    response.apparent_encoding = "utf-8"
+    type(response).text = property(lambda self: self.content.decode(self.encoding))
+
+    cog._session = MagicMock()
+    cog._session.get = MagicMock(return_value=response)
+
+    html = await cog._fetch_url("https://www.guildwars3.com/en/")
+    assert "Guild Wars 3" in html
+    assert "Â" not in html
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_respects_explicit_charset():
+    """An explicit charset in the header wins; don't second-guess the server."""
+    from unittest.mock import MagicMock
+
+    cog = _cog()
+    response = MagicMock()
+    response.headers = {"Content-Type": "text/html; charset=ISO-8859-1"}
+    response.content = "caf\xe9".encode("latin-1")
+    response.raise_for_status = MagicMock()
+    response.encoding = "ISO-8859-1"
+    response.apparent_encoding = "utf-8"
+    type(response).text = property(lambda self: self.content.decode(self.encoding))
+
+    cog._session = MagicMock()
+    cog._session.get = MagicMock(return_value=response)
+
+    assert await cog._fetch_url("https://example/x") == "caf\xe9"
