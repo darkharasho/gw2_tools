@@ -950,3 +950,39 @@ async def test_fetch_text_converts_timeout_to_value_error(mock_bot_alliance):
 
     with pytest.raises(ValueError):
         await cog._fetch_text("https://example.invalid/sheet")
+
+
+@pytest.mark.asyncio
+async def test_post_matchup_persists_refreshed_world_when_post_aborts(mock_bot_alliance):
+    # _refresh_guild_world only mutates the in-memory config; the sole save_config
+    # sits on the success path. So when a post aborts (stale match, fetch failure,
+    # send failure) the newly resolved world id was thrown away and everything else
+    # reading config.alliance_server_id — /reset's NA/EU choice, the web API — kept
+    # serving the old world until some later post happened to succeed.
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_id = "abcdef"
+    config.alliance_server_id = 11010
+    config.alliance_server_name = "Cathedral of Blood"
+
+    guild = MagicMock(); guild.id = 123
+    channel = MagicMock(); channel.send = AsyncMock()
+
+    async def _refresh(cfg, *, force_refresh=False):
+        cfg.alliance_server_id = 11011
+        cfg.alliance_server_name = "Lutgardis Conservatory"
+        return 11011
+
+    cog._refresh_guild_world = AsyncMock(side_effect=_refresh)
+    # Abort right after the world is resolved.
+    cog._fetch_matches = AsyncMock(side_effect=ValueError("boom"))
+
+    posted = await cog._post_matchup(
+        guild=guild, channel=channel, config=config, prediction=False
+    )
+
+    assert posted is False
+    assert config.alliance_server_id == 11011
+    mock_bot_alliance.save_config.assert_any_call(123, config)

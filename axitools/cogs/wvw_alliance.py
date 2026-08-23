@@ -1003,6 +1003,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
         now: Optional[datetime] = None,
     ) -> bool:
         world_id: Optional[int] = None
+        previous_world_id = config.alliance_server_id
         if prediction:
             sheet_world_id = await self._resolve_prediction_world_from_sheet(config)
             if sheet_world_id:
@@ -1015,6 +1016,12 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
         else:
             refreshed_world_id = await self._refresh_guild_world(config, force_refresh=True)
             world_id = refreshed_world_id or config.alliance_server_id
+        if config.alliance_server_id != previous_world_id:
+            # The resolution above only mutates the in-memory config, and the only
+            # save sits on the success path — so every abort below (fetch failure,
+            # stale match, send failure) threw the new world away and left /reset
+            # and the web API reading the old one until a post happened to succeed.
+            self.bot.save_config(guild.id, config)
         if not world_id:
             LOGGER.warning("No WvW world configured for guild %s", guild.id)
             return False
