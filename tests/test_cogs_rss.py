@@ -237,14 +237,85 @@ async def test_build_github_release_embed_thumbnail_override(mock_bot_rss):
     )
     release = {
         "name": "v2.11.4",
+        "tag_name": "v2.11.4",
         "html_url": "https://github.com/darkharasho/axibridge/releases/tag/v2.11.4",
         "body": "notes",
     }
     embed = cog._build_github_release_embed(feed, release)
-    # per-feed override wins over the owner-avatar default
-    assert embed.thumbnail.url == "https://raw.githubusercontent.com/darkharasho/axibridge/main/build/icon.png"
+    # Per-feed override wins over the owner-avatar default, and carries the
+    # release tag so Discord cannot serve the logo it cached for an earlier
+    # release from this same branch-pinned URL.
+    assert embed.thumbnail.url == (
+        "https://raw.githubusercontent.com/darkharasho/axibridge/main/build/icon.png?v=v2.11.4"
+    )
     # author header still identifies the repo
     assert embed.author.name == "darkharasho/axibridge"
+
+
+@pytest.mark.asyncio
+async def test_release_thumbnail_cache_key_changes_between_releases(mock_bot_rss):
+    """The regression this guards: two releases sharing one thumbnail URL.
+
+    A logo re-rasterised under the same filename never reached the feed,
+    because Discord keyed its cache on the unchanging URL.
+    """
+    from axitools.storage import RssFeedConfig
+
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    feed = RssFeedConfig(
+        name="AxiPulse",
+        url="https://github.com/darkharasho/arcdps-axipulse/releases.atom",
+        channel_id=1,
+        thumbnail_url="https://raw.githubusercontent.com/darkharasho/arcdps-axipulse/main/src/assets/axipulse-logo.png",
+    )
+
+    def thumb(tag):
+        return cog._build_github_release_embed(feed, {
+            "name": tag,
+            "tag_name": tag,
+            "html_url": f"https://github.com/darkharasho/arcdps-axipulse/releases/tag/{tag}",
+        }).thumbnail.url
+
+    assert thumb("v0.4.2") != thumb("v0.4.3")
+    # ...and the same release is still stable, so an edit does not reflow the image.
+    assert thumb("v0.4.3") == thumb("v0.4.3")
+
+
+@pytest.mark.asyncio
+async def test_release_thumbnail_left_alone_when_it_already_has_a_query(mock_bot_rss):
+    from axitools.storage import RssFeedConfig
+
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    signed = "https://cdn.example/logo.png?sig=abc123"
+    feed = RssFeedConfig(
+        name="Signed",
+        url="https://github.com/darkharasho/arcdps-axipulse/releases.atom",
+        channel_id=1,
+        thumbnail_url=signed,
+    )
+    embed = cog._build_github_release_embed(feed, {"name": "v1", "tag_name": "v1"})
+    # Appending to a signed URL could invalidate it -- leave it untouched.
+    assert embed.thumbnail.url == signed
+
+
+@pytest.mark.asyncio
+async def test_release_thumbnail_survives_a_release_with_no_tag(mock_bot_rss):
+    from axitools.storage import RssFeedConfig
+
+    cog = RssFeedsCog(mock_bot_rss)
+    cog._feed_poll.cancel()
+    plain = "https://cdn.example/logo.png"
+    feed = RssFeedConfig(
+        name="Untagged",
+        url="https://github.com/darkharasho/arcdps-axipulse/releases.atom",
+        channel_id=1,
+        thumbnail_url=plain,
+    )
+    # No tag_name to key on -- render the configured URL rather than "?v=None".
+    embed = cog._build_github_release_embed(feed, {"name": "untagged"})
+    assert embed.thumbnail.url == plain
 
 
 @pytest.mark.asyncio

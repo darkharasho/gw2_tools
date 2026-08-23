@@ -41,6 +41,26 @@ _GITHUB_RELEASES_RE = re.compile(
 )
 
 
+def _cache_busted(url: str, token: Optional[str]) -> str:
+    """Vary ``url`` by ``token`` so Discord refetches the image.
+
+    Discord caches embed images by URL, forever and across posts. A
+    thumbnail pinned to a moving path -- ``.../main/axipulse-logo.png``
+    -- therefore keeps rendering whatever was fetched the first time,
+    so re-rasterising the logo under the same filename never shows up
+    in the feed. Threading the release tag through the URL gives each
+    release a distinct cache key.
+
+    A URL that already carries a query or fragment is returned as-is:
+    the extra parameter could be signature-relevant, and a hosting
+    setup that bothers with query strings is not the branch-pinned
+    raw.githubusercontent case this exists for.
+    """
+    if not token or not url or "?" in url or "#" in url:
+        return url
+    return f"{url}?v={quote(token, safe='')}"
+
+
 def _parse_github_repo(url: str) -> Optional[Tuple[str, str]]:
     if not url:
         return None
@@ -392,11 +412,14 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
 
         # Thumbnail: per-feed override (e.g. the app icon) if set, otherwise the
         # GitHub owner avatar so every release embed still carries an image.
-        thumbnail = feed_config.thumbnail_url or (
-            f"https://github.com/{owner}.png" if owner else None
-        )
+        # The override is cache-busted per release -- see `_cache_busted`.
+        # The avatar fallback is not: it is shared by every feed under the
+        # same owner and changes far more rarely than a project logo.
+        thumbnail = feed_config.thumbnail_url
         if thumbnail:
-            embed.set_thumbnail(url=thumbnail)
+            embed.set_thumbnail(url=_cache_busted(thumbnail, release.get("tag_name")))
+        elif owner:
+            embed.set_thumbnail(url=f"https://github.com/{owner}.png")
 
         body = (release.get("body") or "").strip()
         if body:
@@ -767,7 +790,7 @@ class RssFeedsCog(commands.GroupCog, name="rss", group_extras={"category": "Anno
         name="Unique name for the feed.",
         url="URL to the RSS or Atom feed.",
         channel="Channel where updates should be posted.",
-        thumbnail="Optional image URL for the embed thumbnail (e.g. the app icon). Defaults to the GitHub owner avatar.",
+        thumbnail="Thumbnail image URL (e.g. the app icon); a branch-pinned URL is fine. Default: owner avatar.",
     )
     async def set_feed(
         self,
