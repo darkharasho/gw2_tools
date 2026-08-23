@@ -320,8 +320,11 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
                         continue
                     response.raise_for_status()
                     return await response.json(content_type=None)
-            except aiohttp.ClientError as exc:
-                raise ValueError(f"Request failed: {exc}") from exc
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                # asyncio.TimeoutError is not an aiohttp.ClientError, so without it
+                # a stalled request escapes raw instead of the ValueError callers
+                # (and the poster loop) are written to handle.
+                raise ValueError(f"Request failed: {exc or type(exc).__name__}") from exc
         raise ValueError("Guild Wars 2 API returned 429: too many requests")
 
     async def _fetch_text(self, url: str, *, params: Optional[Dict[str, str]] = None) -> str:
@@ -334,8 +337,11 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
                         continue
                     response.raise_for_status()
                     return await response.text()
-            except aiohttp.ClientError as exc:
-                raise ValueError(f"Request failed: {exc}") from exc
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                # asyncio.TimeoutError is not an aiohttp.ClientError, so without it
+                # a stalled request escapes raw instead of the ValueError callers
+                # (and the poster loop) are written to handle.
+                raise ValueError(f"Request failed: {exc or type(exc).__name__}") from exc
         raise ValueError("Guild Wars 2 API returned 429: too many requests")
 
     def _parse_timestamp(self, value: Optional[str]) -> Optional[datetime]:
@@ -496,6 +502,25 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
             raise ValueError("Unexpected response from GW2 matches endpoint")
         payload["tier"] = self._resolve_tier(payload)
         return payload
+
+    def _match_is_current(self, match: dict, now: Optional[datetime] = None) -> bool:
+        """Return True when ``now`` falls inside the match's own [start, end) window.
+
+        The GW2 matches endpoint keeps serving the previous week's match for a
+        few minutes after reset, so ``start_time``/``end_time`` are the only
+        reliable freshness signal. If the API omits or mangles them we fail open
+        rather than blocking the post forever.
+        """
+        raw_start = match.get("start_time")
+        raw_end = match.get("end_time")
+        if not isinstance(raw_start, str) or not isinstance(raw_end, str):
+            return True
+        start = self._parse_timestamp(raw_start)
+        end = self._parse_timestamp(raw_end)
+        if not start or not end:
+            return True
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        return start <= current < end
 
     def _extract_match_teams(self, match: dict) -> List[MatchTeam]:
         data = match.get("data") if isinstance(match.get("data"), dict) else {}
@@ -975,6 +1000,7 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
         channel: discord.TextChannel,
         config: GuildConfig,
         prediction: bool,
+        now: Optional[datetime] = None,
     ) -> bool:
         world_id: Optional[int] = None
         if prediction:
@@ -1031,6 +1057,20 @@ class AllianceMatchupCog(commands.GroupCog, name="alliance", group_extras={"cate
                 return False
             if not match:
                 LOGGER.warning("No matchup found for world %s", world_id)
+                return False
+            if not self._match_is_current(match, now):
+                # For several minutes after reset the GW2 matches endpoint still
+                # serves the previous week's match. Team ids persist week to
+                # week, so the home-world check below happily passes and we'd
+                # post last week's opponents. Skip (without stamping) and let
+                # the 5-minute loop retry once the API rolls over.
+                LOGGER.warning(
+                    "Match %s for world %s is not the current week (%s -> %s); skipping post (will retry)",
+                    match.get("id"),
+                    world_id,
+                    match.get("start_time"),
+                    match.get("end_time"),
+                )
                 return False
             teams = self._extract_match_teams(match)
             if not any(world_id in team.world_ids for team in teams):

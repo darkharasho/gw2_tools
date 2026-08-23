@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -823,3 +824,129 @@ async def test_lockout_skips(mock_bot_alliance):
     assert cog._lockout_fire_target(_lockout_config(wvw_lockout_channel_id=None), LOCKOUT, now, 11005) is None
     # region unresolvable (auto + no derivable home world)
     assert cog._lockout_fire_target(_lockout_config(), LOCKOUT, now, None) is None
+
+
+@pytest.mark.asyncio
+async def test_post_matchup_skips_stale_match_from_previous_week(mock_bot_alliance):
+    # Regression: for several minutes after reset the GW2 matches endpoint still
+    # serves the *previous* week's match. Team ids persist week to week, so the
+    # home-world-present check happily passes and the bot posted last week's
+    # opponents, then stamped the timestamp so it never retried. Reject any match
+    # whose [start_time, end_time) window does not contain "now".
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_id = "abcdef"
+    config.alliance_server_id = 11011
+
+    guild = MagicMock()
+    guild.id = 123
+    channel = MagicMock()
+    channel.send = AsyncMock()
+
+    stale_match = {
+        "tier": 2,
+        "start_time": "2026-08-15T02:00:00Z",
+        "end_time": "2026-08-22T01:58:00Z",
+    }
+    teams = [
+        MatchTeam(color="red", world_ids=[11006], victory_points=10),
+        MatchTeam(color="blue", world_ids=[11011], victory_points=8),
+        MatchTeam(color="green", world_ids=[11012], victory_points=6),
+    ]
+
+    cog._refresh_guild_world = AsyncMock(return_value=11011)
+    cog._fetch_matches = AsyncMock(return_value=[])
+    cog._fetch_match_for_world = AsyncMock(return_value=stale_match)
+    cog._extract_match_teams = MagicMock(return_value=teams)
+    cog._resolve_team_alliances = AsyncMock(return_value=AllianceRoster(alliances=[], solo_guilds=[]))
+    cog._build_embed = MagicMock(return_value=object())
+
+    # 02:36 UTC on Saturday 2026-08-22 — 36 minutes after NA reset.
+    now = datetime(2026, 8, 22, 2, 36, tzinfo=timezone.utc)
+    posted = await cog._post_matchup(
+        guild=guild, channel=channel, config=config, prediction=False, now=now
+    )
+
+    assert posted is False
+    channel.send.assert_not_awaited()
+    assert config.alliance_last_actual_at is None
+
+
+@pytest.mark.asyncio
+async def test_post_matchup_accepts_current_week_match(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+
+    config = GuildConfig.default()
+    config.alliance_guild_id = "abcdef"
+    config.alliance_server_id = 11011
+
+    guild = MagicMock()
+    guild.id = 123
+    channel = MagicMock()
+    channel.send = AsyncMock()
+
+    fresh_match = {
+        "tier": 2,
+        "start_time": "2026-08-22T02:00:00Z",
+        "end_time": "2026-08-29T01:58:00Z",
+    }
+    teams = [
+        MatchTeam(color="red", world_ids=[11010], victory_points=0),
+        MatchTeam(color="blue", world_ids=[11011], victory_points=0),
+        MatchTeam(color="green", world_ids=[11004], victory_points=0),
+    ]
+
+    cog._refresh_guild_world = AsyncMock(return_value=11011)
+    cog._fetch_matches = AsyncMock(return_value=[])
+    cog._fetch_match_for_world = AsyncMock(return_value=fresh_match)
+    cog._extract_match_teams = MagicMock(return_value=teams)
+    cog._resolve_team_alliances = AsyncMock(return_value=AllianceRoster(alliances=[], solo_guilds=[]))
+    cog._build_embed = MagicMock(return_value=object())
+
+    now = datetime(2026, 8, 22, 2, 36, tzinfo=timezone.utc)
+    posted = await cog._post_matchup(
+        guild=guild, channel=channel, config=config, prediction=False, now=now
+    )
+
+    assert posted is True
+    channel.send.assert_awaited_once()
+    assert config.alliance_last_actual_at is not None
+
+
+class _TimeoutSession:
+    """Session whose GET raises asyncio.TimeoutError, like a stalled GW2 API."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        raise asyncio.TimeoutError()
+
+
+@pytest.mark.asyncio
+async def test_fetch_json_converts_timeout_to_value_error(mock_bot_alliance):
+    # Regression: asyncio.TimeoutError is not an aiohttp.ClientError, so a stalled
+    # request escaped _fetch_json raw instead of becoming the ValueError callers
+    # expect — this is what burned the first post attempt at the 2026-08-21 reset.
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    session = _TimeoutSession()
+    cog._get_session = AsyncMock(return_value=session)
+
+    with pytest.raises(ValueError):
+        await cog._fetch_json("https://example.invalid/matches")
+
+
+@pytest.mark.asyncio
+async def test_fetch_text_converts_timeout_to_value_error(mock_bot_alliance):
+    cog = AllianceMatchupCog(mock_bot_alliance)
+    cog._poster_loop.cancel()
+    session = _TimeoutSession()
+    cog._get_session = AsyncMock(return_value=session)
+
+    with pytest.raises(ValueError):
+        await cog._fetch_text("https://example.invalid/sheet")
